@@ -1,6 +1,8 @@
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
+// 🌟 NEW: Import the dismiss function from your new component
+import { dismissSplashScreen } from './components/homeScreen.js'; 
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -71,6 +73,9 @@ map.on('load', async () => {
 
         await renderFrame(0);
         document.getElementById('status-toast').style.display = 'none';
+
+        // 🌟 NEW: The map is fully painted and ready! Fade out the splash screen.
+        dismissSplashScreen();
 
         if (stateManager.manifest.chunks.length > 1) {
             loadChunkBitmap(1).then((bitmap1) => {
