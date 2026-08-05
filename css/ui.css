@@ -127,34 +127,62 @@
    ========================================== */
 @media (min-width: 1024px) {
     #splash-screen {
-        flex-direction: row; /* 🌟 SPLITS THE SCREEN */
-        justify-content: space-evenly;
-        padding: 0 8vw; 
+        flex-direction: row; 
+        justify-content: center; /* Brings them together as a pairing */
+        gap: 8vw; /* Dynamic breathing room between left and right sides */
+        padding: 0 5vw; 
+    }
+
+    /* Widen the ambient glow for desktop */
+    #splash-screen::before {
+        width: 1200px;
+        height: 1200px;
+        background: radial-gradient(ellipse, rgba(77, 166, 255, 0.06) 0%, rgba(5, 10, 21, 0) 60%);
+    }
+
+    #splash-branding {
+        flex: 0 1 450px; /* Allows the left side to expand */
     }
 
     #splash-logo {
-        max-width: 380px; /* Allows logo to be much larger */
-        margin-bottom: 20px;
+        width: 100%;
+        max-width: 480px; /* Much larger logo footprint */
+        margin-bottom: 25px;
+    }
+
+    #splash-text {
+        font-size: 26px; /* Scales up to match the larger screen */
+        letter-spacing: 6px;
     }
 
     #home-menu-grid {
-        margin-top: 0; /* Removes vertical stacking gap */
-        gap: 24px;
-        max-width: 600px; /* Keeps the 2x2 grid tight and punchy on the right */
+        margin-top: 0; 
+        gap: 32px; /* Luxurious spacing between tiles */
+        flex: 0 1 750px; 
+        max-width: 750px; /* Significantly wider grid */
     }
 
     .menu-card {
-        padding: 42px 28px; /* Generous internal padding */
-        border-radius: 20px;
+        padding: 55px 30px; /* Taller cards to eat up vertical dead space */
+        border-radius: 24px;
+    }
+
+    .menu-card h3 {
+        font-size: 28px;
+        margin-bottom: 10px;
+    }
+
+    .menu-card p {
+        font-size: 15px;
     }
 
     /* Interactive Desktop Hover Elevation */
     .menu-card:hover {
         background: rgba(255, 255, 255, 0.08);
-        transform: translateY(-6px);
+        transform: translateY(-8px);
         border-color: rgba(77, 166, 255, 0.5);
-        box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6), 
-                    0 0 30px rgba(77, 166, 255, 0.15);
+        box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.7), 
+                    0 0 40px rgba(77, 166, 255, 0.15);
     }
 }
 
