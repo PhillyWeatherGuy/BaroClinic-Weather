@@ -1,27 +1,48 @@
-// Record the exact time this file loads in the browser
 const startTime = performance.now();
 
-export function dismissSplashScreen() {
+// Renamed this to reflect its new job
+export function initHubTransition() {
     const splash = document.getElementById('splash-screen');
+    const grid = document.getElementById('home-menu-grid');
+    const splashText = document.getElementById('splash-text');
     
-    if (splash) {
-        // Calculate how much time has passed since the app started loading
-        const elapsed = performance.now() - startTime;
-        const minDisplayTime = 3000; // 3 seconds (3000 milliseconds)
+    if (!splash || !grid) return;
+
+    const elapsed = performance.now() - startTime;
+    const minDisplayTime = 3000; 
+    const remainingTime = Math.max(0, minDisplayTime - elapsed);
+
+    // 1. REVEAL THE HUB GRID
+    setTimeout(() => {
+        if (splashText) splashText.textContent = "READY";
         
-        // If elapsed is less than 3000, wait the remaining time. If more, wait 0.
-        const remainingTime = Math.max(0, minDisplayTime - elapsed);
-
         setTimeout(() => {
-            // Trigger the CSS fade animation
-            splash.classList.add('fade-out');
+            splash.classList.add('hub-active');
+        }, 500);
 
-            // Wait 600ms for the CSS transition to finish, then delete it
+    }, remainingTime); 
+
+    // 2. LISTEN FOR CLICKS ON THE CARDS
+    const cards = document.querySelectorAll('.menu-card');
+    cards.forEach(card => {
+        card.addEventListener('click', (e) => {
+            const targetView = e.currentTarget.dataset.target;
+            
+            // Trigger the staggered fade-out in CSS
+            grid.classList.add('exiting');
+            
+            // Wait 700ms (longest card fade is 0.3s delay + 0.4s fade = 0.7s)
             setTimeout(() => {
-                splash.remove();
-                console.log("Splash screen unmounted. Ready for interaction.");
-            }, 600); 
-
-        }, remainingTime); 
-    }
+                splash.classList.add('fade-out');
+                
+                // Wait 600ms for background to fade, then destroy the container
+                setTimeout(() => {
+                    splash.remove();
+                    console.log(`Entering view: ${targetView}. Map is interactive.`);
+                    
+                    // Note: Later, you'll tell stateManager.js to load the satellite/radar here!
+                }, 600);
+            }, 700); 
+        });
+    });
 }
