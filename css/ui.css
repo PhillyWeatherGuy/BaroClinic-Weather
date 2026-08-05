@@ -1,3 +1,49 @@
+/* ==========================================
+   SPLASH SCREEN & TRANSITIONS
+   ========================================== */
+#splash-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: #050a15; /* Deep, dark navy */
+    z-index: 9999; /* Forces it to the very top layer */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1); /* Smooth cinematic fade */
+}
+
+#splash-logo {
+    width: 250px; /* Adjust size based on how big your image is */
+    margin-bottom: 20px;
+    filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.2)); /* Subtle glow */
+}
+
+#splash-text {
+    font-family: 'Rajdhani', sans-serif; /* The futuristic Google Font */
+    font-size: 24px;
+    font-weight: 700;
+    color: #4da6ff; /* Ice blue text color */
+    letter-spacing: 4px;
+    animation: pulse 1.5s infinite; /* Makes the text throb while loading */
+}
+
+/* The class JS adds to trigger the fade */
+#splash-screen.fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Keyframe for the pulsing text */
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
+
 #top-nav {
     position: absolute;
     top: 0;
