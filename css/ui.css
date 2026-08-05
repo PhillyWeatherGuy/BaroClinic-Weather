@@ -13,22 +13,28 @@
     flex-direction: column;
     justify-content: center;
     align-items: center;
+    padding: 20px;
+    box-sizing: border-box;
     transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1); /* Smooth cinematic fade */
 }
 
+/* Crisp, responsive logo sizing for mobile and desktop */
 #splash-logo {
-    width: 250px; /* Adjust size based on how big your image is */
-    margin-bottom: 20px;
+    width: 75vw;
+    max-width: 300px; /* Caps size on desktop so it doesn't get massive */
+    height: auto;
+    margin-bottom: 15px;
     filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.2)); /* Subtle glow */
 }
 
 #splash-text {
     font-family: 'Rajdhani', sans-serif; /* The futuristic Google Font */
-    font-size: 24px;
+    font-size: 20px;
     font-weight: 700;
     color: #4da6ff; /* Ice blue text color */
     letter-spacing: 4px;
     animation: pulse 1.5s infinite; /* Makes the text throb while loading */
+    margin: 0 0 10px 0;
 }
 
 /* The class JS adds to trigger the fade */
@@ -38,15 +44,16 @@
 }
 
 /* ==========================================
-   THE HUB GRID & GLASS TILES
+   THE 2x2 GLASS GRID (Mobile & Desktop)
    ========================================== */
 #home-menu-grid {
     display: grid;
-    grid-template-columns: 1fr; /* Mobile: 1 column */
-    gap: 20px;
-    width: 90vw;
-    max-width: 1000px;
-    margin-top: 30px;
+    grid-template-columns: repeat(2, 1fr); /* Enforces 2 columns everywhere */
+    gap: 12px; /* Tighter gap so it fits nicely on phones */
+    width: 100%;
+    max-width: 800px; /* Keeps it neatly contained on large screens */
+    margin-top: 15px;
+    box-sizing: border-box;
     
     /* Starts hidden and pushed down slightly */
     opacity: 0;
@@ -55,11 +62,10 @@
     pointer-events: none; 
 }
 
-/* Desktop: 2x2 Grid */
 @media (min-width: 768px) {
     #home-menu-grid {
-        grid-template-columns: 1fr 1fr; 
-        gap: 30px;
+        gap: 20px; /* More breathing room on desktop */
+        margin-top: 25px;
     }
 }
 
@@ -81,12 +87,19 @@
     backdrop-filter: blur(12px); /* The frosted glass effect */
     -webkit-backdrop-filter: blur(12px); /* Safari support */
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
-    padding: 50px 20px; /* Makes them huge and clickable */
+    border-radius: 16px;
+    padding: 20px 10px; /* Compact padding for mobile */
     text-align: center;
     color: white;
     cursor: pointer;
     transition: transform 0.2s ease, background 0.3s ease, opacity 0.4s ease;
+}
+
+@media (min-width: 768px) {
+    .menu-card {
+        padding: 35px 20px; /* Generous desktop padding */
+        border-radius: 20px;
+    }
 }
 
 .menu-card:hover {
@@ -97,16 +110,17 @@
 
 .menu-card h3 {
     font-family: 'Rajdhani', sans-serif;
-    font-size: 32px;
-    margin: 0 0 10px 0;
-    letter-spacing: 2px;
+    font-size: clamp(16px, 3.5vw, 26px); /* Scales smoothly between phone and desktop */
+    margin: 0 0 6px 0;
+    letter-spacing: 1px;
 }
 
 .menu-card p {
     font-family: sans-serif;
-    font-size: 16px;
+    font-size: clamp(11px, 1.8vw, 14px); /* Prevents text overflow on small screens */
     color: #b3b3b3;
     margin: 0;
+    line-height: 1.2;
 }
 
 /* ==========================================
@@ -131,6 +145,9 @@
     100% { opacity: 0.6; }
 }
 
+/* ==========================================
+   NAVIGATION & UI OVERLAYS
+   ========================================== */
 #top-nav {
     position: absolute;
     top: 0;
@@ -165,6 +182,7 @@
     z-index: 10; 
     border: 1px solid rgba(255,255,255,0.1);
 }
+
 #timeline-slider { width: 200px; accent-color: #38bdf8; cursor: pointer; }
 #time-label { font-weight: 600; font-size: 14px; min-width: 110px; }
 
@@ -192,5 +210,6 @@
     text-align: center;
     border: 1px solid rgba(255,255,255,0.15);
 }
+
 .temp-f { font-size: 20px; font-weight: 800; color: #38bdf8; }
 .temp-c { font-size: 13px; color: #94a3b8; }
