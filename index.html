@@ -5,6 +5,10 @@
     <title>BaroClinic Weather</title>
     <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
     
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
     
@@ -12,6 +16,11 @@
     <link href="./css/ui.css" rel="stylesheet" />
 </head>
 <body>
+
+    <div id="splash-screen">
+        <img src="./assets/IMG_2466.png" id="splash-logo" alt="BaroClinic Logo">
+        <h2 id="splash-text">LOADING MODELS...</h2>
+    </div>
 
     <nav id="top-nav">
         <div class="logo">BaroClinic</div>
