@@ -8,36 +8,49 @@
     width: 100vw;
     height: 100vh;
     background-color: #050a15; /* Deep, dark navy */
-    z-index: 9999; /* Forces it to the very top layer */
+    z-index: 9999;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
     padding: 20px;
     box-sizing: border-box;
-    transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1); /* Smooth cinematic fade */
+    transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
 }
 
-/* Crisp, responsive logo sizing for mobile and desktop */
+/* Atmospheric Ambient Lighting for Desktop Displays */
+#splash-screen::before {
+    content: '';
+    position: absolute;
+    width: 800px;
+    height: 800px;
+    background: radial-gradient(circle, rgba(77, 166, 255, 0.08) 0%, rgba(5, 10, 21, 0) 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Crisp, responsive logo sizing */
 #splash-logo {
-    width: 75vw;
-    max-width: 300px; /* Caps size on desktop so it doesn't get massive */
+    width: 70vw;
+    max-width: 280px;
     height: auto;
-    margin-bottom: 15px;
-    filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.2)); /* Subtle glow */
+    margin-bottom: 12px;
+    filter: drop-shadow(0 0 18px rgba(77, 166, 255, 0.25));
+    z-index: 1;
 }
 
 #splash-text {
-    font-family: 'Rajdhani', sans-serif; /* The futuristic Google Font */
+    font-family: 'Rajdhani', sans-serif;
     font-size: 20px;
     font-weight: 700;
-    color: #4da6ff; /* Ice blue text color */
+    color: #4da6ff;
     letter-spacing: 4px;
-    animation: pulse 1.5s infinite; /* Makes the text throb while loading */
+    animation: pulse 1.5s infinite;
     margin: 0 0 10px 0;
+    z-index: 1;
 }
 
-/* The class JS adds to trigger the fade */
 #splash-screen.fade-out {
     opacity: 0;
     pointer-events: none;
@@ -48,83 +61,92 @@
    ========================================== */
 #home-menu-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr); /* Enforces 2 columns everywhere */
-    gap: 12px; /* Tighter gap so it fits nicely on phones */
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
     width: 100%;
-    max-width: 800px; /* Keeps it neatly contained on large screens */
+    max-width: 800px;
     margin-top: 15px;
     box-sizing: border-box;
+    z-index: 1;
     
-    /* Starts hidden and pushed down slightly */
     opacity: 0;
     transform: translateY(20px);
     transition: opacity 0.8s ease, transform 0.8s ease;
     pointer-events: none; 
 }
 
-@media (min-width: 768px) {
-    #home-menu-grid {
-        gap: 20px; /* More breathing room on desktop */
-        margin-top: 25px;
-    }
-}
-
-/* When the Hub becomes active */
 #splash-screen.hub-active #home-menu-grid {
     opacity: 1;
     transform: translateY(0);
-    pointer-events: auto; /* Allows clicking */
+    pointer-events: auto;
 }
 
-/* Hide the loading text when hub is active */
 #splash-screen.hub-active #splash-text {
     display: none; 
 }
 
-/* The Glassmorphism Card Style */
+/* Glassmorphism Card Style */
 .menu-card {
-    background: rgba(255, 255, 255, 0.05); /* Very faint white */
-    backdrop-filter: blur(12px); /* The frosted glass effect */
-    -webkit-backdrop-filter: blur(12px); /* Safari support */
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px;
-    padding: 20px 10px; /* Compact padding for mobile */
+    padding: 22px 12px;
     text-align: center;
     color: white;
     cursor: pointer;
-    transition: transform 0.2s ease, background 0.3s ease, opacity 0.4s ease;
-}
-
-@media (min-width: 768px) {
-    .menu-card {
-        padding: 35px 20px; /* Generous desktop padding */
-        border-radius: 20px;
-    }
-}
-
-.menu-card:hover {
-    background: rgba(255, 255, 255, 0.15);
-    transform: scale(1.03); /* Pops out slightly */
-    border-color: rgba(77, 166, 255, 0.6); /* Ice blue glow */
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .menu-card h3 {
     font-family: 'Rajdhani', sans-serif;
-    font-size: clamp(16px, 3.5vw, 26px); /* Scales smoothly between phone and desktop */
+    font-size: clamp(16px, 3.5vw, 28px);
     margin: 0 0 6px 0;
     letter-spacing: 1px;
+    color: #ffffff;
 }
 
 .menu-card p {
     font-family: sans-serif;
-    font-size: clamp(11px, 1.8vw, 14px); /* Prevents text overflow on small screens */
-    color: #b3b3b3;
+    font-size: clamp(11px, 1.8vw, 14px);
+    color: #94a3b8;
     margin: 0;
-    line-height: 1.2;
+    line-height: 1.3;
 }
 
 /* ==========================================
-   THE STAGGERED EXIT ANIMATION
+   DESKTOP SPECIFIC ENHANCEMENTS (>= 768px)
+   ========================================== */
+@media (min-width: 768px) {
+    #splash-logo {
+        max-width: 320px;
+        margin-bottom: 20px;
+    }
+
+    #home-menu-grid {
+        max-width: 920px; /* Expands wider to utilize desktop real estate */
+        gap: 24px;
+        margin-top: 20px;
+    }
+
+    .menu-card {
+        padding: 42px 28px; /* Generous internal padding */
+        border-radius: 20px;
+    }
+
+    /* Interactive Desktop Hover Elevation & Ambient Glow */
+    .menu-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+        transform: translateY(-6px);
+        border-color: rgba(77, 166, 255, 0.5);
+        box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6), 
+                    0 0 30px rgba(77, 166, 255, 0.15);
+    }
+}
+
+/* ==========================================
+   STAGGERED EXIT ANIMATION
    ========================================== */
 #home-menu-grid.exiting .menu-card {
     opacity: 0;
@@ -132,13 +154,11 @@
     pointer-events: none;
 }
 
-/* The magic timing trick! */
 #home-menu-grid.exiting #card-tropics   { transition-delay: 0.0s; }
 #home-menu-grid.exiting #card-radar     { transition-delay: 0.1s; }
 #home-menu-grid.exiting #card-satellite { transition-delay: 0.2s; }
 #home-menu-grid.exiting #card-models    { transition-delay: 0.3s; }
 
-/* Keyframe for the pulsing text */
 @keyframes pulse {
     0% { opacity: 0.6; }
     50% { opacity: 1; }
