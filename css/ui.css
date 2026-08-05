@@ -9,8 +9,10 @@
     height: 100vh;
     background-color: #050a15; /* Deep, dark navy */
     z-index: 9999;
+    
+    /* MOBILE DEFAULT: Vertical Flexbox */
     display: flex;
-    flex-direction: column; /* MOBILE: Stacks vertically */
+    flex-direction: column; 
     justify-content: center;
     align-items: center;
     padding: 20px;
@@ -30,7 +32,7 @@
     z-index: 0;
 }
 
-/* BRANDING WRAPPER */
+/* BRANDING WRAPPER (Mobile Base) */
 #splash-branding {
     display: flex;
     flex-direction: column;
@@ -71,10 +73,11 @@
     gap: 12px;
     width: 100%;
     max-width: 600px;
-    margin-top: 25px; /* Spacing between logo and grid on mobile */
+    margin-top: 25px; 
     box-sizing: border-box;
     z-index: 1;
     
+    /* Mobile intro slide */
     opacity: 0;
     transform: translateY(20px);
     transition: opacity 0.8s ease, transform 0.8s ease;
@@ -87,7 +90,6 @@
     pointer-events: auto;
 }
 
-/* Hide loading text when hub is active */
 #splash-screen.hub-active #splash-text {
     display: none; 
 }
@@ -123,47 +125,75 @@
 }
 
 /* ==========================================
-   DESKTOP: SPLIT VIEW (>= 1024px)
+   DESKTOP: CINEMATIC SLIDE VIEW (>= 1024px)
    ========================================== */
 @media (min-width: 1024px) {
+    
     #splash-screen {
-        flex-direction: row; 
-        justify-content: center; /* Brings them together as a pairing */
-        gap: 8vw; /* Dynamic breathing room between left and right sides */
-        padding: 0 5vw; 
+        display: block; /* Turns off flexbox so we can freely animate absolute positions */
     }
 
-    /* Widen the ambient glow for desktop */
     #splash-screen::before {
-        width: 1200px;
-        height: 1200px;
-        background: radial-gradient(ellipse, rgba(77, 166, 255, 0.06) 0%, rgba(5, 10, 21, 0) 60%);
+        width: 1400px;
+        height: 1400px;
+        background: radial-gradient(ellipse, rgba(77, 166, 255, 0.06) 0%, rgba(5, 10, 21, 0) 50%);
     }
 
+    /* 1. THE LOADING STATE (Dead Center) */
     #splash-branding {
-        flex: 0 1 450px; /* Allows the left side to expand */
+        position: absolute;
+        top: 50%;
+        left: 50%; /* Starts exactly in the middle of the monitor */
+        transform: translate(-50%, -50%);
+        width: 40vw; /* Responsive scaling */
+        max-width: 600px; /* 🌟 Massive desktop logo upgrade */
+        
+        /* The buttery smooth slide animation */
+        transition: left 0.9s cubic-bezier(0.25, 1, 0.35, 1), 
+                    transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
     }
 
     #splash-logo {
         width: 100%;
-        max-width: 480px; /* Much larger logo footprint */
+        max-width: none; 
         margin-bottom: 25px;
     }
 
     #splash-text {
-        font-size: 26px; /* Scales up to match the larger screen */
+        font-size: 28px;
         letter-spacing: 6px;
     }
 
+    /* 2. THE ACTIVE STATE (Slides to the left) */
+    #splash-screen.hub-active #splash-branding {
+        left: 26vw; /* Glides to the left side of the screen */
+    }
+
+    /* 3. THE GRID (Anchored on the right) */
     #home-menu-grid {
+        position: absolute;
+        top: 50%;
+        right: 6vw; /* Pins it neatly to the right side */
         margin-top: 0; 
-        gap: 32px; /* Luxurious spacing between tiles */
-        flex: 0 1 750px; 
-        max-width: 750px; /* Significantly wider grid */
+        
+        width: 42vw; /* Perfectly balances the logo's width */
+        max-width: 750px; 
+        gap: 32px;
+        
+        /* Starts pushed down slightly */
+        transform: translateY(20px); 
+        opacity: 0;
+        transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
+    }
+
+    #splash-screen.hub-active #home-menu-grid {
+        /* Glides up into perfect vertical center */
+        transform: translateY(-50%); 
+        opacity: 1;
     }
 
     .menu-card {
-        padding: 55px 30px; /* Taller cards to eat up vertical dead space */
+        padding: 55px 30px; 
         border-radius: 24px;
     }
 
@@ -176,7 +206,7 @@
         font-size: 15px;
     }
 
-    /* Interactive Desktop Hover Elevation */
+    /* Desktop Hover Elevation */
     .menu-card:hover {
         background: rgba(255, 255, 255, 0.08);
         transform: translateY(-8px);
