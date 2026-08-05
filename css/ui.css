@@ -10,7 +10,7 @@
     background-color: #050a15; /* Deep, dark navy */
     z-index: 9999;
     display: flex;
-    flex-direction: column;
+    flex-direction: column; /* MOBILE: Stacks vertically */
     justify-content: center;
     align-items: center;
     padding: 20px;
@@ -19,7 +19,7 @@
     overflow: hidden;
 }
 
-/* Atmospheric Ambient Lighting for Desktop Displays */
+/* Atmospheric Ambient Lighting */
 #splash-screen::before {
     content: '';
     position: absolute;
@@ -30,14 +30,21 @@
     z-index: 0;
 }
 
-/* Crisp, responsive logo sizing */
+/* BRANDING WRAPPER */
+#splash-branding {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 1;
+}
+
+/* Crisp, responsive logo sizing for mobile */
 #splash-logo {
-    width: 70vw;
+    width: 75vw;
     max-width: 280px;
     height: auto;
-    margin-bottom: 12px;
+    margin-bottom: 15px;
     filter: drop-shadow(0 0 18px rgba(77, 166, 255, 0.25));
-    z-index: 1;
 }
 
 #splash-text {
@@ -47,8 +54,7 @@
     color: #4da6ff;
     letter-spacing: 4px;
     animation: pulse 1.5s infinite;
-    margin: 0 0 10px 0;
-    z-index: 1;
+    margin: 0;
 }
 
 #splash-screen.fade-out {
@@ -57,15 +63,15 @@
 }
 
 /* ==========================================
-   THE 2x2 GLASS GRID (Mobile & Desktop)
+   THE 2x2 GLASS GRID (Mobile Base)
    ========================================== */
 #home-menu-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 12px;
     width: 100%;
-    max-width: 800px;
-    margin-top: 15px;
+    max-width: 600px;
+    margin-top: 25px; /* Spacing between logo and grid on mobile */
     box-sizing: border-box;
     z-index: 1;
     
@@ -81,11 +87,12 @@
     pointer-events: auto;
 }
 
+/* Hide loading text when hub is active */
 #splash-screen.hub-active #splash-text {
     display: none; 
 }
 
-/* Glassmorphism Card Style */
+/* Glassmorphism Card Style - Mobile optimized */
 .menu-card {
     background: rgba(255, 255, 255, 0.04);
     backdrop-filter: blur(16px);
@@ -101,7 +108,7 @@
 
 .menu-card h3 {
     font-family: 'Rajdhani', sans-serif;
-    font-size: clamp(16px, 3.5vw, 28px);
+    font-size: clamp(16px, 3.5vw, 24px);
     margin: 0 0 6px 0;
     letter-spacing: 1px;
     color: #ffffff;
@@ -116,18 +123,24 @@
 }
 
 /* ==========================================
-   DESKTOP SPECIFIC ENHANCEMENTS (>= 768px)
+   DESKTOP: SPLIT VIEW (>= 1024px)
    ========================================== */
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
+    #splash-screen {
+        flex-direction: row; /* 🌟 SPLITS THE SCREEN */
+        justify-content: space-evenly;
+        padding: 0 8vw; 
+    }
+
     #splash-logo {
-        max-width: 320px;
+        max-width: 380px; /* Allows logo to be much larger */
         margin-bottom: 20px;
     }
 
     #home-menu-grid {
-        max-width: 920px; /* Expands wider to utilize desktop real estate */
+        margin-top: 0; /* Removes vertical stacking gap */
         gap: 24px;
-        margin-top: 20px;
+        max-width: 600px; /* Keeps the 2x2 grid tight and punchy on the right */
     }
 
     .menu-card {
@@ -135,7 +148,7 @@
         border-radius: 20px;
     }
 
-    /* Interactive Desktop Hover Elevation & Ambient Glow */
+    /* Interactive Desktop Hover Elevation */
     .menu-card:hover {
         background: rgba(255, 255, 255, 0.08);
         transform: translateY(-6px);
