@@ -145,8 +145,8 @@
         top: 50%;
         left: 50%; 
         transform: translate(-50%, -50%);
-        width: 40vw; 
-        max-width: 600px; 
+        width: 32vw; /* Scaled perfectly for its half of the screen */
+        max-width: 550px; 
         transition: left 0.9s cubic-bezier(0.25, 1, 0.35, 1), 
                     transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
     }
@@ -162,50 +162,56 @@
         letter-spacing: 6px;
     }
 
-    /* 2. THE ACTIVE STATE (Slides to the left) */
+    /* 2. THE ACTIVE STATE (Anchors to exact middle of the left side) */
     #splash-screen.hub-active #splash-branding {
-        left: 25vw; /* Pushed slightly further left to make room for giant buttons */
+        left: 25%; 
     }
 
-    /* 3. THE GRID (Anchored on the right) */
+    /* 3. THE GRID (Anchors to exact middle of the right side) */
     #home-menu-grid {
         position: absolute;
         top: 50%;
-        right: 5vw; 
+        left: 75%; 
         margin-top: 0; 
         
-        width: 48vw; /* 🌟 Wider grid to support bigger buttons */
-        max-width: 900px; /* 🌟 Raised maximum limit */
-        gap: 36px; /* 🌟 Slightly more breathing room between them */
+        width: 40vw; /* Takes up a large volume of the right half */
+        max-width: 800px; 
+        gap: 2.5vw; /* Fluid gap that breathes with the screen width */
         
-        transform: translateY(20px); 
+        transform: translate(-50%, 20px); /* Start pushed down slightly */
         opacity: 0;
         transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
     }
 
     #splash-screen.hub-active #home-menu-grid {
-        transform: translateY(-50%); 
+        transform: translate(-50%, -50%); /* Glides up into perfect center */
         opacity: 1;
     }
 
+    /* The Bubbles (Dynamic Aspect Ratio) */
     .menu-card {
-        padding: 70px 30px; /* 🌟 Massive bump to vertical height */
-        border-radius: 28px; /* 🌟 Slightly rounder corners for the larger scale */
+        border-radius: 28px; 
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        aspect-ratio: 4 / 3; /* 🌟 Forces them to balloon outwards and fill screen volume */
+        padding: 2vw; /* Fluid internal spacing */
     }
 
     .menu-card h3 {
-        font-size: 32px; /* 🌟 Scaled up title */
+        font-size: clamp(20px, 2.5vw, 34px); /* Text shrinks/grows perfectly */
         margin-bottom: 12px;
     }
 
     .menu-card p {
-        font-size: 17px; /* 🌟 Scaled up subtitle */
+        font-size: clamp(13px, 1vw, 17px); /* Text shrinks/grows perfectly */
     }
 
     /* Desktop Hover Elevation */
     .menu-card:hover {
         background: rgba(255, 255, 255, 0.08);
-        transform: translateY(-8px);
+        transform: translateY(-8px) scale(1.02); /* Slight scale up on hover for impact */
         border-color: rgba(77, 166, 255, 0.5);
         box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.7), 
                     0 0 40px rgba(77, 166, 255, 0.15);
