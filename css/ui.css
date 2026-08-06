@@ -145,7 +145,7 @@
         top: 50%;
         left: 50%; 
         transform: translate(-50%, -50%);
-        width: 32vw; /* Scaled perfectly for its half of the screen */
+        width: 32vw; 
         max-width: 550px; 
         transition: left 0.9s cubic-bezier(0.25, 1, 0.35, 1), 
                     transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
@@ -162,29 +162,29 @@
         letter-spacing: 6px;
     }
 
-    /* 2. THE ACTIVE STATE (Anchors to exact middle of the left side) */
+    /* 2. THE ACTIVE STATE (Nudged slightly left to accommodate bigger cards) */
     #splash-screen.hub-active #splash-branding {
-        left: 25%; 
+        left: 23%; 
     }
 
-    /* 3. THE GRID (Anchors to exact middle of the right side) */
+    /* 3. THE GRID (Expanded container footprint) */
     #home-menu-grid {
         position: absolute;
         top: 50%;
-        left: 75%; 
+        left: 74%; 
         margin-top: 0; 
         
-        width: 40vw; /* Takes up a large volume of the right half */
-        max-width: 800px; 
-        gap: 2.5vw; /* Fluid gap that breathes with the screen width */
+        width: 45vw; /* 🌟 Expanded to give bubbles much more physical presence */
+        max-width: 880px; /* 🌟 Higher maximum width limit */
+        gap: 2vw; 
         
-        transform: translate(-50%, 20px); /* Start pushed down slightly */
+        transform: translate(-50%, 20px); 
         opacity: 0;
         transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
     }
 
     #splash-screen.hub-active #home-menu-grid {
-        transform: translate(-50%, -50%); /* Glides up into perfect center */
+        transform: translate(-50%, -50%); 
         opacity: 1;
     }
 
@@ -195,23 +195,23 @@
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        aspect-ratio: 4 / 3; /* 🌟 Forces them to balloon outwards and fill screen volume */
-        padding: 2vw; /* Fluid internal spacing */
+        aspect-ratio: 4 / 3; 
+        padding: 2.5vw; /* 🌟 Generous interior room */
     }
 
     .menu-card h3 {
-        font-size: clamp(20px, 2.5vw, 34px); /* Text shrinks/grows perfectly */
+        font-size: clamp(22px, 2.8vw, 36px); /* 🌟 Scaled up title */
         margin-bottom: 12px;
     }
 
     .menu-card p {
-        font-size: clamp(13px, 1vw, 17px); /* Text shrinks/grows perfectly */
+        font-size: clamp(13px, 1.1vw, 18px); /* 🌟 Scaled up subtitle */
     }
 
     /* Desktop Hover Elevation */
     .menu-card:hover {
         background: rgba(255, 255, 255, 0.08);
-        transform: translateY(-8px) scale(1.02); /* Slight scale up on hover for impact */
+        transform: translateY(-8px) scale(1.02); 
         border-color: rgba(77, 166, 255, 0.5);
         box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.7), 
                     0 0 40px rgba(77, 166, 255, 0.15);
