@@ -130,7 +130,7 @@
 @media (min-width: 1024px) {
     
     #splash-screen {
-        display: block; /* Turns off flexbox so we can freely animate absolute positions */
+        display: block; 
     }
 
     #splash-screen::before {
@@ -143,12 +143,10 @@
     #splash-branding {
         position: absolute;
         top: 50%;
-        left: 50%; /* Starts exactly in the middle of the monitor */
+        left: 50%; 
         transform: translate(-50%, -50%);
-        width: 40vw; /* Responsive scaling */
-        max-width: 600px; /* 🌟 Massive desktop logo upgrade */
-        
-        /* The buttery smooth slide animation */
+        width: 40vw; 
+        max-width: 600px; 
         transition: left 0.9s cubic-bezier(0.25, 1, 0.35, 1), 
                     transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
     }
@@ -166,44 +164,42 @@
 
     /* 2. THE ACTIVE STATE (Slides to the left) */
     #splash-screen.hub-active #splash-branding {
-        left: 26vw; /* Glides to the left side of the screen */
+        left: 25vw; /* Pushed slightly further left to make room for giant buttons */
     }
 
     /* 3. THE GRID (Anchored on the right) */
     #home-menu-grid {
         position: absolute;
         top: 50%;
-        right: 6vw; /* Pins it neatly to the right side */
+        right: 5vw; 
         margin-top: 0; 
         
-        width: 42vw; /* Perfectly balances the logo's width */
-        max-width: 750px; 
-        gap: 32px;
+        width: 48vw; /* 🌟 Wider grid to support bigger buttons */
+        max-width: 900px; /* 🌟 Raised maximum limit */
+        gap: 36px; /* 🌟 Slightly more breathing room between them */
         
-        /* Starts pushed down slightly */
         transform: translateY(20px); 
         opacity: 0;
         transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
     }
 
     #splash-screen.hub-active #home-menu-grid {
-        /* Glides up into perfect vertical center */
         transform: translateY(-50%); 
         opacity: 1;
     }
 
     .menu-card {
-        padding: 55px 30px; 
-        border-radius: 24px;
+        padding: 70px 30px; /* 🌟 Massive bump to vertical height */
+        border-radius: 28px; /* 🌟 Slightly rounder corners for the larger scale */
     }
 
     .menu-card h3 {
-        font-size: 28px;
-        margin-bottom: 10px;
+        font-size: 32px; /* 🌟 Scaled up title */
+        margin-bottom: 12px;
     }
 
     .menu-card p {
-        font-size: 15px;
+        font-size: 17px; /* 🌟 Scaled up subtitle */
     }
 
     /* Desktop Hover Elevation */
