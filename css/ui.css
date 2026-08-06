@@ -139,14 +139,14 @@
         background: radial-gradient(ellipse, rgba(77, 166, 255, 0.06) 0%, rgba(5, 10, 21, 0) 50%);
     }
 
-    /* 1. THE LOADING STATE (Dead Center) */
+    /* 1. THE LOADING STATE (Dead Center & Scaled Up PNG) */
     #splash-branding {
         position: absolute;
         top: 50%;
         left: 50%; 
         transform: translate(-50%, -50%);
-        width: 32vw; 
-        max-width: 550px; 
+        width: 38vw; /* 🌟 Increased logo viewport width */
+        max-width: 680px; /* 🌟 Substantially larger desktop size cap */
         transition: left 0.9s cubic-bezier(0.25, 1, 0.35, 1), 
                     transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
     }
@@ -162,20 +162,20 @@
         letter-spacing: 6px;
     }
 
-    /* 2. THE ACTIVE STATE (Nudged slightly left to accommodate bigger cards) */
+    /* 2. THE ACTIVE STATE (Balanced left anchor) */
     #splash-screen.hub-active #splash-branding {
-        left: 23%; 
+        left: 24%; 
     }
 
-    /* 3. THE GRID (Expanded container footprint) */
+    /* 3. THE GRID (Anchored on the right side) */
     #home-menu-grid {
         position: absolute;
         top: 50%;
         left: 74%; 
         margin-top: 0; 
         
-        width: 45vw; /* 🌟 Expanded to give bubbles much more physical presence */
-        max-width: 880px; /* 🌟 Higher maximum width limit */
+        width: 44vw; 
+        max-width: 850px; 
         gap: 2vw; 
         
         transform: translate(-50%, 20px); 
@@ -196,16 +196,16 @@
         justify-content: center;
         align-items: center;
         aspect-ratio: 4 / 3; 
-        padding: 2.5vw; /* 🌟 Generous interior room */
+        padding: 2.5vw; 
     }
 
     .menu-card h3 {
-        font-size: clamp(22px, 2.8vw, 36px); /* 🌟 Scaled up title */
+        font-size: clamp(22px, 2.8vw, 36px); 
         margin-bottom: 12px;
     }
 
     .menu-card p {
-        font-size: clamp(13px, 1.1vw, 18px); /* 🌟 Scaled up subtitle */
+        font-size: clamp(13px, 1.1vw, 18px); 
     }
 
     /* Desktop Hover Elevation */
