@@ -1,8 +1,13 @@
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
-// 🌟 NEW: Import the hub initialization function from your component
 import { initHubTransition } from './components/homeScreen.js'; 
+import { 
+    initViewerUI, 
+    syncTimelineWithManifest, 
+    showToast, 
+    hideToast 
+} from './components/viewerUI.js';
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -51,6 +56,12 @@ async function renderFrame(globalIdx) {
     }
 }
 
+// 🌟 Initialize UI listeners & register GPU redraw callback
+initViewerUI((stepIndex) => {
+    if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
+    renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
+});
+
 map.on('load', async () => {
     try {
         await fetchManifest();
@@ -59,31 +70,24 @@ map.on('load', async () => {
         const bitmap0 = await loadChunkBitmap(0);
         customShaderLayer.preloadChunkTexture(0, bitmap0);
 
-        const slider = document.getElementById('timeline-slider');
-        slider.max = stateManager.globalSteps.length - 1;
-        
-        slider.addEventListener('input', (e) => {
-            const val = parseInt(e.target.value);
-            const frameInfo = stateManager.globalSteps[val];
-            document.getElementById('time-label').textContent = `Forecast: F${String(frameInfo.step).padStart(3, '0')}`;
-            
-            if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
-            renderDebounceId = requestAnimationFrame(() => renderFrame(val));
-        });
+        // Sync slider min/max/value & label with manifest step length
+        syncTimelineWithManifest();
 
+        // Render initial frame (F000)
         await renderFrame(0);
-        document.getElementById('status-toast').style.display = 'none';
+        hideToast();
 
-        // 🌟 NEW: The map is fully painted! Initialize the hub transition sequence.
+        // 🌟 Initialize the home hub screen sequence once the map is painted
         initHubTransition();
 
+        // Preload next chunk if present
         if (stateManager.manifest.chunks.length > 1) {
             loadChunkBitmap(1).then((bitmap1) => {
                 customShaderLayer.preloadChunkTexture(1, bitmap1);
             });
         }
     } catch (err) {
-        document.getElementById('status-toast').textContent = '❌ ' + err.message;
+        showToast('❌ ' + err.message);
     }
 });
 
