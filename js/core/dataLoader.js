@@ -5,6 +5,13 @@ export async function fetchManifest() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     stateManager.manifest = await resp.json();
     
+    // 🌟 ADDED THIS: Look for common time properties in your JSON and save to state
+    stateManager.initTime = stateManager.manifest.init_time 
+                         || stateManager.manifest.run_time 
+                         || stateManager.manifest.base_time 
+                         || stateManager.manifest.model_run
+                         || stateManager.manifest.time;
+    
     stateManager.globalSteps = [];
     const chunks = stateManager.manifest.chunks || [];
     for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
