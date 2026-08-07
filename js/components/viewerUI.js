@@ -6,7 +6,7 @@ let playInterval = null;
 const PLAYBACK_SPEED_MS = 400; // Time per frame in milliseconds
 
 /**
- * Initializes listeners for the timeline slider, play/pause controls, top navigation, and UI overlays.
+ * Initializes listeners for the timeline slider, play/pause controls, top navigation, UI overlays, and model run dropdown.
  * @param {Function} stepCallback - Callback function executed when step changes
  */
 export function initViewerUI(stepCallback) {
@@ -17,6 +17,9 @@ export function initViewerUI(stepCallback) {
     const prevBtn = document.getElementById('btn-prev');
     const nextBtn = document.getElementById('btn-next');
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
+
+    // 🌟 Initialize Model Run Dropdown (Past 7 Days of Runs)
+    initModelRunDropdown();
 
     // 1. Timeline Slider scrubbing listener
     if (slider) {
@@ -56,6 +59,75 @@ export function initViewerUI(stepCallback) {
             const targetMode = e.currentTarget.getAttribute('data-target');
             console.log(`[UI] Active view switched to: ${targetMode}`);
         });
+    });
+}
+
+/**
+ * Generates and populates the past 7 days of model runs (18Z, 12Z, 06Z, 00Z) into the dropdown menu.
+ */
+function initModelRunDropdown() {
+    const toggleBtn = document.getElementById('model-run-toggle');
+    const menu = document.getElementById('model-run-menu');
+    const labelSpan = document.getElementById('current-run-label');
+
+    if (!toggleBtn || !menu) return;
+
+    const runs = [];
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+    const latestRunHour = Math.floor(currentHour / 6) * 6;
+    
+    let currentDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), latestRunHour, 0));
+
+    // 7 days * 4 cycles/day = 28 runs total
+    for (let i = 0; i < 28; i++) {
+        const runHour = String(currentDate.getUTCHours()).padStart(2, '0') + 'Z';
+        const options = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' };
+        const dateStr = currentDate.toLocaleDateString('en-US', options);
+        
+        const runId = `${runHour} ${dateStr}`;
+        runs.push({ id: runId });
+
+        currentDate.setUTCHours(currentDate.getUTCHours() - 6);
+    }
+
+    // Populate the dropdown HTML
+    menu.innerHTML = '';
+    runs.forEach((run, index) => {
+        const item = document.createElement('button');
+        item.className = `run-dropdown-item ${index === 0 ? 'active' : ''}`;
+        item.setAttribute('data-run', run.id);
+        item.innerHTML = `<span>Run Time: ${run.id}</span><span class="check-icon">✓</span>`;
+        
+        item.addEventListener('click', async () => {
+            document.querySelectorAll('.run-dropdown-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            if (labelSpan) labelSpan.textContent = run.id;
+            menu.style.display = 'none';
+
+            showToast(`Loading ${run.id}...`);
+            try {
+                stateManager.activeModelRun = run.id;
+                // Add your fetchManifest or model update trigger here if required
+                hideToast();
+            } catch (err) {
+                showToast('❌ Failed to load run');
+            }
+        });
+
+        menu.appendChild(item);
+    });
+
+    // Toggle menu display on click
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = menu.style.display === 'block';
+        menu.style.display = isVisible ? 'none' : 'block';
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', () => {
+        menu.style.display = 'none';
     });
 }
 
@@ -196,7 +268,6 @@ function updateForecastClock(stepData) {
     if (typeof rawStep === 'number') {
         stepHours = rawStep;
     } else if (typeof rawStep === 'string') {
-        // Strip out the 'F' so we just have the number
         stepHours = parseInt(rawStep.replace(/\D/g, ''), 10) || 0;
     }
 
@@ -205,14 +276,11 @@ function updateForecastClock(stepData) {
     let validDate = null;
 
     if (baseTimeString) {
-        // Force the string to be parsed as UTC if it doesn't specify a timezone
         if (!baseTimeString.endsWith('Z') && !baseTimeString.includes('+') && !baseTimeString.includes('-')) {
             baseTimeString = baseTimeString.replace(' ', 'T') + 'Z';
         }
         
         const baseTime = new Date(baseTimeString);
-        
-        // Add the forecast hour offset in milliseconds (1 hour = 3,600,000 ms)
         validDate = new Date(baseTime.getTime() + (stepHours * 3600 * 1000));
     }
 
