@@ -1,26 +1,53 @@
 import { stateManager } from '../core/stateManager.js';
 
 let onStepChangeCallback = null;
+let isPlaying = false;
+let playInterval = null;
+const PLAYBACK_SPEED_MS = 400; // Time per frame in milliseconds
 
 /**
- * Initializes listeners for the timeline slider, top navigation, and UI overlays.
+ * Initializes listeners for the timeline slider, play/pause controls, top navigation, and UI overlays.
  * @param {Function} stepCallback - Callback function executed when step changes (passed to app.js to trigger GPU redraws)
  */
 export function initViewerUI(stepCallback) {
     onStepChangeCallback = stepCallback;
 
     const slider = document.getElementById('timeline-slider');
+    const playBtn = document.getElementById('btn-play');
+    const prevBtn = document.getElementById('btn-prev');
+    const nextBtn = document.getElementById('btn-next');
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
 
     // 1. Timeline Slider scrubbing listener
     if (slider) {
         slider.addEventListener('input', (e) => {
+            if (isPlaying) pausePlayback();
             const targetIndex = parseInt(e.target.value, 10);
             setStepIndex(targetIndex);
         });
     }
 
-    // 2. Navigation tab selection listener
+    // 2. Play / Pause button toggle
+    if (playBtn) {
+        playBtn.addEventListener('click', togglePlayback);
+    }
+
+    // 3. Step Forward / Backward buttons
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            if (isPlaying) pausePlayback();
+            stepRelative(-1);
+        });
+    }
+
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            if (isPlaying) pausePlayback();
+            stepRelative(1);
+        });
+    }
+
+    // 4. Navigation tab selection listener
     navButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
             navButtons.forEach((b) => b.classList.remove('active'));
@@ -30,6 +57,68 @@ export function initViewerUI(stepCallback) {
             console.log(`[UI] Active view switched to: ${targetMode}`);
         });
     });
+}
+
+/**
+ * Toggles the forecast animation loop.
+ */
+export function togglePlayback() {
+    if (isPlaying) {
+        pausePlayback();
+    } else {
+        startPlayback();
+    }
+}
+
+export function startPlayback() {
+    if (!stateManager.globalSteps || stateManager.globalSteps.length <= 1) return;
+    
+    isPlaying = true;
+    updatePlayPauseUI();
+
+    playInterval = setInterval(() => {
+        let nextIndex = stateManager.currentStepIndex + 1;
+        
+        // Loop back to start if we hit the end
+        if (nextIndex >= stateManager.globalSteps.length) {
+            nextIndex = 0;
+        }
+        
+        setStepIndex(nextIndex);
+    }, PLAYBACK_SPEED_MS);
+}
+
+export function pausePlayback() {
+    isPlaying = false;
+    if (playInterval) {
+        clearInterval(playInterval);
+        playInterval = null;
+    }
+    updatePlayPauseUI();
+}
+
+/**
+ * Steps forward (+1) or backward (-1) relative to current index.
+ */
+function stepRelative(delta) {
+    if (!stateManager.globalSteps) return;
+    const maxIndex = stateManager.globalSteps.length - 1;
+    let targetIndex = stateManager.currentStepIndex + delta;
+
+    if (targetIndex < 0) targetIndex = maxIndex;
+    if (targetIndex > maxIndex) targetIndex = 0;
+
+    setStepIndex(targetIndex);
+}
+
+function updatePlayPauseUI() {
+    const playIcon = document.getElementById('play-icon');
+    const pauseIcon = document.getElementById('pause-icon');
+    
+    if (playIcon && pauseIcon) {
+        playIcon.style.display = isPlaying ? 'none' : 'block';
+        pauseIcon.style.display = isPlaying ? 'block' : 'none';
+    }
 }
 
 /**
@@ -55,17 +144,13 @@ export function syncTimelineWithManifest() {
 export function setStepIndex(index) {
     if (!stateManager.globalSteps || index < 0 || index >= stateManager.globalSteps.length) return;
 
-    // Update global state
     stateManager.currentStepIndex = index;
 
-    // Sync slider position if triggered externally
     const slider = document.getElementById('timeline-slider');
     if (slider) slider.value = index.toString();
 
-    // Update text label (e.g. Forecast: F006)
     updateTimeLabel(index);
 
-    // Notify app.js to update WebGL textures / shader uniforms
     if (typeof onStepChangeCallback === 'function') {
         onStepChangeCallback(index, stateManager.globalSteps[index]);
     }
@@ -83,7 +168,6 @@ function updateTimeLabel(index) {
     const rawStep = stepData.step;
     let formattedStep = rawStep;
 
-    // Format numbers or raw strings to 'F000' format
     if (typeof rawStep === 'number') {
         formattedStep = `F${String(rawStep).padStart(3, '0')}`;
     } else if (typeof rawStep === 'string' && !rawStep.startsWith('F')) {
@@ -93,9 +177,6 @@ function updateTimeLabel(index) {
     label.textContent = `Forecast: ${formattedStep}`;
 }
 
-/**
- * Toast banner helpers for engine/data loading status.
- */
 export function showToast(message) {
     const toast = document.getElementById('status-toast');
     if (toast) {
