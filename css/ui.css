@@ -1,436 +1,92 @@
-/* ==========================================
-   SPLASH SCREEN & TRANSITIONS
-   ========================================== */
-#splash-screen {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background-color: #050a15; /* Deep, dark navy */
-    z-index: 9999;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>BaroClinic Weather</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
     
-    /* MOBILE DEFAULT: Vertical Flexbox */
-    display: flex;
-    flex-direction: column; 
-    justify-content: center;
-    align-items: center;
-    padding: 20px;
-    box-sizing: border-box;
-    transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    overflow: hidden;
-}
-
-/* Atmospheric Ambient Lighting */
-#splash-screen::before {
-    content: '';
-    position: absolute;
-    width: 800px;
-    height: 800px;
-    background: radial-gradient(circle, rgba(77, 166, 255, 0.08) 0%, rgba(5, 10, 21, 0) 70%);
-    pointer-events: none;
-    z-index: 0;
-}
-
-/* BRANDING WRAPPER (Mobile Base) */
-#splash-branding {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    z-index: 1;
-}
-
-/* Crisp, responsive logo sizing for mobile */
-#splash-logo {
-    width: 75vw;
-    max-width: 280px;
-    height: auto;
-    margin-bottom: 15px;
-    filter: drop-shadow(0 0 18px rgba(77, 166, 255, 0.25));
-}
-
-#splash-text {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 20px;
-    font-weight: 700;
-    color: #4da6ff;
-    letter-spacing: 4px;
-    animation: pulse 1.5s infinite;
-    margin: 0;
-}
-
-#splash-screen.fade-out {
-    opacity: 0;
-    pointer-events: none;
-}
-
-/* ==========================================
-   THE 2x2 GLASS GRID (Mobile Base)
-   ========================================== */
-#home-menu-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-    width: 100%;
-    max-width: 600px;
-    margin-top: 25px; 
-    box-sizing: border-box;
-    z-index: 1;
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
     
-    /* Mobile intro slide */
-    opacity: 0;
-    transform: translateY(20px);
-    transition: opacity 0.8s ease, transform 0.8s ease;
-    pointer-events: none; 
-}
-
-#splash-screen.hub-active #home-menu-grid {
-    opacity: 1;
-    transform: translateY(0);
-    pointer-events: auto;
-}
-
-#splash-screen.hub-active #splash-text {
-    display: none; 
-}
-
-/* Glassmorphism Card Style - Mobile optimized */
-.menu-card {
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    padding: 22px 12px;
-    text-align: center;
-    color: white;
-    cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.menu-card h3 {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: clamp(16px, 3.5vw, 24px);
-    margin: 0 0 6px 0;
-    letter-spacing: 1px;
-    color: #ffffff;
-}
-
-.menu-card p {
-    font-family: sans-serif;
-    font-size: clamp(11px, 1.8vw, 14px);
-    color: #94a3b8;
-    margin: 0;
-    line-height: 1.3;
-}
-
-/* ==========================================
-   DESKTOP: CINEMATIC SLIDE VIEW (>= 1024px)
-   ========================================== */
-@media (min-width: 1024px) {
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
     
-    #splash-screen {
-        display: block; 
-    }
+    <link href="./css/main.css" rel="stylesheet" />
+    <link href="./css/ui.css" rel="stylesheet" />
+</head>
+<body>
 
-    #splash-screen::before {
-        width: 1400px;
-        height: 1400px;
-        background: radial-gradient(ellipse, rgba(77, 166, 255, 0.06) 0%, rgba(5, 10, 21, 0) 50%);
-    }
-
-    /* 1. THE LOADING STATE (Dead Center & Scaled Up PNG) */
-    #splash-branding {
-        position: absolute;
-        top: 50%;
-        left: 50%; 
-        transform: translate(-50%, -50%);
-        width: 38vw; /* 🌟 Increased logo viewport width */
-        max-width: 680px; /* 🌟 Substantially larger desktop size cap */
-        transition: left 0.9s cubic-bezier(0.25, 1, 0.35, 1), 
-                    transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
-    }
-
-    #splash-logo {
-        width: 100%;
-        max-width: none; 
-        margin-bottom: 25px;
-    }
-
-    #splash-text {
-        font-size: 28px;
-        letter-spacing: 6px;
-    }
-
-    /* 2. THE ACTIVE STATE (Balanced left anchor) */
-    #splash-screen.hub-active #splash-branding {
-        left: 24%; 
-    }
-
-    /* 3. THE GRID (Anchored on the right side) */
-    #home-menu-grid {
-        position: absolute;
-        top: 50%;
-        left: 74%; 
-        margin-top: 0; 
+    <div id="splash-screen">
+        <div id="splash-branding">
+            <img src="./assets/IMG_2466.png" id="splash-logo" alt="BaroClinic Logo">
+            <h2 id="splash-text">LOADING MODELS...</h2>
+        </div>
         
-        width: 44vw; 
-        max-width: 850px; 
-        gap: 2vw; 
-        
-        transform: translate(-50%, 20px); 
-        opacity: 0;
-        transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
-    }
+        <div id="home-menu-grid">
+            <button class="menu-card" id="card-models" data-target="modelViewer">
+                <h3>Model Viewer</h3>
+                <p>Interactive Global GFS & ECMWF</p>
+            </button>
+            <button class="menu-card" id="card-satellite" data-target="satellite">
+                <h3>Satellite</h3>
+                <p>Real-time GOES Imagery</p>
+            </button>
+            <button class="menu-card" id="card-radar" data-target="radar">
+                <h3>Radar</h3>
+                <p>High-Res Precipitation</p>
+            </button>
+            <button class="menu-card" id="card-tropics" data-target="tropics">
+                <h3>Tropics</h3>
+                <p>Hurricane & Cyclone Tracking</p>
+            </button>
+        </div>
+    </div>
 
-    #splash-screen.hub-active #home-menu-grid {
-        transform: translate(-50%, -50%); 
-        opacity: 1;
-    }
+    <!-- Top Nav -->
+    <nav id="top-nav">
+        <div class="nav-left">
+            <div class="logo">BaroClinic</div>
+        </div>
+        <div class="nav-tabs">
+            <button data-target="modelViewer" class="active">Models</button>
+            <button data-target="radar">Radar</button>
+            <button data-target="tropics">Tropics</button>
+        </div>
+    </nav>
 
-    /* The Bubbles (Dynamic Aspect Ratio) */
-    .menu-card {
-        border-radius: 28px; 
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        aspect-ratio: 4 / 3; 
-        padding: 2.5vw; 
-    }
+    <!-- Top Floating Time Badge (Option 3) -->
+    <div id="top-time-container">
+        <div id="desktop-clock" class="clock-display">--:--</div>
+        <div id="mobile-clock" class="clock-display">--:--</div>
+    </div>
 
-    .menu-card h3 {
-        font-size: clamp(22px, 2.8vw, 36px); 
-        margin-bottom: 12px;
-    }
-
-    .menu-card p {
-        font-size: clamp(13px, 1.1vw, 18px); 
-    }
-
-    /* Desktop Hover Elevation */
-    .menu-card:hover {
-        background: rgba(255, 255, 255, 0.08);
-        transform: translateY(-8px) scale(1.02); 
-        border-color: rgba(77, 166, 255, 0.5);
-        box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.7), 
-                    0 0 40px rgba(77, 166, 255, 0.15);
-    }
-}
-
-/* ==========================================
-   STAGGERED EXIT ANIMATION
-   ========================================== */
-#home-menu-grid.exiting .menu-card {
-    opacity: 0;
-    transform: scale(0.95);
-    pointer-events: none;
-}
-
-#home-menu-grid.exiting #card-tropics   { transition-delay: 0.0s; }
-#home-menu-grid.exiting #card-radar     { transition-delay: 0.1s; }
-#home-menu-grid.exiting #card-satellite { transition-delay: 0.2s; }
-#home-menu-grid.exiting #card-models    { transition-delay: 0.3s; }
-
-@keyframes pulse {
-    0% { opacity: 0.6; }
-    50% { opacity: 1; }
-    100% { opacity: 0.6; }
-}
-
-/* ==========================================
-   NAVIGATION & UI OVERLAYS
-   ========================================== */
-#top-nav {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 50px;
-    background: rgba(11, 15, 25, 0.85);
-    backdrop-filter: blur(12px);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 20px;
-    z-index: 30;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    color: #f8fafc;
-}
-
-#timeline-container {
-    position: absolute; 
-    bottom: 30px; 
-    left: 50%; 
-    transform: translateX(-50%);
-    background: rgba(11, 15, 25, 0.85); 
-    backdrop-filter: blur(12px);
-    padding: 12px 24px; 
-    border-radius: 16px; 
-    color: #f8fafc; 
-    display: flex; 
-    gap: 16px; 
-    align-items: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
-    z-index: 10; 
-    border: 1px solid rgba(255,255,255,0.1);
-}
-
-#timeline-slider { width: 200px; accent-color: #38bdf8; cursor: pointer; }
-#time-label { font-weight: 600; font-size: 14px; min-width: 110px; }
-
-#status-toast {
-    position: absolute; 
-    top: 70px; 
-    left: 50%; 
-    transform: translateX(-50%);
-    background: rgba(11, 15, 25, 0.9); 
-    color: #38bdf8; 
-    padding: 8px 18px; 
-    border-radius: 20px;
-    font-size: 13px; 
-    font-weight: 500; 
-    z-index: 20; 
-    border: 1px solid rgba(56,189,248,0.3);
-    pointer-events: none;
-}
-
-.maplibregl-popup-content {
-    background: #0b0f19 !important; 
-    color: #f8fafc !important;
-    border-radius: 12px; 
-    padding: 12px 16px; 
-    text-align: center;
-    border: 1px solid rgba(255,255,255,0.15);
-}
-
-.temp-f { font-size: 20px; font-weight: 800; color: #38bdf8; }
-.temp-c { font-size: 13px; color: #94a3b8; }
-
-/* ==========================================
-   NAVIGATION & UI OVERLAYS
-   ========================================== */
-.nav-left {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-}
-
-.clock-display {
-    font-family: 'Rajdhani', sans-serif;
-    font-weight: 700;
-    font-size: 13px;
-    color: #94a3b8;
-    letter-spacing: 0.5px;
-}
-
-.desktop-only { display: none !important; }
-.mobile-only { display: block !important; }
-
-/* ==========================================
-   TIMELINE CONTAINER (MOBILE BASE)
-   ========================================== */
-#timeline-container {
-    position: absolute; 
-    bottom: 24px; 
-    left: 50%; 
-    transform: translateX(-50%);
-    width: calc(100% - 32px);
-    max-width: 420px;
-    background: rgba(11, 15, 25, 0.88); 
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    <!-- Compact Bottom Timeline Capsule -->
+    <div id="timeline-container">
+        <div class="timeline-controls">
+            <button id="btn-prev" class="ctrl-btn" title="Previous Frame">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
+            </button>
+            <button id="btn-play" class="ctrl-btn play-btn" title="Play/Pause">
+                <svg id="play-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <svg id="pause-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+            </button>
+            <button id="btn-next" class="ctrl-btn" title="Next Frame">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
+            </button>
+            <button id="btn-gif" class="gif-btn" title="Create GIF">GIF</button>
+        </div>
     
-    /* 🌟 Increased top padding to make room for absolute corners */
-    padding: 36px 16px 10px 16px; 
-    border-radius: 20px; 
-    color: #f8fafc; 
-    display: flex; 
-    flex-direction: column;
-    gap: 10px; 
-    align-items: center;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.1); 
-    z-index: 10; 
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-sizing: border-box;
-}
+        <div class="timeline-slider-wrapper">
+            <span id="time-label">F000</span>
+            <input id="timeline-slider" type="range" min="0" max="0" value="0">
+        </div>
+    </div>
 
-/* 🌟 Mobile Corner Positioning */
-#mobile-clock {
-    position: absolute;
-    top: 12px;
-    left: 16px;
-    color: #cbd5e1;
-}
+    <div id="status-toast" style="display: none;">Loading engine...</div>
+    
+    <div id="map"></div>
 
-.gif-btn {
-    position: absolute;
-    top: 8px;
-    right: 16px;
-    background: rgba(56, 189, 248, 0.15);
-    border: 1px solid rgba(56, 189, 248, 0.4);
-    color: #38bdf8;
-    font-family: 'Rajdhani', sans-serif;
-    font-weight: 700;
-    font-size: 12px;
-    letter-spacing: 1px;
-    border-radius: 6px;
-    padding: 4px 10px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.gif-btn:hover {
-    background: rgba(56, 189, 248, 0.3);
-}
-
-.timeline-controls {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-}
-
-.timeline-slider-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-}
-
-/* ==========================================
-   DESKTOP RESPONSIVE EXTENSION (>= 1024px)
-   ========================================== */
-@media (min-width: 1024px) {
-    .mobile-only { display: none !important; }
-    .desktop-only { display: block !important; }
-
-    #timeline-container {
-        flex-direction: row;
-        max-width: 760px;
-        /* 🌟 Reset padding so everything sits on one row */
-        padding: 12px 24px;
-        border-radius: 28px;
-        gap: 20px;
-        bottom: 36px;
-    }
-
-    /* 🌟 Force GIF button into the standard layout flow on the far right */
-    .gif-btn {
-        position: static;
-        height: 36px;
-        padding: 0 16px;
-        font-size: 14px;
-        border-radius: 8px;
-        flex-shrink: 0;
-    }
-
-    .timeline-controls {
-        width: auto;
-    }
-
-    .timeline-slider-wrapper {
-        flex: 1;
-    }
-}
+    <script type="module" src="./js/app.js"></script>
+</body>
+</html>
