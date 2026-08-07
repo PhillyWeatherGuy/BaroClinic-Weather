@@ -19,7 +19,7 @@ export function initViewerUI(stepCallback) {
     const nextBtn = document.getElementById('btn-next');
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
 
-    // 1. Initialize Model Run Dropdown based on actual available initialization time
+    // 1. Initialize Model Run Dropdown cleanly using stateManager.initTime as source of truth
     initModelRunDropdown();
 
     // 2. Timeline Slider scrubbing listener
@@ -64,8 +64,8 @@ export function initViewerUI(stepCallback) {
 }
 
 /**
- * Generates and populates the past 7 days of model runs using stateManager.initTime as the anchor,
- * ensuring unloading/loading logic executes on demand without preloading.
+ * Generates and populates the past 7 days of model runs. It directly reads stateManager.initTime 
+ * to align the latest available run (e.g. 12Z), passes run parameters to fetchManifest, and unloads/loads properly.
  */
 function initModelRunDropdown() {
     const toggleBtn = document.getElementById('model-run-toggle');
@@ -74,8 +74,8 @@ function initModelRunDropdown() {
 
     if (!toggleBtn || !menu) return;
 
-    // Use stateManager.initTime as the true anchor for the latest run, falling back to current UTC time if not set yet
-    let anchorDate;
+    // 1. Precise Anchor: Rely entirely on stateManager.initTime if loaded, otherwise fallback to current UTC time
+    let anchorDate = null;
     if (stateManager.initTime) {
         let baseStr = stateManager.initTime;
         if (!baseStr.endsWith('Z') && !baseStr.includes('+') && !baseStr.includes('-')) {
@@ -94,7 +94,7 @@ function initModelRunDropdown() {
     const runs = [];
     let currentDate = new Date(anchorDate.getTime());
 
-    // 7 days * 4 cycles/day = 28 runs total going backwards from the latest available run
+    // 2. Generate 7 days * 4 cycles/day = 28 runs backward from anchor
     for (let i = 0; i < 28; i++) {
         const runHour = String(currentDate.getUTCHours()).padStart(2, '0') + 'Z';
         const options = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' };
@@ -106,7 +106,8 @@ function initModelRunDropdown() {
             year: currentDate.getUTCFullYear(),
             month: String(currentDate.getUTCMonth() + 1).padStart(2, '0'),
             day: String(currentDate.getUTCDate()).padStart(2, '0'),
-            cycle: runHour
+            cycle: runHour,
+            rawDate: new Date(currentDate.getTime())
         });
 
         currentDate.setUTCHours(currentDate.getUTCHours() - 6);
@@ -120,6 +121,10 @@ function initModelRunDropdown() {
         item.setAttribute('data-run', run.id);
         item.innerHTML = `<span>Run Time: ${run.id}</span><span class="check-icon">✓</span>`;
         
+        if (index === 0 && labelSpan && !labelSpan.textContent.trim()) {
+            labelSpan.textContent = run.id;
+        }
+
         item.addEventListener('click', async () => {
             document.querySelectorAll('.run-dropdown-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
@@ -128,7 +133,7 @@ function initModelRunDropdown() {
 
             showToast(`Unloading previous run data...`);
             
-            // 🛑 UNLOAD: Purge active state, bitmaps, and steps to free memory completely
+            // 🛑 UNLOAD: Purge state completely to prevent memory bloat/stale data
             stateManager.manifest = null;
             stateManager.globalSteps = [];
             stateManager.loadedChunkBitmaps = {};
@@ -140,22 +145,23 @@ function initModelRunDropdown() {
             try {
                 stateManager.activeModelRun = run.id;
                 
-                // Fetch the manifest for this specific run cycle
-                await fetchManifest(); 
+                // Pass the specific run details object so dataLoader fetches the exact requested run endpoint
+                await fetchManifest(run); 
 
-                // Load initial chunk on demand (no preloading of other runs)
+                // Load initial chunk on demand
                 await loadChunkBitmap(0);
                 
-                // Sync timeline UI bounds to the new manifest
+                // Sync timeline bounds
                 syncTimelineWithManifest();
 
-                // Trigger step 0 render callback
+                // Trigger callback for step 0
                 if (typeof onStepChangeCallback === 'function') {
                     onStepChangeCallback(0, stateManager.globalSteps[0]);
                 }
 
                 hideToast();
             } catch (err) {
+                console.error(err);
                 showToast(`❌ Failed to load run ${run.id}`);
             }
         });
