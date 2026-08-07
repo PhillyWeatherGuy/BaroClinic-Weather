@@ -165,7 +165,7 @@ function updateTimeLabel(index) {
 
     if (!stepData) return;
 
-    // 1. Update Forecast Hour Label (e.g. "Forecast: F012")
+    // 1. Update Forecast Hour Label (e.g. "Forecast: F012" or compact "F012")
     const rawStep = stepData.step;
     let formattedStep = rawStep;
 
@@ -175,7 +175,7 @@ function updateTimeLabel(index) {
         formattedStep = `F${rawStep.padStart(3, '0')}`;
     }
 
-    if (label) label.textContent = `Forecast: ${formattedStep}`;
+    if (label) label.textContent = `${formattedStep}`;
 
     // 2. Update Dynamic Forecast Local Time Clock
     updateForecastClock(stepData);
@@ -185,10 +185,9 @@ function updateTimeLabel(index) {
  * Calculates the forecast frame's valid local time from a UTC base time.
  */
 function updateForecastClock(stepData) {
-    const desktopClock = document.getElementById('desktop-clock');
-    const mobileClock = document.getElementById('mobile-clock');
+    const appClock = document.getElementById('app-clock');
 
-    if (!desktopClock && !mobileClock) return;
+    if (!appClock) return;
 
     // 1. Get the forecast hour offset (e.g., "F012" -> 12)
     let stepHours = 0;
@@ -208,7 +207,6 @@ function updateForecastClock(stepData) {
     if (baseTimeString) {
         // Force the string to be parsed as UTC if it doesn't specify a timezone
         if (!baseTimeString.endsWith('Z') && !baseTimeString.includes('+') && !baseTimeString.includes('-')) {
-            // Replace a space with 'T' (standard ISO format) and append 'Z' for UTC
             baseTimeString = baseTimeString.replace(' ', 'T') + 'Z';
         }
         
@@ -220,8 +218,7 @@ function updateForecastClock(stepData) {
 
     // 3. Fallback if the manifest hasn't loaded the init time yet
     if (!validDate || isNaN(validDate.getTime())) {
-        if (desktopClock) desktopClock.textContent = "--:--";
-        if (mobileClock) mobileClock.textContent = "--:--";
+        appClock.textContent = "--:--";
         return;
     }
 
@@ -235,8 +232,7 @@ function updateForecastClock(stepData) {
         timeZoneName: 'short' 
     });
 
-    if (desktopClock) desktopClock.textContent = timeString;
-    if (mobileClock) mobileClock.textContent = timeString;
+    appClock.textContent = timeString;
 }
 
 export function showToast(message) {
