@@ -47,6 +47,10 @@
     <nav id="top-nav">
         <div class="nav-left">
             <div class="logo">BaroClinic</div>
+            <!-- Unified clock inside nav for desktop, floats below on mobile via CSS -->
+            <div id="top-time-container">
+                <div id="app-clock" class="clock-display">--:--</div>
+            </div>
         </div>
         <div class="nav-tabs">
             <button data-target="modelViewer" class="active">Models</button>
@@ -54,11 +58,6 @@
             <button data-target="tropics">Tropics</button>
         </div>
     </nav>
-
-    <!-- Top Floating Time Badge -->
-    <div id="top-time-container">
-        <div id="app-clock" class="clock-display">--:--</div>
-    </div>
 
     <!-- Compact Bottom Timeline Capsule -->
     <div id="timeline-container">
