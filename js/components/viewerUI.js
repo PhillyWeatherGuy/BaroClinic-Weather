@@ -182,30 +182,50 @@ function updateTimeLabel(index) {
 }
 
 /**
- * Calculates and displays the forecast frame's valid local time.
+ * Calculates the forecast frame's valid local time from a UTC base time.
  */
 function updateForecastClock(stepData) {
     const desktopClock = document.getElementById('desktop-clock');
     const mobileClock = document.getElementById('mobile-clock');
 
-    let validDate = null;
+    if (!desktopClock && !mobileClock) return;
 
-    // 1. Direct valid time property in manifest step
-    if (stepData.validTime) {
-        validDate = new Date(stepData.validTime);
-    } else if (stepData.timestamp) {
-        validDate = new Date(stepData.timestamp);
-    } 
-    // 2. Derived from model run initialization time + forecast step hours
-    else if (stateManager.initTime || stateManager.runTime) {
-        const init = new Date(stateManager.initTime || stateManager.runTime);
-        const stepHours = typeof stepData.step === 'number' ? stepData.step : (parseInt(stepData.step, 10) || 0);
-        validDate = new Date(init.getTime() + stepHours * 3600 * 1000);
+    // 1. Get the forecast hour offset (e.g., "F012" -> 12)
+    let stepHours = 0;
+    const rawStep = stepData?.step ?? stepData?.forecast_hour ?? 0;
+    
+    if (typeof rawStep === 'number') {
+        stepHours = rawStep;
+    } else if (typeof rawStep === 'string') {
+        // Strip out the 'F' so we just have the number
+        stepHours = parseInt(rawStep.replace(/\D/g, ''), 10) || 0;
     }
 
-    if (!validDate || isNaN(validDate.getTime())) return;
+    // 2. Get the model's initialization time
+    let baseTimeString = stateManager.initTime || stateManager.runTime;
+    let validDate = null;
 
-    // Formats into local user time, e.g. "Fri, Aug 7, 2:00 PM EDT"
+    if (baseTimeString) {
+        // Force the string to be parsed as UTC if it doesn't specify a timezone
+        if (!baseTimeString.endsWith('Z') && !baseTimeString.includes('+') && !baseTimeString.includes('-')) {
+            // Replace a space with 'T' (standard ISO format) and append 'Z' for UTC
+            baseTimeString = baseTimeString.replace(' ', 'T') + 'Z';
+        }
+        
+        const baseTime = new Date(baseTimeString);
+        
+        // Add the forecast hour offset in milliseconds (1 hour = 3,600,000 ms)
+        validDate = new Date(baseTime.getTime() + (stepHours * 3600 * 1000));
+    }
+
+    // 3. Fallback if the manifest hasn't loaded the init time yet
+    if (!validDate || isNaN(validDate.getTime())) {
+        if (desktopClock) desktopClock.textContent = "--:--";
+        if (mobileClock) mobileClock.textContent = "--:--";
+        return;
+    }
+
+    // 4. Format the calculated UTC date into the viewer's local timezone
     const timeString = validDate.toLocaleTimeString([], { 
         weekday: 'short',
         month: 'numeric',
