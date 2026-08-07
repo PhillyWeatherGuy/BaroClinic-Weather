@@ -191,3 +191,26 @@ export function hideToast() {
         toast.style.display = 'none';
     }
 }
+/**
+ * Starts a timer to keep the local clock updated in the UI.
+ */
+function initClock() {
+    const desktopClock = document.getElementById('desktop-clock');
+    const mobileClock = document.getElementById('mobile-clock');
+
+    function updateClock() {
+        // Gets local time like "12:00 PM EDT"
+        const now = new Date();
+        const timeString = now.toLocaleTimeString([], { 
+            hour: 'numeric', 
+            minute: '2-digit', 
+            timeZoneName: 'short' 
+        });
+
+        if (desktopClock) desktopClock.textContent = timeString;
+        if (mobileClock) mobileClock.textContent = timeString;
+    }
+
+    updateClock(); // Run immediately
+    setInterval(updateClock, 1000); // Update every second
+}
