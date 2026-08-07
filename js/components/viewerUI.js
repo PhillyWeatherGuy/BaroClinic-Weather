@@ -1,4 +1,5 @@
 import { stateManager } from '../core/stateManager.js';
+import { fetchManifest, loadChunkBitmap } from '../core/dataLoader.js';
 
 let onStepChangeCallback = null;
 let isPlaying = false;
@@ -18,10 +19,10 @@ export function initViewerUI(stepCallback) {
     const nextBtn = document.getElementById('btn-next');
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
 
-    // 🌟 Initialize Model Run Dropdown (Past 7 Days of Runs)
+    // 1. Initialize Model Run Dropdown (Past 7 Days of Runs)
     initModelRunDropdown();
 
-    // 1. Timeline Slider scrubbing listener
+    // 2. Timeline Slider scrubbing listener
     if (slider) {
         slider.addEventListener('input', (e) => {
             if (isPlaying) pausePlayback();
@@ -30,12 +31,12 @@ export function initViewerUI(stepCallback) {
         });
     }
 
-    // 2. Play / Pause button toggle
+    // 3. Play / Pause button toggle
     if (playBtn) {
         playBtn.addEventListener('click', togglePlayback);
     }
 
-    // 3. Step Forward / Backward buttons
+    // 4. Step Forward / Backward buttons
     if (prevBtn) {
         prevBtn.addEventListener('click', () => {
             if (isPlaying) pausePlayback();
@@ -50,7 +51,7 @@ export function initViewerUI(stepCallback) {
         });
     }
 
-    // 4. Navigation tab selection listener
+    // 5. Navigation tab selection listener
     navButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
             navButtons.forEach((b) => b.classList.remove('active'));
@@ -63,7 +64,7 @@ export function initViewerUI(stepCallback) {
 }
 
 /**
- * Generates and populates the past 7 days of model runs (18Z, 12Z, 06Z, 00Z) into the dropdown menu.
+ * Generates and populates the past 7 days of model runs and unloads/loads data on selection.
  */
 function initModelRunDropdown() {
     const toggleBtn = document.getElementById('model-run-toggle');
@@ -74,24 +75,33 @@ function initModelRunDropdown() {
 
     const runs = [];
     const now = new Date();
+    
+    // Determine the latest available 6-hour GFS/Model cycle (00Z, 06Z, 12Z, 18Z)
     const currentHour = now.getUTCHours();
     const latestRunHour = Math.floor(currentHour / 6) * 6;
     
     let currentDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), latestRunHour, 0));
 
-    // 7 days * 4 cycles/day = 28 runs total
+    // 7 days * 4 cycles/day = 28 runs total going backwards from latest
     for (let i = 0; i < 28; i++) {
         const runHour = String(currentDate.getUTCHours()).padStart(2, '0') + 'Z';
         const options = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' };
         const dateStr = currentDate.toLocaleDateString('en-US', options);
         
         const runId = `${runHour} ${dateStr}`;
-        runs.push({ id: runId });
+        // Store technical parameters needed to query the backend endpoint for this specific run
+        runs.push({ 
+            id: runId, 
+            year: currentDate.getUTCFullYear(),
+            month: String(currentDate.getUTCMonth() + 1).padStart(2, '0'),
+            day: String(currentDate.getUTCDate()).padStart(2, '0'),
+            cycle: runHour
+        });
 
         currentDate.setUTCHours(currentDate.getUTCHours() - 6);
     }
 
-    // Populate the dropdown HTML
+    // Populate dropdown HTML list
     menu.innerHTML = '';
     runs.forEach((run, index) => {
         const item = document.createElement('button');
@@ -105,13 +115,37 @@ function initModelRunDropdown() {
             if (labelSpan) labelSpan.textContent = run.id;
             menu.style.display = 'none';
 
-            showToast(`Loading ${run.id}...`);
+            showToast(`Unloading previous run data...`);
+            
+            // 🛑 UNLOAD: Clean out active state, bitmaps, and steps to ensure memory release
+            stateManager.manifest = null;
+            stateManager.globalSteps = [];
+            stateManager.loadedChunkBitmaps = {};
+            stateManager.currentStepIndex = 0;
+            stateManager.activeFrameState = null;
+
+            showToast(`Loading model run ${run.id}...`);
             try {
                 stateManager.activeModelRun = run.id;
-                // Add your fetchManifest or model update trigger here if required
+                
+                // Fetch the manifest specific to this date/cycle (modify fetchManifest to accept parameters if your API requires it)
+                // e.g., await fetchManifest({ year: run.year, month: run.month, day: run.day, cycle: run.cycle });
+                await fetchManifest(); 
+
+                // Load initial chunk for the new run
+                const bitmap0 = await loadChunkBitmap(0);
+                
+                // Sync timeline UI bounds to new manifest
+                syncTimelineWithManifest();
+
+                // Trigger step 0 render callback
+                if (typeof onStepChangeCallback === 'function') {
+                    onStepChangeCallback(0, stateManager.globalSteps[0]);
+                }
+
                 hideToast();
             } catch (err) {
-                showToast('❌ Failed to load run');
+                showToast(`❌ Failed to load run ${run.id}`);
             }
         });
 
@@ -237,7 +271,6 @@ function updateTimeLabel(index) {
 
     if (!stepData) return;
 
-    // 1. Update Forecast Hour Label (e.g. "Forecast: F012" or compact "F012")
     const rawStep = stepData.step;
     let formattedStep = rawStep;
 
@@ -249,7 +282,6 @@ function updateTimeLabel(index) {
 
     if (label) label.textContent = `${formattedStep}`;
 
-    // 2. Update Dynamic Forecast Local Time Clock
     updateForecastClock(stepData);
 }
 
@@ -261,7 +293,6 @@ function updateForecastClock(stepData) {
 
     if (!appClock) return;
 
-    // 1. Get the forecast hour offset (e.g., "F012" -> 12)
     let stepHours = 0;
     const rawStep = stepData?.step ?? stepData?.forecast_hour ?? 0;
     
@@ -271,7 +302,6 @@ function updateForecastClock(stepData) {
         stepHours = parseInt(rawStep.replace(/\D/g, ''), 10) || 0;
     }
 
-    // 2. Get the model's initialization time
     let baseTimeString = stateManager.initTime || stateManager.runTime;
     let validDate = null;
 
@@ -284,13 +314,11 @@ function updateForecastClock(stepData) {
         validDate = new Date(baseTime.getTime() + (stepHours * 3600 * 1000));
     }
 
-    // 3. Fallback if the manifest hasn't loaded the init time yet
     if (!validDate || isNaN(validDate.getTime())) {
         appClock.textContent = "--:--";
         return;
     }
 
-    // 4. Format the calculated UTC date into the viewer's local timezone
     const timeString = validDate.toLocaleTimeString([], { 
         weekday: 'short',
         month: 'numeric',
