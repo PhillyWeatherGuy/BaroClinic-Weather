@@ -7,15 +7,10 @@ const PLAYBACK_SPEED_MS = 400; // Time per frame in milliseconds
 
 /**
  * Initializes listeners for the timeline slider, play/pause controls, top navigation, and UI overlays.
- * @param {Function} stepCallback - Callback function executed when step changes (passed to app.js to trigger GPU redraws)
+ * @param {Function} stepCallback - Callback function executed when step changes
  */
 export function initViewerUI(stepCallback) {
     onStepChangeCallback = stepCallback;
-
-    // Start local time clock tracking
-    initClock();
-    
-    // ... rest of existing initViewerUI logic (slider listeners, play controls, etc.)
 
     const slider = document.getElementById('timeline-slider');
     const playBtn = document.getElementById('btn-play');
@@ -131,7 +126,7 @@ function updatePlayPauseUI() {
  */
 export function syncTimelineWithManifest() {
     const slider = document.getElementById('timeline-slider');
-    const stepsCount = stateManager.globalSteps.length;
+    const stepsCount = stateManager.globalSteps ? stateManager.globalSteps.length : 0;
 
     if (!slider || stepsCount === 0) return;
 
@@ -162,14 +157,15 @@ export function setStepIndex(index) {
 }
 
 /**
- * Formats and updates the #time-label text.
+ * Formats and updates the #time-label text and forecast valid local clock display.
  */
 function updateTimeLabel(index) {
     const label = document.getElementById('time-label');
-    const stepData = stateManager.globalSteps[index];
+    const stepData = stateManager.globalSteps ? stateManager.globalSteps[index] : null;
 
-    if (!label || !stepData) return;
+    if (!stepData) return;
 
+    // 1. Update Forecast Hour Label (e.g. "Forecast: F012")
     const rawStep = stepData.step;
     let formattedStep = rawStep;
 
@@ -179,7 +175,48 @@ function updateTimeLabel(index) {
         formattedStep = `F${rawStep.padStart(3, '0')}`;
     }
 
-    label.textContent = `Forecast: ${formattedStep}`;
+    if (label) label.textContent = `Forecast: ${formattedStep}`;
+
+    // 2. Update Dynamic Forecast Local Time Clock
+    updateForecastClock(stepData);
+}
+
+/**
+ * Calculates and displays the forecast frame's valid local time.
+ */
+function updateForecastClock(stepData) {
+    const desktopClock = document.getElementById('desktop-clock');
+    const mobileClock = document.getElementById('mobile-clock');
+
+    let validDate = null;
+
+    // 1. Direct valid time property in manifest step
+    if (stepData.validTime) {
+        validDate = new Date(stepData.validTime);
+    } else if (stepData.timestamp) {
+        validDate = new Date(stepData.timestamp);
+    } 
+    // 2. Derived from model run initialization time + forecast step hours
+    else if (stateManager.initTime || stateManager.runTime) {
+        const init = new Date(stateManager.initTime || stateManager.runTime);
+        const stepHours = typeof stepData.step === 'number' ? stepData.step : (parseInt(stepData.step, 10) || 0);
+        validDate = new Date(init.getTime() + stepHours * 3600 * 1000);
+    }
+
+    if (!validDate || isNaN(validDate.getTime())) return;
+
+    // Formats into local user time, e.g. "Fri, Aug 7, 2:00 PM EDT"
+    const timeString = validDate.toLocaleTimeString([], { 
+        weekday: 'short',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric', 
+        minute: '2-digit', 
+        timeZoneName: 'short' 
+    });
+
+    if (desktopClock) desktopClock.textContent = timeString;
+    if (mobileClock) mobileClock.textContent = timeString;
 }
 
 export function showToast(message) {
@@ -195,27 +232,4 @@ export function hideToast() {
     if (toast) {
         toast.style.display = 'none';
     }
-}
-/**
- * Starts a timer to keep the local clock updated in the UI.
- */
-function initClock() {
-    const desktopClock = document.getElementById('desktop-clock');
-    const mobileClock = document.getElementById('mobile-clock');
-
-    function updateClock() {
-        // Gets local time like "12:00 PM EDT"
-        const now = new Date();
-        const timeString = now.toLocaleTimeString([], { 
-            hour: 'numeric', 
-            minute: '2-digit', 
-            timeZoneName: 'short' 
-        });
-
-        if (desktopClock) desktopClock.textContent = timeString;
-        if (mobileClock) mobileClock.textContent = timeString;
-    }
-
-    updateClock(); // Run immediately
-    setInterval(updateClock, 1000); // Update every second
 }
