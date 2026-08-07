@@ -414,17 +414,19 @@
     }
 
     .clock-display {
-        font-size: 14px;
-        color: #94a3b8;
+        font-size: 16px; 
+        color: #38bdf8; 
         text-align: left;
     }
 
     #timeline-container {
         flex-direction: row;
-        max-width: 480px;
-        padding: 10px 18px;
+        width: 60%; /* Dynamically scale with the screen */
+        max-width: 1000px; /* Generous upper limit for ultra-wides */
+        min-width: 650px; /* Maintain minimum size for standard desktops */
+        padding: 12px 24px;
         border-radius: 24px;
-        gap: 16px;
+        gap: 20px;
         bottom: 30px;
     }
 
