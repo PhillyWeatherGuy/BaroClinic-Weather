@@ -12,6 +12,11 @@ const PLAYBACK_SPEED_MS = 400; // Time per frame in milliseconds
 export function initViewerUI(stepCallback) {
     onStepChangeCallback = stepCallback;
 
+    // Start local time clock tracking
+    initClock();
+    
+    // ... rest of existing initViewerUI logic (slider listeners, play controls, etc.)
+
     const slider = document.getElementById('timeline-slider');
     const playBtn = document.getElementById('btn-play');
     const prevBtn = document.getElementById('btn-prev');
