@@ -62,30 +62,82 @@ initViewerUI((stepIndex) => {
     renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
 });
 
-// Wire up Model Run Selector buttons (00z, 06z, 12z, 18z)
-document.querySelectorAll('.run-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-        document.querySelectorAll('.run-btn').forEach(b => b.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-        const selectedRun = e.currentTarget.getAttribute('data-run');
+// 🌟 Generate Past 7 Days of Model Runs (18Z, 12Z, 06Z, 00Z)
+function initModelRunDropdown() {
+    const toggleBtn = document.getElementById('model-run-toggle');
+    const menu = document.getElementById('model-run-menu');
+    const labelSpan = document.getElementById('current-run-label');
+
+    const hours = [18, 12, 6, 0];
+    const runs = [];
+    
+    // Generate past 7 days starting from current UTC time backwards
+    const now = new Date();
+    // Round down to latest available 6-hour cycle window
+    const currentHour = now.getUTCHours();
+    const latestRunHour = Math.floor(currentHour / 6) * 6;
+    
+    let currentDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), latestRunHour, 0));
+
+    // 7 days * 4 cycles/day = 28 runs total
+    for (let i = 0; i < 28; i++) {
+        const runHour = String(currentDate.getUTCHours()).padStart(2, '0') + 'Z';
         
-        showToast(`Loading ${selectedRun} run...`);
-        try {
-            // If your backend supports passing the run parameter, update fetchManifest accordingly:
-            // e.g., await fetchManifest(selectedRun);
-            // For now, this cleanly hooks up the state change & UI feedback:
-            stateManager.activeModelRun = selectedRun;
-            
-            // Reload/re-render logic can go here if tied to manifest re-fetching
-            hideToast();
-        } catch (err) {
-            showToast('❌ Failed to load ' + selectedRun);
-        }
+        // Format date e.g., "Fri Aug 07"
+        const options = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' };
+        const dateStr = currentDate.toLocaleDateString('en-US', options);
+        
+        const runId = `${runHour} ${dateStr}`;
+        runs.push({ id: runId, dateObj: new Date(currentDate) });
+
+        // Step back 6 hours
+        currentDate.setUTCHours(currentDate.getUTCHours() - 6);
+    }
+
+    // Populate menu DOM
+    menu.innerHTML = '';
+    runs.forEach((run, index) => {
+        const item = document.createElement('button');
+        item.className = `run-dropdown-item ${index === 0 ? 'active' : ''}`;
+        item.setAttribute('data-run', run.id);
+        item.innerHTML = `<span>${run.id}</span><span class="check-icon">✓</span>`;
+        
+        item.addEventListener('click', async () => {
+            document.querySelectorAll('.run-dropdown-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            labelSpan.textContent = run.id;
+            menu.style.display = 'none';
+
+            showToast(`Loading ${run.id}...`);
+            try {
+                stateManager.activeModelRun = run.id;
+                // Hook up your manifest fetch with the selected run parameter here if applicable
+                // await fetchManifest(run.id);
+                hideToast();
+            } catch (err) {
+                showToast('❌ Failed to load run');
+            }
+        });
+
+        menu.appendChild(item);
     });
-});
+
+    // Toggle menu visibility
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = menu.style.display === 'block';
+        menu.style.display = isVisible ? 'none' : 'block';
+    });
+
+    // Close menu when clicking outside
+    document.addEventListener('click', () => {
+        menu.style.display = 'none';
+    });
+}
 
 map.on('load', async () => {
     try {
+        initModelRunDropdown();
         await fetchManifest();
         initLayer();
 
