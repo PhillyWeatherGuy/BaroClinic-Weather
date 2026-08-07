@@ -19,7 +19,7 @@ export function initViewerUI(stepCallback) {
     const nextBtn = document.getElementById('btn-next');
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
 
-    // 1. Initialize Model Run Dropdown (Past 7 Days of Runs)
+    // 1. Initialize Model Run Dropdown based on actual available initialization time
     initModelRunDropdown();
 
     // 2. Timeline Slider scrubbing listener
@@ -64,7 +64,8 @@ export function initViewerUI(stepCallback) {
 }
 
 /**
- * Generates and populates the past 7 days of model runs and unloads/loads data on selection.
+ * Generates and populates the past 7 days of model runs using stateManager.initTime as the anchor,
+ * ensuring unloading/loading logic executes on demand without preloading.
  */
 function initModelRunDropdown() {
     const toggleBtn = document.getElementById('model-run-toggle');
@@ -73,23 +74,33 @@ function initModelRunDropdown() {
 
     if (!toggleBtn || !menu) return;
 
-    const runs = [];
-    const now = new Date();
-    
-    // Determine the latest available 6-hour GFS/Model cycle (00Z, 06Z, 12Z, 18Z)
-    const currentHour = now.getUTCHours();
-    const latestRunHour = Math.floor(currentHour / 6) * 6;
-    
-    let currentDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), latestRunHour, 0));
+    // Use stateManager.initTime as the true anchor for the latest run, falling back to current UTC time if not set yet
+    let anchorDate;
+    if (stateManager.initTime) {
+        let baseStr = stateManager.initTime;
+        if (!baseStr.endsWith('Z') && !baseStr.includes('+') && !baseStr.includes('-')) {
+            baseStr = baseStr.replace(' ', 'T') + 'Z';
+        }
+        anchorDate = new Date(baseStr);
+    }
 
-    // 7 days * 4 cycles/day = 28 runs total going backwards from latest
+    if (!anchorDate || isNaN(anchorDate.getTime())) {
+        const now = new Date();
+        const currentHour = now.getUTCHours();
+        const latestRunHour = Math.floor(currentHour / 6) * 6;
+        anchorDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), latestRunHour, 0));
+    }
+
+    const runs = [];
+    let currentDate = new Date(anchorDate.getTime());
+
+    // 7 days * 4 cycles/day = 28 runs total going backwards from the latest available run
     for (let i = 0; i < 28; i++) {
         const runHour = String(currentDate.getUTCHours()).padStart(2, '0') + 'Z';
         const options = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' };
         const dateStr = currentDate.toLocaleDateString('en-US', options);
         
         const runId = `${runHour} ${dateStr}`;
-        // Store technical parameters needed to query the backend endpoint for this specific run
         runs.push({ 
             id: runId, 
             year: currentDate.getUTCFullYear(),
@@ -117,25 +128,25 @@ function initModelRunDropdown() {
 
             showToast(`Unloading previous run data...`);
             
-            // 🛑 UNLOAD: Clean out active state, bitmaps, and steps to ensure memory release
+            // 🛑 UNLOAD: Purge active state, bitmaps, and steps to free memory completely
             stateManager.manifest = null;
             stateManager.globalSteps = [];
             stateManager.loadedChunkBitmaps = {};
             stateManager.currentStepIndex = 0;
             stateManager.activeFrameState = null;
+            stateManager.initTime = null;
 
             showToast(`Loading model run ${run.id}...`);
             try {
                 stateManager.activeModelRun = run.id;
                 
-                // Fetch the manifest specific to this date/cycle (modify fetchManifest to accept parameters if your API requires it)
-                // e.g., await fetchManifest({ year: run.year, month: run.month, day: run.day, cycle: run.cycle });
+                // Fetch the manifest for this specific run cycle
                 await fetchManifest(); 
 
-                // Load initial chunk for the new run
-                const bitmap0 = await loadChunkBitmap(0);
+                // Load initial chunk on demand (no preloading of other runs)
+                await loadChunkBitmap(0);
                 
-                // Sync timeline UI bounds to new manifest
+                // Sync timeline UI bounds to the new manifest
                 syncTimelineWithManifest();
 
                 // Trigger step 0 render callback
@@ -185,7 +196,6 @@ export function startPlayback() {
     playInterval = setInterval(() => {
         let nextIndex = stateManager.currentStepIndex + 1;
         
-        // Loop back to start if we hit the end
         if (nextIndex >= stateManager.globalSteps.length) {
             nextIndex = 0;
         }
