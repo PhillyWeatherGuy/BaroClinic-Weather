@@ -235,12 +235,19 @@
 
 .nav-left {
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    align-items: center;
+    gap: 15px;
+}
+
+.logo {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 1px;
 }
 
 /* ==========================================
-   TOP FLOATING TIME BADGE (OPTION 3)
+   TOP TIME BADGE (MOBILE DEFAULT / DESKTOP INLINE)
    ========================================== */
 #top-time-container {
     position: absolute;
@@ -265,29 +272,6 @@
     letter-spacing: 0.5px;
     text-align: center;
     white-space: nowrap;
-}
-
-/* ==========================================
-   DESKTOP RESPONSIVE EXTENSION (>= 1024px)
-   ========================================== */
-@media (min-width: 1024px) {
-    #top-time-container {
-        top: 7px;
-        left: 180px;
-        transform: none;
-        background: transparent;
-        border: none;
-        box-shadow: none;
-        padding: 0;
-        display: flex;
-        align-items: center;
-        height: 50px;
-    }
-
-    .clock-display {
-        font-size: 15px;
-        color: #94a3b8;
-    }
 }
 
 /* ==========================================
@@ -417,21 +401,22 @@
    ========================================== */
 @media (min-width: 1024px) {
     #top-time-container {
-        top: 7px;
-        left: 180px;
+        position: static;
         transform: none;
         background: transparent;
         border: none;
         box-shadow: none;
-        padding: 0;
+        padding: 0 0 0 15px;
+        margin-left: 10px;
+        border-left: 1px solid rgba(255, 255, 255, 0.15);
         display: flex;
         align-items: center;
-        height: 50px;
     }
 
     .clock-display {
-        font-size: 15px;
+        font-size: 14px;
         color: #94a3b8;
+        text-align: left;
     }
 
     #timeline-container {
