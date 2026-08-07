@@ -56,10 +56,32 @@ async function renderFrame(globalIdx) {
     }
 }
 
-// 🌟 Initialize UI listeners & register GPU redraw callback
+// Initialize UI listeners & register GPU redraw callback
 initViewerUI((stepIndex) => {
     if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
     renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
+});
+
+// Wire up Model Run Selector buttons (00z, 06z, 12z, 18z)
+document.querySelectorAll('.run-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+        document.querySelectorAll('.run-btn').forEach(b => b.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        const selectedRun = e.currentTarget.getAttribute('data-run');
+        
+        showToast(`Loading ${selectedRun} run...`);
+        try {
+            // If your backend supports passing the run parameter, update fetchManifest accordingly:
+            // e.g., await fetchManifest(selectedRun);
+            // For now, this cleanly hooks up the state change & UI feedback:
+            stateManager.activeModelRun = selectedRun;
+            
+            // Reload/re-render logic can go here if tied to manifest re-fetching
+            hideToast();
+        } catch (err) {
+            showToast('❌ Failed to load ' + selectedRun);
+        }
+    });
 });
 
 map.on('load', async () => {
@@ -77,7 +99,7 @@ map.on('load', async () => {
         await renderFrame(0);
         hideToast();
 
-        // 🌟 Initialize the home hub screen sequence once the map is painted
+        // Initialize the home hub screen sequence once the map is painted
         initHubTransition();
 
         // Preload next chunk if present
