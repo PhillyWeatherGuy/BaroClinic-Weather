@@ -1,5 +1,5 @@
 export const stateManager = {
-    BASE_URL: 'https://phillyweatherguy.github.io/BaroClinic-Weather---Backend/run_conus/',
+    BASE_URL: 'https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/', 
     manifest: null,
     loadedChunkBitmaps: [],
     globalSteps: [],
