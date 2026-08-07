@@ -414,22 +414,33 @@
     }
 
     .clock-display {
-        font-size: 18px; /* Increased for better visibility */
+        font-size: 18px; 
         color: #38bdf8; 
         text-align: left;
         letter-spacing: 1px;
-        text-shadow: 0 0 8px rgba(56, 189, 248, 0.4); /* Added glow to pop against dark background */
+        text-shadow: 0 0 8px rgba(56, 189, 248, 0.4); 
     }
 
     #timeline-container {
         flex-direction: row;
-        width: 75%; /* Increased from 60% for a much wider presence */
-        max-width: 1200px; /* Raised upper limit */
-        min-width: 800px; /* Raised lower limit so it doesn't compress the slider */
+        width: 75%; 
+        max-width: 1200px; 
+        min-width: 800px; 
         padding: 12px 24px;
         border-radius: 24px;
         gap: 20px;
         bottom: 30px;
+    }
+
+    .timeline-controls {
+        width: auto;
+        min-width: 280px; /* Keeps the empty space on the left for future buttons */
+        justify-content: flex-end; /* Snaps the buttons right next to the slider */
+    }
+    
+    .timeline-slider-wrapper {
+        width: auto;
+        flex: 1; /* Allows the slider to stretch and fill all that empty middle space */
     }
 
     .gif-btn {
