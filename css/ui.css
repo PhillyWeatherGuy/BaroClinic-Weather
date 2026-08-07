@@ -406,24 +406,26 @@
         background: transparent;
         border: none;
         box-shadow: none;
-        padding: 0 0 0 15px;
-        margin-left: 10px;
-        border-left: 1px solid rgba(255, 255, 255, 0.15);
+        padding: 0 0 0 18px;
+        margin-left: 12px;
+        border-left: 2px solid rgba(255, 255, 255, 0.2);
         display: flex;
         align-items: center;
     }
 
     .clock-display {
-        font-size: 16px; 
+        font-size: 18px; /* Increased for better visibility */
         color: #38bdf8; 
         text-align: left;
+        letter-spacing: 1px;
+        text-shadow: 0 0 8px rgba(56, 189, 248, 0.4); /* Added glow to pop against dark background */
     }
 
     #timeline-container {
         flex-direction: row;
-        width: 60%; /* Dynamically scale with the screen */
-        max-width: 1000px; /* Generous upper limit for ultra-wides */
-        min-width: 650px; /* Maintain minimum size for standard desktops */
+        width: 75%; /* Increased from 60% for a much wider presence */
+        max-width: 1200px; /* Raised upper limit */
+        min-width: 800px; /* Raised lower limit so it doesn't compress the slider */
         padding: 12px 24px;
         border-radius: 24px;
         gap: 20px;
