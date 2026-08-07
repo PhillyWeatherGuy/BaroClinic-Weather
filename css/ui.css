@@ -449,3 +449,47 @@
         font-size: 12px;
     }
 }
+
+/* ==========================================
+   MODEL RUN SELECTOR
+   ========================================== */
+.model-run-selector {
+    display: flex;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+}
+
+.run-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.run-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.run-btn.active {
+    background: rgba(56, 189, 248, 0.2);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+@media (min-width: 1024px) {
+    .run-btn {
+        font-size: 12px;
+        padding: 5px 10px;
+    }
+}
