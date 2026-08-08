@@ -11,6 +11,7 @@ let isLoaded = false;
 let overlayContainer = null;
 let mapInstance = null;
 
+// 🌟 Ultra-clean WeatherFront typography and drop shadows
 const style = document.createElement('style');
 style.textContent = `
     #city-temp-overlay-container {
@@ -47,14 +48,34 @@ style.textContent = `
         font-weight: 700;
         line-height: 1.1;
         letter-spacing: 0.5px;
-        color: #ffffff;
+        color: #f1f5f9;
         text-shadow: 0 0 3px #000, 0 1px 4px #000, 0 0 8px #000;
     }
 `;
 document.head.appendChild(style);
 
+/**
+ * 🌟 Hides native basemap city/town text to prevent double-text clutter
+ */
+function hideBasemapCityLabels(map) {
+    const style = map.getStyle();
+    if (!style || !style.layers) return;
+
+    style.layers.forEach(layer => {
+        const id = layer.id.toLowerCase();
+        if (layer.type === 'symbol' && (id.includes('place') || id.includes('settlement') || id.includes('city') || id.includes('town') || id.includes('village'))) {
+            try {
+                map.setLayoutProperty(layer.id, 'visibility', 'none');
+            } catch (e) {}
+        }
+    });
+}
+
 export async function initCityTempOverlay(map) {
     mapInstance = map;
+
+    // 🌟 Turn off MapTiler native city labels
+    hideBasemapCityLabels(map);
 
     if (!overlayContainer) {
         overlayContainer = document.createElement('div');
@@ -91,6 +112,9 @@ export async function initCityTempOverlay(map) {
     }
 }
 
+/**
+ * 🌟 Smart Screen Distance Filter: Positions DOM labels & prevents label collisions
+ */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
 
@@ -102,6 +126,7 @@ function updateCityPositions() {
     const south = bounds.getSouth();
     const north = bounds.getNorth();
 
+    // 1. Filter cities inside viewport
     let visible = allGlobalCities.filter(c => {
         if (zoom < c.minZoom) return false;
         if (c.lat < south || c.lat > north) return false;
@@ -109,11 +134,32 @@ function updateCityPositions() {
         return c.lng >= west || c.lng <= east;
     });
 
+    // 2. Sort by major rank priority
     visible.sort((a, b) => a.rank - b.rank);
-    activeCities = visible.slice(0, 50);
+
+    // 3. Screen-Space Distance Check (Prevents city labels from crowding each other)
+    const placedScreenPoints = [];
+    const minDistancePx = 38; // 38px spacing buffer
+    activeCities = [];
+
+    for (let i = 0; i < visible.length; i++) {
+        const city = visible[i];
+        const pos = mapInstance.project([city.lng, city.lat]);
+
+        // Check distance against already placed higher-priority cities
+        const collides = placedScreenPoints.some(pt => Math.hypot(pt.x - pos.x, pt.y - pos.y) < minDistancePx);
+
+        if (!collides) {
+            placedScreenPoints.push(pos);
+            city.screenPos = pos;
+            activeCities.push(city);
+            if (activeCities.length >= 45) break; // Max 45 labels visible at a time
+        }
+    }
 
     const activeSet = new Set(activeCities.map(c => c.name));
 
+    // Update DOM nodes
     activeCities.forEach(city => {
         let node = cityDOMNodes[city.name];
         if (!node) {
@@ -124,11 +170,11 @@ function updateCityPositions() {
             cityDOMNodes[city.name] = node;
         }
 
-        const pos = mapInstance.project([city.lng, city.lat]);
-        node.style.transform = `translate3d(${Math.round(pos.x)}px, ${Math.round(pos.y)}px, 0)`;
+        node.style.transform = `translate3d(${Math.round(city.screenPos.x)}px, ${Math.round(city.screenPos.y)}px, 0)`;
         node.style.display = 'block';
     });
 
+    // Hide non-visible or colliding cities
     for (const name in cityDOMNodes) {
         if (!activeSet.has(name)) {
             cityDOMNodes[name].style.display = 'none';
@@ -141,7 +187,7 @@ function updateCityPositions() {
 }
 
 /**
- * 🌟 0.0001ms INSTANT TEMPERATURE UPDATES via single-channel memory array
+ * 🌟 0.0001ms INSTANT TEMPERATURE UPDATES
  */
 export function updateCityTemperatures(map, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return;
@@ -178,7 +224,6 @@ export function updateCityTemperatures(map, activeFrameState, manifest) {
             const sheetX = activeFrameState.col * frameW + px;
             const sheetY = activeFrameState.row * frameH + py;
 
-            // Single-channel index lookup
             const pixelIdx = sheetY * sheetW + sheetX;
             const rawVal = pixelData[pixelIdx];
 
