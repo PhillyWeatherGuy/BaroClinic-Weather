@@ -1,17 +1,11 @@
 import { stateManager } from './stateManager.js';
 
-export async function fetchManifest(run = null) {
-    let url = stateManager.BASE_URL + 'manifest.json';
-    
-    // Construct endpoint query or path if a specific run was selected from dropdown
-    if (run && run.year && run.month && run.day && run.cycle) {
-        url = `${stateManager.BASE_URL}?year=${run.year}&month=${run.month}&day=${run.day}&cycle=${run.cycle}`;
-    }
-
-    const resp = await fetch(url);
+export async function fetchManifest() {
+    const resp = await fetch(stateManager.BASE_URL + 'manifest.json');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     stateManager.manifest = await resp.json();
     
+    // 🌟 ADDED THIS: Look for common time properties in your JSON and save to state
     stateManager.initTime = stateManager.manifest.init_time 
                          || stateManager.manifest.run_time 
                          || stateManager.manifest.base_time 
@@ -36,12 +30,7 @@ export async function fetchManifest(run = null) {
 
 export async function loadChunkBitmap(chunkIndex) {
     const chunk = stateManager.manifest.chunks[chunkIndex];
-    if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
-
-    const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-    const imgResp = await fetch(chunkUrl);
-    if (!imgResp.ok) throw new Error(`Failed to load chunk image: ${imgResp.status}`);
-
+    const imgResp = await fetch(stateManager.BASE_URL + chunk.file);
     const bitmap = await createImageBitmap(await imgResp.blob());
     stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
     return bitmap;
