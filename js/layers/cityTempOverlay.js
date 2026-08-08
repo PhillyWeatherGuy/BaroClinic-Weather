@@ -11,7 +11,7 @@ let isLoaded = false;
 let overlayContainer = null;
 let mapInstance = null;
 
-// 🌟 Ultra-clean WeatherFront typography and drop shadows
+// 🌟 Added city dot marker & cleaned up typography
 const style = document.createElement('style');
 style.textContent = `
     #city-temp-overlay-container {
@@ -29,12 +29,21 @@ style.textContent = `
         top: 0;
         left: 0;
         transform: translate3d(-50%, -50%, 0);
-        text-align: center;
-        font-family: 'Rajdhani', -apple-system, sans-serif;
-        text-transform: uppercase;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
         pointer-events: none;
         user-select: none;
         will-change: transform;
+    }
+    .city-dot {
+        width: 4px;
+        height: 4px;
+        background-color: #ffffff;
+        border-radius: 50%;
+        box-shadow: 0 0 4px #000, 0 0 8px #000;
+        margin: 1px 0;
     }
     .city-label-val {
         font-size: 15px;
@@ -44,7 +53,7 @@ style.textContent = `
         text-shadow: 0 0 3px #000, 0 1px 4px #000, 0 0 8px #000, 0 0 12px #000;
     }
     .city-label-name {
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 700;
         line-height: 1.1;
         letter-spacing: 0.5px;
@@ -55,7 +64,7 @@ style.textContent = `
 document.head.appendChild(style);
 
 /**
- * 🌟 Hides native basemap city/town text to prevent double-text clutter
+ * 🌟 Hides native basemap city, town, state, region, and country text labels
  */
 function hideBasemapCityLabels(map) {
     const style = map.getStyle();
@@ -63,7 +72,16 @@ function hideBasemapCityLabels(map) {
 
     style.layers.forEach(layer => {
         const id = layer.id.toLowerCase();
-        if (layer.type === 'symbol' && (id.includes('place') || id.includes('settlement') || id.includes('city') || id.includes('town') || id.includes('village'))) {
+        if (layer.type === 'symbol' && (
+            id.includes('place') || 
+            id.includes('settlement') || 
+            id.includes('city') || 
+            id.includes('town') || 
+            id.includes('village') ||
+            id.includes('state') ||
+            id.includes('country') ||
+            id.includes('region')
+        )) {
             try {
                 map.setLayoutProperty(layer.id, 'visibility', 'none');
             } catch (e) {}
@@ -74,7 +92,7 @@ function hideBasemapCityLabels(map) {
 export async function initCityTempOverlay(map) {
     mapInstance = map;
 
-    // 🌟 Turn off MapTiler native city labels
+    // 🌟 Turn off MapTiler native city & state labels
     hideBasemapCityLabels(map);
 
     if (!overlayContainer) {
@@ -113,7 +131,7 @@ export async function initCityTempOverlay(map) {
 }
 
 /**
- * 🌟 Smart Screen Distance Filter: Positions DOM labels & prevents label collisions
+ * 🌟 Position DOM nodes with city dots & screen-space collision checks
  */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
@@ -126,7 +144,6 @@ function updateCityPositions() {
     const south = bounds.getSouth();
     const north = bounds.getNorth();
 
-    // 1. Filter cities inside viewport
     let visible = allGlobalCities.filter(c => {
         if (zoom < c.minZoom) return false;
         if (c.lat < south || c.lat > north) return false;
@@ -134,47 +151,46 @@ function updateCityPositions() {
         return c.lng >= west || c.lng <= east;
     });
 
-    // 2. Sort by major rank priority
     visible.sort((a, b) => a.rank - b.rank);
 
-    // 3. Screen-Space Distance Check (Prevents city labels from crowding each other)
     const placedScreenPoints = [];
-    const minDistancePx = 38; // 38px spacing buffer
+    const minDistancePx = 38;
     activeCities = [];
 
     for (let i = 0; i < visible.length; i++) {
         const city = visible[i];
         const pos = mapInstance.project([city.lng, city.lat]);
 
-        // Check distance against already placed higher-priority cities
         const collides = placedScreenPoints.some(pt => Math.hypot(pt.x - pos.x, pt.y - pos.y) < minDistancePx);
 
         if (!collides) {
             placedScreenPoints.push(pos);
             city.screenPos = pos;
             activeCities.push(city);
-            if (activeCities.length >= 45) break; // Max 45 labels visible at a time
+            if (activeCities.length >= 45) break;
         }
     }
 
     const activeSet = new Set(activeCities.map(c => c.name));
 
-    // Update DOM nodes
     activeCities.forEach(city => {
         let node = cityDOMNodes[city.name];
         if (!node) {
             node = document.createElement('div');
             node.className = 'city-label-node';
-            node.innerHTML = `<div class="city-label-val">--°</div><div class="city-label-name">${city.name}</div>`;
+            node.innerHTML = `
+                <div class="city-label-val">--°</div>
+                <div class="city-dot"></div>
+                <div class="city-label-name">${city.name}</div>
+            `;
             overlayContainer.appendChild(node);
             cityDOMNodes[city.name] = node;
         }
 
         node.style.transform = `translate3d(${Math.round(city.screenPos.x)}px, ${Math.round(city.screenPos.y)}px, 0)`;
-        node.style.display = 'block';
+        node.style.display = 'flex';
     });
 
-    // Hide non-visible or colliding cities
     for (const name in cityDOMNodes) {
         if (!activeSet.has(name)) {
             cityDOMNodes[name].style.display = 'none';
