@@ -11,6 +11,9 @@ import {
     hideToast 
 } from './components/viewerUI.js';
 
+// 🌟 Import the City Temp Overlay Layer
+import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
+
 let customShaderLayer = null;
 let renderDebounceId = null;
 
@@ -47,7 +50,6 @@ async function renderFrame(globalIdx) {
     const chunkIdx = frameInfo.chunkIndex;
     const chunkInfo = stateManager.manifest.chunks[chunkIdx];
 
-    // 🌟 On-demand chunk loading if missing when scrubbing slider!
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
             showToast(`Loading forecast chunk ${chunkIdx + 1}...`);
@@ -74,6 +76,9 @@ async function renderFrame(globalIdx) {
     if (customShaderLayer) {
         customShaderLayer.updateFrame(stateManager.activeFrameState);
     }
+
+    // 🌟 Update City Temperatures on the map whenever a frame renders!
+    updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
 }
 
 initViewerUI((stepIndex) => {
@@ -85,6 +90,9 @@ map.on('load', async () => {
     try {
         await fetchManifest();
         initLayer();
+
+        // 🌟 Initialize City Temperature Overlay Layer
+        initCityTempOverlay(map);
 
         syncModelRunDropdown();
 
