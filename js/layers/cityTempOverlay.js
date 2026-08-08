@@ -11,7 +11,6 @@ let isLoaded = false;
 let overlayContainer = null;
 let mapInstance = null;
 
-// 🌟 Inject ultra-fast crisp WeatherFront CSS styles
 const style = document.createElement('style');
 style.textContent = `
     #city-temp-overlay-container {
@@ -54,9 +53,6 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-/**
- * Initializes DOM Overlay container & attaches map movement listeners
- */
 export async function initCityTempOverlay(map) {
     mapInstance = map;
 
@@ -66,7 +62,6 @@ export async function initCityTempOverlay(map) {
         map.getContainer().appendChild(overlayContainer);
     }
 
-    // 🌟 Reposition DOM labels smoothly during map pan / zoom / rotate
     map.on('move', updateCityPositions);
     map.on('zoom', updateCityPositions);
 
@@ -96,9 +91,6 @@ export async function initCityTempOverlay(map) {
     }
 }
 
-/**
- * Positions DOM labels over the map based on viewport bounds
- */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
 
@@ -110,7 +102,6 @@ function updateCityPositions() {
     const south = bounds.getSouth();
     const north = bounds.getNorth();
 
-    // Filter cities inside current viewport
     let visible = allGlobalCities.filter(c => {
         if (zoom < c.minZoom) return false;
         if (c.lat < south || c.lat > north) return false;
@@ -118,13 +109,11 @@ function updateCityPositions() {
         return c.lng >= west || c.lng <= east;
     });
 
-    // Prioritize major ranked cities (max ~50 visible at a time)
     visible.sort((a, b) => a.rank - b.rank);
     activeCities = visible.slice(0, 50);
 
     const activeSet = new Set(activeCities.map(c => c.name));
 
-    // Update or create DOM nodes for visible cities
     activeCities.forEach(city => {
         let node = cityDOMNodes[city.name];
         if (!node) {
@@ -140,7 +129,6 @@ function updateCityPositions() {
         node.style.display = 'block';
     });
 
-    // Hide non-visible cities
     for (const name in cityDOMNodes) {
         if (!activeSet.has(name)) {
             cityDOMNodes[name].style.display = 'none';
@@ -153,8 +141,7 @@ function updateCityPositions() {
 }
 
 /**
- * 🌟 0.0001ms ZERO-LATENCY INSTANT TEMPERATURE UPDATES
- * Updates DOM node text values directly on the main thread
+ * 🌟 0.0001ms INSTANT TEMPERATURE UPDATES via single-channel memory array
  */
 export function updateCityTemperatures(map, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return;
@@ -175,7 +162,6 @@ export function updateCityTemperatures(map, activeFrameState, manifest) {
     const minK = manifest.temp_min_k || 210.0;
     const maxK = manifest.temp_max_k || 330.0;
 
-    // Direct DOM text content update loop (0.0001ms execution time)
     for (let i = 0; i < activeCities.length; i++) {
         const city = activeCities[i];
         let normX = (city.lng + 180) / 360;
@@ -192,7 +178,8 @@ export function updateCityTemperatures(map, activeFrameState, manifest) {
             const sheetX = activeFrameState.col * frameW + px;
             const sheetY = activeFrameState.row * frameH + py;
 
-            const pixelIdx = (sheetY * sheetW + sheetX) * 4;
+            // Single-channel index lookup
+            const pixelIdx = sheetY * sheetW + sheetX;
             const rawVal = pixelData[pixelIdx];
 
             if (rawVal !== undefined) {
