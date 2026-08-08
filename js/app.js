@@ -5,6 +5,7 @@ import { initHubTransition } from './components/homeScreen.js';
 import { 
     initViewerUI, 
     syncTimelineWithManifest, 
+    syncModelRunDropdown,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
@@ -66,6 +67,9 @@ map.on('load', async () => {
     try {
         await fetchManifest();
         initLayer();
+
+        // 🌟 Re-sync dropdown with real initTime from Cloudflare manifest
+        syncModelRunDropdown();
 
         const bitmap0 = await loadChunkBitmap(0);
         customShaderLayer.preloadChunkTexture(0, bitmap0);
