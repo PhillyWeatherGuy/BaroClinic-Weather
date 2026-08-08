@@ -4,7 +4,7 @@ import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataL
 let onStepChangeCallback = null;
 let isPlaying = false;
 let playInterval = null;
-const PLAYBACK_SPEED_MS = 400; // Time per frame in milliseconds
+const PLAYBACK_SPEED_MS = 400;
 let shaderLayerRef = null;
 
 export function setShaderLayerReference(layer) {
@@ -46,7 +46,6 @@ export function initViewerUI(stepCallback) {
         });
     }
 
-    // 🌟 Navigation tab selection: Purges memory when navigating between pages/views
     navButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
             navButtons.forEach((b) => b.classList.remove('active'));
@@ -55,8 +54,8 @@ export function initViewerUI(stepCallback) {
             const targetMode = e.currentTarget.getAttribute('data-target');
             console.log(`[UI] Active view switched to: ${targetMode}`);
 
-            // 🛑 Purges memory when navigating away from model viewer
             if (targetMode !== 'modelViewer') {
+                if (isPlaying) pausePlayback();
                 showToast(`Switching view...`);
                 purgeAllAppMemory(shaderLayerRef);
             }
@@ -129,10 +128,14 @@ function initModelRunDropdown() {
             if (labelSpan) labelSpan.textContent = run.id;
             menu.style.display = 'none';
 
+            // 🛑 PAUSE PLAYBACK IMMEDIATELY
+            if (isPlaying) pausePlayback();
+
             showToast(`Unloading previous run data...`);
             
-            // 🛑 FULL SYSTEM MEMORY PURGE: Wipes 100% of RAM & WebGL VRAM
+            // 🛑 INSTANT MEMORY PURGE + GENERATION TOKEN INCREMENT
             purgeAllAppMemory(shaderLayerRef);
+            const thisGen = stateManager.loadGeneration;
 
             showToast(`Loading model run ${run.id}...`);
             try {
@@ -140,33 +143,37 @@ function initModelRunDropdown() {
                 
                 await fetchManifest(run); 
 
-                // 1. Load Chunk 0
-                const bitmap0 = await loadChunkBitmap(0);
-                if (shaderLayerRef) {
+                // 1. Load Chunk 0 safely with generation check
+                const bitmap0 = await loadChunkBitmap(0, thisGen);
+                if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
                     shaderLayerRef.preloadChunkTexture(0, bitmap0);
                 }
                 
-                // 2. Sync timeline min/max and reset index to F000
+                if (thisGen !== stateManager.loadGeneration) return;
+
                 syncTimelineWithManifest();
                 setStepIndex(0);
 
-                // 3. Render initial frame F000
                 if (typeof onStepChangeCallback === 'function') {
                     onStepChangeCallback(0, stateManager.globalSteps[0]);
                 }
 
                 hideToast();
 
-                // 4. Preload Chunk 1 in background
+                // 2. Preload Chunk 1 sequentially with generation check
                 if (stateManager.manifest.chunks && stateManager.manifest.chunks.length > 1) {
-                    loadChunkBitmap(1).then((bitmap1) => {
-                        if (shaderLayerRef) shaderLayerRef.preloadChunkTexture(1, bitmap1);
-                    }).catch(err => console.warn("Chunk 1 preload:", err));
+                    loadChunkBitmap(1, thisGen).then((bitmap1) => {
+                        if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
+                            shaderLayerRef.preloadChunkTexture(1, bitmap1);
+                        }
+                    }).catch(() => {});
                 }
 
             } catch (err) {
-                console.error(err);
-                showToast(`❌ Failed to load run ${run.id}`);
+                if (err.message !== "Load cancelled") {
+                    console.error(err);
+                    showToast(`❌ Failed to load run ${run.id}`);
+                }
             }
         });
 
