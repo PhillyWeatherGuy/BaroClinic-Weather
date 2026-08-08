@@ -11,7 +11,6 @@ import {
     hideToast 
 } from './components/viewerUI.js';
 
-// 🌟 Import the City Temp Overlay Layer
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
 
 let customShaderLayer = null;
@@ -50,16 +49,19 @@ async function renderFrame(globalIdx) {
     const chunkIdx = frameInfo.chunkIndex;
     const chunkInfo = stateManager.manifest.chunks[chunkIdx];
 
+    // On-demand fetch fallback if scrubbing ahead of background preloader
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
             showToast(`Loading forecast chunk ${chunkIdx + 1}...`);
-            const bitmap = await loadChunkBitmap(chunkIdx);
+            const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
             if (customShaderLayer) {
                 customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             }
             hideToast();
         } catch (err) {
-            console.error(`Error loading chunk ${chunkIdx}:`, err);
+            if (err.message !== "Load cancelled") {
+                console.error(`Error loading chunk ${chunkIdx}:`, err);
+            }
             return;
         }
     }
@@ -77,8 +79,33 @@ async function renderFrame(globalIdx) {
         customShaderLayer.updateFrame(stateManager.activeFrameState);
     }
 
-    // 🌟 Update City Temperatures on the map whenever a frame renders!
     updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
+}
+
+/**
+ * 🌟 SEQUENTIAL PRELOADER: Silently fetches ALL remaining chunks (1, 2, 3, 4...) in the background
+ */
+export async function preloadRemainingChunks(currentGen) {
+    if (!stateManager.manifest || !stateManager.manifest.chunks) return;
+    const totalChunks = stateManager.manifest.chunks.length;
+
+    for (let i = 1; i < totalChunks; i++) {
+        if (currentGen !== stateManager.loadGeneration) break; // Abort if user switched runs
+
+        if (!stateManager.loadedChunkBitmaps[i]) {
+            try {
+                const bitmap = await loadChunkBitmap(i, currentGen);
+                if (customShaderLayer && currentGen === stateManager.loadGeneration) {
+                    customShaderLayer.preloadChunkTexture(i, bitmap);
+                }
+            } catch (err) {
+                if (err.message !== "Load cancelled") {
+                    console.warn(`Background preload chunk ${i} paused:`, err);
+                }
+                break;
+            }
+        }
+    }
 }
 
 initViewerUI((stepIndex) => {
@@ -91,12 +118,10 @@ map.on('load', async () => {
         await fetchManifest();
         initLayer();
 
-        // 🌟 Initialize City Temperature Overlay Layer
         initCityTempOverlay(map);
-
         syncModelRunDropdown();
 
-        const bitmap0 = await loadChunkBitmap(0);
+        const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
         customShaderLayer.preloadChunkTexture(0, bitmap0);
 
         syncTimelineWithManifest();
@@ -106,11 +131,9 @@ map.on('load', async () => {
 
         initHubTransition();
 
-        if (stateManager.manifest.chunks.length > 1) {
-            loadChunkBitmap(1).then((bitmap1) => {
-                if (customShaderLayer) customShaderLayer.preloadChunkTexture(1, bitmap1);
-            });
-        }
+        // 🌟 Sequentially preloads ALL remaining chunks in the background!
+        preloadRemainingChunks(stateManager.loadGeneration);
+
     } catch (err) {
         showToast('❌ ' + err.message);
     }
