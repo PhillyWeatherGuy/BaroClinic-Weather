@@ -23,14 +23,14 @@ export function getMaxLoadedStepIndex() {
         if (stateManager.loadedChunkBitmaps[chunkIdx]) {
             maxIdx = i;
         } else {
-            break; // Stop at the first missing chunk!
+            break; // Stop at first missing chunk
         }
     }
     return maxIdx;
 }
 
 /**
- * 🌟 Updates the slider background gradient (Blue = Loaded, Red = Unloaded) and restricts scrub bounds
+ * 🌟 Updates slider background (Blue = Active, Dark = Loaded, Red = Unloaded)
  */
 export function updateSliderTrackAndBounds() {
     const slider = document.getElementById('timeline-slider');
@@ -45,14 +45,14 @@ export function updateSliderTrackAndBounds() {
     const currentPercent = (currentIdx / totalSteps) * 100;
     const loadedPercent = (maxLoadedIdx / totalSteps) * 100;
 
-    // Gradient: Blue (Active) -> Muted Blue (Loaded) -> Translucent Red (Unloaded)
+    // Clean Two-State Track: Active Sky Blue -> Dark Glass Track -> Translucent Red
     slider.style.background = `linear-gradient(to right, 
         #38bdf8 0%, 
         #38bdf8 ${currentPercent}%, 
-        rgba(56, 189, 248, 0.35) ${currentPercent}%, 
-        rgba(56, 189, 248, 0.35) ${loadedPercent}%, 
-        rgba(239, 68, 68, 0.5) ${loadedPercent}%, 
-        rgba(239, 68, 68, 0.5) 100%)`;
+        rgba(255, 255, 255, 0.15) ${currentPercent}%, 
+        rgba(255, 255, 255, 0.15) ${loadedPercent}%, 
+        rgba(239, 68, 68, 0.6) ${loadedPercent}%, 
+        rgba(239, 68, 68, 0.6) 100%)`;
 }
 
 export function initViewerUI(stepCallback) {
@@ -73,7 +73,7 @@ export function initViewerUI(stepCallback) {
             const maxLoadedIdx = getMaxLoadedStepIndex();
             let targetIndex = parseInt(e.target.value, 10);
 
-            // 🛑 Restrict slider from dragging past loaded chunks into the red zone
+            // 🛑 Lock slider from dragging into the red unloaded section
             if (targetIndex > maxLoadedIdx) {
                 targetIndex = maxLoadedIdx;
                 slider.value = maxLoadedIdx.toString();
@@ -250,7 +250,6 @@ export function startPlayback() {
         const maxLoadedIdx = getMaxLoadedStepIndex();
         let nextIndex = stateManager.currentStepIndex + 1;
 
-        // Loop back to 0 if full run is loaded, or wait at max loaded frame
         if (nextIndex > maxLoadedIdx) {
             if (maxLoadedIdx === stateManager.globalSteps.length - 1) {
                 nextIndex = 0;
