@@ -1,5 +1,6 @@
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
+import { preloadRemainingChunks } from '../app.js';
 
 let onStepChangeCallback = null;
 let isPlaying = false;
@@ -128,12 +129,10 @@ function initModelRunDropdown() {
             if (labelSpan) labelSpan.textContent = run.id;
             menu.style.display = 'none';
 
-            // 🛑 PAUSE PLAYBACK IMMEDIATELY
             if (isPlaying) pausePlayback();
 
             showToast(`Unloading previous run data...`);
             
-            // 🛑 INSTANT MEMORY PURGE + GENERATION TOKEN INCREMENT
             purgeAllAppMemory(shaderLayerRef);
             const thisGen = stateManager.loadGeneration;
 
@@ -143,7 +142,6 @@ function initModelRunDropdown() {
                 
                 await fetchManifest(run); 
 
-                // 1. Load Chunk 0 safely with generation check
                 const bitmap0 = await loadChunkBitmap(0, thisGen);
                 if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
                     shaderLayerRef.preloadChunkTexture(0, bitmap0);
@@ -160,14 +158,8 @@ function initModelRunDropdown() {
 
                 hideToast();
 
-                // 2. Preload Chunk 1 sequentially with generation check
-                if (stateManager.manifest.chunks && stateManager.manifest.chunks.length > 1) {
-                    loadChunkBitmap(1, thisGen).then((bitmap1) => {
-                        if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
-                            shaderLayerRef.preloadChunkTexture(1, bitmap1);
-                        }
-                    }).catch(() => {});
-                }
+                // 🌟 Preload ALL remaining chunks in background for the new run!
+                preloadRemainingChunks(thisGen);
 
             } catch (err) {
                 if (err.message !== "Load cancelled") {
