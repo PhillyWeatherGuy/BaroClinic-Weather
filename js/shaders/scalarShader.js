@@ -107,6 +107,20 @@ export function createScalarShaderLayer(mapInstance) {
         activeTex: null,
         uvOffset: [0, 0],
         uvScale: [1, 1],
+
+        /**
+         * 🌟 VRAM MEMORY CLEANUP: Deletes WebGL textures from the GPU card directly
+         */
+        clearTextures: function() {
+            if (!this.gl) return;
+            for (const key in this.chunkTextures) {
+                if (this.chunkTextures[key]) {
+                    this.gl.deleteTexture(this.chunkTextures[key]);
+                }
+            }
+            this.chunkTextures = {};
+            this.activeTex = null;
+        },
         
         onAdd: function (map, gl) {
             this.gl = gl;
