@@ -196,14 +196,3 @@ export function createScalarShaderLayer(mapInstance) {
         }
     };
 }
-// Add inside return { ... } in createScalarShaderLayer:
-clearTextures: function() {
-    if (!this.gl) return;
-    for (const key in this.chunkTextures) {
-        if (this.chunkTextures[key]) {
-            this.gl.deleteTexture(this.chunkTextures[key]);
-        }
-    }
-    this.chunkTextures = {};
-    this.activeTex = null;
-},
