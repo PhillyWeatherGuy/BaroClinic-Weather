@@ -9,7 +9,7 @@ let cityMarkers = {};
 let isLoaded = false;
 let mapInstance = null;
 
-// 🌟 Minimalist Dot-Free Typography Layout
+// 🌟 Scaled up 21px / 13px typography with expanded black halos
 const style = document.createElement('style');
 style.textContent = `
     .city-label-node {
@@ -23,21 +23,21 @@ style.textContent = `
         text-transform: uppercase;
     }
     .city-label-val {
-        font-size: 18px;
+        font-size: 21px;
         font-weight: 800;
         line-height: 1;
         letter-spacing: -0.5px;
         color: #ffffff;
-        text-shadow: 0 0 3px #000, 0 1px 5px #000, 0 0 8px #000, 0 0 14px #000;
+        text-shadow: 0 0 4px #000, 0 1px 6px #000, 0 0 10px #000, 0 0 16px #000;
     }
     .city-label-name {
-        font-size: 11px;
+        font-size: 13px;
         font-weight: 700;
         line-height: 1.1;
         letter-spacing: 0.5px;
         color: #f1f5f9;
-        text-shadow: 0 0 3px #000, 0 1px 4px #000, 0 0 8px #000;
-        margin-top: 1px;
+        text-shadow: 0 0 3px #000, 0 1px 4px #000, 0 0 10px #000;
+        margin-top: 2px;
     }
 `;
 document.head.appendChild(style);
@@ -110,7 +110,7 @@ export async function initCityTempOverlay(map) {
 }
 
 /**
- * 🌟 Population-Ranked Screen Collision System
+ * 🌟 Population-Ranked Screen Collision System with Expanded 52px Spacing
  */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
@@ -133,7 +133,7 @@ function updateCityPositions() {
     visible.sort((a, b) => b.pop - a.pop);
 
     const placedScreenPoints = [];
-    const minDistancePx = 40;
+    const minDistancePx = 52; // 🌟 Expanded 52px breathing room buffer
     activeCities = [];
 
     for (let i = 0; i < visible.length; i++) {
@@ -145,7 +145,7 @@ function updateCityPositions() {
         if (!collides) {
             placedScreenPoints.push(pos);
             activeCities.push(city);
-            if (activeCities.length >= 45) break;
+            if (activeCities.length >= 40) break; // Max 40 spaced-out labels visible
         }
     }
 
