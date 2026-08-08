@@ -42,14 +42,11 @@ export function updateSliderTrackAndBounds() {
     const maxLoadedIdx = getMaxLoadedStepIndex();
     const currentIdx = stateManager.currentStepIndex;
 
-    const currentPercent = (currentIdx / totalSteps) * 100;
     const loadedPercent = (maxLoadedIdx / totalSteps) * 100;
 
-    // Clean Two-State Track: Active Sky Blue -> Dark Glass Track -> Translucent Red
+    // 🌟 Dark Glass Track for loaded region -> Red for unloaded region
     slider.style.background = `linear-gradient(to right, 
-        #38bdf8 0%, 
-        #38bdf8 ${currentPercent}%, 
-        rgba(255, 255, 255, 0.15) ${currentPercent}%, 
+        rgba(255, 255, 255, 0.15) 0%, 
         rgba(255, 255, 255, 0.15) ${loadedPercent}%, 
         rgba(239, 68, 68, 0.6) ${loadedPercent}%, 
         rgba(239, 68, 68, 0.6) 100%)`;
