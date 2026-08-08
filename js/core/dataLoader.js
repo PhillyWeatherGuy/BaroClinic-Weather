@@ -35,7 +35,12 @@ export async function fetchManifest(run = null) {
     return stateManager.manifest;
 }
 
-export async function loadChunkBitmap(chunkIndex) {
+export async function loadChunkBitmap(chunkIndex, currentGen = null) {
+    // 🌟 Cancel if a new run was selected
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        throw new Error("Load cancelled");
+    }
+
     const chunk = stateManager.manifest.chunks[chunkIndex];
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
@@ -43,25 +48,52 @@ export async function loadChunkBitmap(chunkIndex) {
     const imgResp = await fetch(chunkUrl);
     if (!imgResp.ok) throw new Error(`Failed to load chunk image: ${imgResp.status}`);
 
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        throw new Error("Load cancelled");
+    }
+
     const blob = await imgResp.blob();
     const bitmap = await createImageBitmap(blob);
+
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        bitmap.close();
+        throw new Error("Load cancelled");
+    }
+
     stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
 
-    // Extract raw pixel Uint8Array ONCE when chunk loads
-    const offCanvas = document.createElement('canvas');
+    // 🌟 75% LIGHTER MEMORY: Extract 67 MB single-channel Uint8Array instead of 268 MB RGBA
+    let offCanvas = document.createElement('canvas');
     offCanvas.width = bitmap.width;
     offCanvas.height = bitmap.height;
-    const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+    let offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
     offCtx.drawImage(bitmap, 0, 0);
-    stateManager.chunkPixelData[chunkIndex] = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+
+    const rgba = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const singleChannel = new Uint8Array(bitmap.width * bitmap.height);
+
+    for (let i = 0; i < singleChannel.length; i++) {
+        singleChannel[i] = rgba[i * 4]; // Extract Red channel luminance
+    }
+
+    stateManager.chunkPixelData[chunkIndex] = singleChannel;
+
+    // Release temporary canvas memory
+    offCanvas.width = 0;
+    offCanvas.height = 0;
+    offCanvas = null;
+    offCtx = null;
 
     return bitmap;
 }
 
 /**
- * 🌟 UNIFIED APP MEMORY PURGER: Wipes 100% of RAM, VRAM, and Global Caches
+ * 🌟 UNIFIED APP MEMORY PURGER: Immediately aborts stale loads & wipes VRAM
  */
 export function purgeAllAppMemory(shaderLayerRef = null) {
+    // Increment generation token to instantly cancel all pending loads
+    stateManager.loadGeneration++;
+
     // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
         const bitmap = stateManager.loadedChunkBitmaps[key];
@@ -71,7 +103,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
     }
     stateManager.loadedChunkBitmaps = {};
 
-    // 2. Clear raw city temperature pixel memory arrays
+    // 2. Clear raw city temperature pixel memory
     stateManager.chunkPixelData = {};
 
     // 3. Delete WebGL textures from GPU VRAM
@@ -79,7 +111,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
         shaderLayerRef.clearTextures();
     }
 
-    // 4. Clear global state references
+    // 4. Clear state references
     stateManager.manifest = null;
     stateManager.globalSteps = [];
     stateManager.currentStepIndex = 0;
