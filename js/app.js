@@ -7,6 +7,7 @@ import {
     syncTimelineWithManifest, 
     syncModelRunDropdown,
     setShaderLayerReference,
+    updateSliderTrackAndBounds,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
@@ -49,19 +50,15 @@ async function renderFrame(globalIdx) {
     const chunkIdx = frameInfo.chunkIndex;
     const chunkInfo = stateManager.manifest.chunks[chunkIdx];
 
-    // On-demand fetch fallback if scrubbing ahead of background preloader
+    // Fallback load if bitmap missing
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
-            showToast(`Loading forecast chunk ${chunkIdx + 1}...`);
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
             if (customShaderLayer) {
                 customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             }
-            hideToast();
+            updateSliderTrackAndBounds();
         } catch (err) {
-            if (err.message !== "Load cancelled") {
-                console.error(`Error loading chunk ${chunkIdx}:`, err);
-            }
             return;
         }
     }
@@ -83,14 +80,14 @@ async function renderFrame(globalIdx) {
 }
 
 /**
- * 🌟 SEQUENTIAL PRELOADER: Silently fetches ALL remaining chunks (1, 2, 3, 4...) in the background
+ * 🌟 SEQUENTIAL PRELOADER: Updates slider red/blue progress as each chunk finishes downloading
  */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
     const totalChunks = stateManager.manifest.chunks.length;
 
     for (let i = 1; i < totalChunks; i++) {
-        if (currentGen !== stateManager.loadGeneration) break; // Abort if user switched runs
+        if (currentGen !== stateManager.loadGeneration) break;
 
         if (!stateManager.loadedChunkBitmaps[i]) {
             try {
@@ -98,6 +95,8 @@ export async function preloadRemainingChunks(currentGen) {
                 if (customShaderLayer && currentGen === stateManager.loadGeneration) {
                     customShaderLayer.preloadChunkTexture(i, bitmap);
                 }
+                // 🌟 Dynamically turns red section blue on timeline slider!
+                updateSliderTrackAndBounds();
             } catch (err) {
                 if (err.message !== "Load cancelled") {
                     console.warn(`Background preload chunk ${i} paused:`, err);
@@ -131,7 +130,6 @@ map.on('load', async () => {
 
         initHubTransition();
 
-        // 🌟 Sequentially preloads ALL remaining chunks in the background!
         preloadRemainingChunks(stateManager.loadGeneration);
 
     } catch (err) {
