@@ -19,7 +19,7 @@ export function initViewerUI(stepCallback) {
     const nextBtn = document.getElementById('btn-next');
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
 
-    // 1. Initialize Model Run Dropdown cleanly using stateManager.initTime as source of truth
+    // 1. Initialize Model Run Dropdown
     initModelRunDropdown();
 
     // 2. Timeline Slider scrubbing listener
@@ -64,6 +64,13 @@ export function initViewerUI(stepCallback) {
 }
 
 /**
+ * Public function to sync/re-populate the dropdown once stateManager.initTime is loaded from manifest.json
+ */
+export function syncModelRunDropdown() {
+    initModelRunDropdown();
+}
+
+/**
  * Generates and populates the past 7 days of model runs. It directly reads stateManager.initTime 
  * to align the latest available run (e.g. 12Z), passes run parameters to fetchManifest, and unloads/loads properly.
  */
@@ -74,7 +81,7 @@ function initModelRunDropdown() {
 
     if (!toggleBtn || !menu) return;
 
-    // 1. Precise Anchor: Rely entirely on stateManager.initTime if loaded, otherwise fallback to current UTC time
+    // 1. Precise Anchor: Rely entirely on stateManager.initTime if loaded from Cloudflare manifest
     let anchorDate = null;
     if (stateManager.initTime) {
         let baseStr = stateManager.initTime;
@@ -113,6 +120,11 @@ function initModelRunDropdown() {
         currentDate.setUTCHours(currentDate.getUTCHours() - 6);
     }
 
+    // Set the button label to match the latest actual run
+    if (runs.length > 0 && labelSpan) {
+        labelSpan.textContent = runs[0].id;
+    }
+
     // Populate dropdown HTML list
     menu.innerHTML = '';
     runs.forEach((run, index) => {
@@ -120,10 +132,6 @@ function initModelRunDropdown() {
         item.className = `run-dropdown-item ${index === 0 ? 'active' : ''}`;
         item.setAttribute('data-run', run.id);
         item.innerHTML = `<span>Run Time: ${run.id}</span><span class="check-icon">✓</span>`;
-        
-        if (index === 0 && labelSpan && !labelSpan.textContent.trim()) {
-            labelSpan.textContent = run.id;
-        }
 
         item.addEventListener('click', async () => {
             document.querySelectorAll('.run-dropdown-item').forEach(el => el.classList.remove('active'));
@@ -136,7 +144,7 @@ function initModelRunDropdown() {
             // 🛑 UNLOAD: Purge state completely to prevent memory bloat/stale data
             stateManager.manifest = null;
             stateManager.globalSteps = [];
-            stateManager.loadedChunkBitmaps = {};
+            stateManager.loadedChunkBitmaps = [];
             stateManager.currentStepIndex = 0;
             stateManager.activeFrameState = null;
             stateManager.initTime = null;
@@ -145,16 +153,12 @@ function initModelRunDropdown() {
             try {
                 stateManager.activeModelRun = run.id;
                 
-                // Pass the specific run details object so dataLoader fetches the exact requested run endpoint
                 await fetchManifest(run); 
 
-                // Load initial chunk on demand
                 await loadChunkBitmap(0);
                 
-                // Sync timeline bounds
                 syncTimelineWithManifest();
 
-                // Trigger callback for step 0
                 if (typeof onStepChangeCallback === 'function') {
                     onStepChangeCallback(0, stateManager.globalSteps[0]);
                 }
@@ -169,17 +173,15 @@ function initModelRunDropdown() {
         menu.appendChild(item);
     });
 
-    // Toggle menu display on click
-    toggleBtn.addEventListener('click', (e) => {
+    toggleBtn.onclick = (e) => {
         e.stopPropagation();
         const isVisible = menu.style.display === 'block';
         menu.style.display = isVisible ? 'none' : 'block';
-    });
+    };
 
-    // Close dropdown when clicking outside
-    document.addEventListener('click', () => {
+    document.onclick = () => {
         menu.style.display = 'none';
-    });
+    };
 }
 
 /**
