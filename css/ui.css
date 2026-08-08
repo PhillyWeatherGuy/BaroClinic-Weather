@@ -315,10 +315,39 @@
     width: 100%;
 }
 
+/* Replace the #timeline-slider section in css/ui.css with this: */
 #timeline-slider { 
     flex: 1; 
     accent-color: #38bdf8; 
     cursor: pointer; 
+    height: 6px;
+    border-radius: 4px;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+    background: rgba(239, 68, 68, 0.5); /* Default red for unloaded track */
+    transition: background 0.15s ease;
+}
+
+#timeline-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #38bdf8;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+}
+
+#timeline-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #38bdf8;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+    border: none;
 }
 
 #time-label { 
