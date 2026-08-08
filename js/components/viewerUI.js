@@ -1,15 +1,16 @@
 import { stateManager } from '../core/stateManager.js';
-import { fetchManifest, loadChunkBitmap } from '../core/dataLoader.js';
+import { fetchManifest, loadChunkBitmap, purgeLoadedBitmaps } from '../core/dataLoader.js';
 
 let onStepChangeCallback = null;
 let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 400; // Time per frame in milliseconds
+let shaderLayerRef = null;
 
-/**
- * Initializes listeners for the timeline slider, play/pause controls, top navigation, UI overlays, and model run dropdown.
- * @param {Function} stepCallback - Callback function executed when step changes
- */
+export function setShaderLayerReference(layer) {
+    shaderLayerRef = layer;
+}
+
 export function initViewerUI(stepCallback) {
     onStepChangeCallback = stepCallback;
 
@@ -19,10 +20,8 @@ export function initViewerUI(stepCallback) {
     const nextBtn = document.getElementById('btn-next');
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
 
-    // 1. Initialize Model Run Dropdown
     initModelRunDropdown();
 
-    // 2. Timeline Slider scrubbing listener
     if (slider) {
         slider.addEventListener('input', (e) => {
             if (isPlaying) pausePlayback();
@@ -31,12 +30,8 @@ export function initViewerUI(stepCallback) {
         });
     }
 
-    // 3. Play / Pause button toggle
-    if (playBtn) {
-        playBtn.addEventListener('click', togglePlayback);
-    }
+    if (playBtn) playBtn.addEventListener('click', togglePlayback);
 
-    // 4. Step Forward / Backward buttons
     if (prevBtn) {
         prevBtn.addEventListener('click', () => {
             if (isPlaying) pausePlayback();
@@ -51,7 +46,6 @@ export function initViewerUI(stepCallback) {
         });
     }
 
-    // 5. Navigation tab selection listener
     navButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
             navButtons.forEach((b) => b.classList.remove('active'));
@@ -63,17 +57,10 @@ export function initViewerUI(stepCallback) {
     });
 }
 
-/**
- * Public function to sync/re-populate the dropdown once stateManager.initTime is loaded from manifest.json
- */
 export function syncModelRunDropdown() {
     initModelRunDropdown();
 }
 
-/**
- * Generates and populates the past 7 days of model runs. It directly reads stateManager.initTime 
- * to align the latest available run (e.g. 12Z), passes run parameters to fetchManifest, and unloads/loads properly.
- */
 function initModelRunDropdown() {
     const toggleBtn = document.getElementById('model-run-toggle');
     const menu = document.getElementById('model-run-menu');
@@ -81,7 +68,6 @@ function initModelRunDropdown() {
 
     if (!toggleBtn || !menu) return;
 
-    // 1. Precise Anchor: Rely entirely on stateManager.initTime if loaded from Cloudflare manifest
     let anchorDate = null;
     if (stateManager.initTime) {
         let baseStr = stateManager.initTime;
@@ -101,7 +87,6 @@ function initModelRunDropdown() {
     const runs = [];
     let currentDate = new Date(anchorDate.getTime());
 
-    // 2. Generate 7 days * 4 cycles/day = 28 runs backward from anchor
     for (let i = 0; i < 28; i++) {
         const runHour = String(currentDate.getUTCHours()).padStart(2, '0') + 'Z';
         const options = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' };
@@ -120,12 +105,10 @@ function initModelRunDropdown() {
         currentDate.setUTCHours(currentDate.getUTCHours() - 6);
     }
 
-    // Set the button label to match the latest actual run
     if (runs.length > 0 && labelSpan) {
         labelSpan.textContent = runs[0].id;
     }
 
-    // Populate dropdown HTML list
     menu.innerHTML = '';
     runs.forEach((run, index) => {
         const item = document.createElement('button');
@@ -141,10 +124,14 @@ function initModelRunDropdown() {
 
             showToast(`Unloading previous run data...`);
             
-            // 🛑 UNLOAD: Purge state completely to prevent memory bloat/stale data
+            // 🛑 FULL MEMORY PURGE: Clears RAM & WebGL VRAM
+            purgeLoadedBitmaps();
+            if (shaderLayerRef && typeof shaderLayerRef.clearTextures === 'function') {
+                shaderLayerRef.clearTextures();
+            }
+
             stateManager.manifest = null;
             stateManager.globalSteps = [];
-            stateManager.loadedChunkBitmaps = [];
             stateManager.currentStepIndex = 0;
             stateManager.activeFrameState = null;
             stateManager.initTime = null;
@@ -155,7 +142,10 @@ function initModelRunDropdown() {
                 
                 await fetchManifest(run); 
 
-                await loadChunkBitmap(0);
+                const bitmap0 = await loadChunkBitmap(0);
+                if (shaderLayerRef) {
+                    shaderLayerRef.preloadChunkTexture(0, bitmap0);
+                }
                 
                 syncTimelineWithManifest();
 
@@ -184,15 +174,9 @@ function initModelRunDropdown() {
     };
 }
 
-/**
- * Toggles the forecast animation loop.
- */
 export function togglePlayback() {
-    if (isPlaying) {
-        pausePlayback();
-    } else {
-        startPlayback();
-    }
+    if (isPlaying) pausePlayback();
+    else startPlayback();
 }
 
 export function startPlayback() {
@@ -203,11 +187,7 @@ export function startPlayback() {
 
     playInterval = setInterval(() => {
         let nextIndex = stateManager.currentStepIndex + 1;
-        
-        if (nextIndex >= stateManager.globalSteps.length) {
-            nextIndex = 0;
-        }
-        
+        if (nextIndex >= stateManager.globalSteps.length) nextIndex = 0;
         setStepIndex(nextIndex);
     }, PLAYBACK_SPEED_MS);
 }
@@ -221,9 +201,6 @@ export function pausePlayback() {
     updatePlayPauseUI();
 }
 
-/**
- * Steps forward (+1) or backward (-1) relative to current index.
- */
 function stepRelative(delta) {
     if (!stateManager.globalSteps) return;
     const maxIndex = stateManager.globalSteps.length - 1;
@@ -245,9 +222,6 @@ function updatePlayPauseUI() {
     }
 }
 
-/**
- * Synchronizes the slider min, max, and current value after the manifest is fetched.
- */
 export function syncTimelineWithManifest() {
     const slider = document.getElementById('timeline-slider');
     const stepsCount = stateManager.globalSteps ? stateManager.globalSteps.length : 0;
@@ -261,10 +235,6 @@ export function syncTimelineWithManifest() {
     updateTimeLabel(stateManager.currentStepIndex);
 }
 
-/**
- * Sets the current step index, updates UI display, and fires the frame update callback.
- * @param {number} index - Global step array index
- */
 export function setStepIndex(index) {
     if (!stateManager.globalSteps || index < 0 || index >= stateManager.globalSteps.length) return;
 
@@ -280,9 +250,6 @@ export function setStepIndex(index) {
     }
 }
 
-/**
- * Formats and updates the #time-label text and forecast valid local clock display.
- */
 function updateTimeLabel(index) {
     const label = document.getElementById('time-label');
     const stepData = stateManager.globalSteps ? stateManager.globalSteps[index] : null;
@@ -299,13 +266,9 @@ function updateTimeLabel(index) {
     }
 
     if (label) label.textContent = `${formattedStep}`;
-
     updateForecastClock(stepData);
 }
 
-/**
- * Calculates the forecast frame's valid local time from a UTC base time.
- */
 function updateForecastClock(stepData) {
     const appClock = document.getElementById('app-clock');
 
