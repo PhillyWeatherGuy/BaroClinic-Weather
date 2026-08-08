@@ -5,11 +5,11 @@ const GLOBAL_CITIES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vec
 
 let allGlobalCities = [];
 let activeCities = [];
-let cityMarkers = {}; // Stores native MapLibre Marker instances
+let cityMarkers = {};
 let isLoaded = false;
 let mapInstance = null;
 
-// 🌟 Clean WeatherFront typography
+// 🌟 Bigger typography & enhanced black halos
 const style = document.createElement('style');
 style.textContent = `
     .city-label-node {
@@ -23,22 +23,23 @@ style.textContent = `
         text-transform: uppercase;
     }
     .city-dot {
-        width: 4px;
-        height: 4px;
+        width: 5px;
+        height: 5px;
         background-color: #ffffff;
         border-radius: 50%;
         box-shadow: 0 0 4px #000, 0 0 8px #000;
-        margin: 1px 0;
+        margin: 2px 0;
     }
     .city-label-val {
-        font-size: 15px;
+        font-size: 18px;
         font-weight: 800;
         line-height: 1;
+        letter-spacing: -0.5px;
         color: #ffffff;
-        text-shadow: 0 0 3px #000, 0 1px 4px #000, 0 0 8px #000, 0 0 12px #000;
+        text-shadow: 0 0 3px #000, 0 1px 5px #000, 0 0 8px #000, 0 0 14px #000;
     }
     .city-label-name {
-        font-size: 10px;
+        font-size: 12px;
         font-weight: 700;
         line-height: 1.1;
         letter-spacing: 0.5px;
@@ -48,9 +49,6 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-/**
- * 🌟 Hides native basemap text layers
- */
 function hideBasemapCityLabels(map) {
     const style = map.getStyle();
     if (!style || !style.layers) return;
@@ -87,14 +85,25 @@ export async function initCityTempOverlay(map) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
-        allGlobalCities = data.features.map((f, i) => ({
-            id: i,
-            name: f.properties.NAME || f.properties.name || f.properties.NAMEASCII,
-            lng: f.geometry.coordinates[0],
-            lat: f.geometry.coordinates[1],
-            rank: f.properties.SCALERANK ?? 10,
-            minZoom: f.properties.SCALERANK ? Math.max(3, f.properties.SCALERANK - 1) : 6
-        }));
+        allGlobalCities = data.features.map((f, i) => {
+            const pop = f.properties.POP_MAX || f.properties.pop_max || 0;
+            
+            // 🌟 Assign minimum zoom based on city population
+            let minZoom = 6;
+            if (pop >= 2000000) minZoom = 2;      // Mega Metros (NYC, LA, Chicago, Phoenix, Mexico City)
+            else if (pop >= 500000) minZoom = 4;  // Major Cities (Denver, Salt Lake, Seattle)
+            else if (pop >= 100000) minZoom = 5;  // Mid-size Cities (Trenton, Atlantic City)
+            else minZoom = 6;                     // Towns
+
+            return {
+                id: i,
+                name: f.properties.NAME || f.properties.name || f.properties.NAMEASCII,
+                lng: f.geometry.coordinates[0],
+                lat: f.geometry.coordinates[1],
+                pop: pop,
+                minZoom: minZoom
+            };
+        });
 
         isLoaded = true;
 
@@ -109,7 +118,7 @@ export async function initCityTempOverlay(map) {
 }
 
 /**
- * 🌟 ZERO-DRIFT PRECISION ANCHORING using native MapLibre Markers
+ * 🌟 Population-Ranked Screen Collision System
  */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
@@ -129,10 +138,11 @@ function updateCityPositions() {
         return c.lng >= west || c.lng <= east;
     });
 
-    visible.sort((a, b) => a.rank - b.rank);
+    // 🌟 Sort strictly by Population Descending (Highest population gets placed first!)
+    visible.sort((a, b) => b.pop - a.pop);
 
     const placedScreenPoints = [];
-    const minDistancePx = 38;
+    const minDistancePx = 42; // Buffer spacing for 18px text
     activeCities = [];
 
     for (let i = 0; i < visible.length; i++) {
@@ -150,7 +160,6 @@ function updateCityPositions() {
 
     const activeSet = new Set(activeCities.map(c => c.name));
 
-    // Create or show native MapLibre Markers
     activeCities.forEach(city => {
         let marker = cityMarkers[city.name];
         if (!marker) {
@@ -162,7 +171,6 @@ function updateCityPositions() {
                 <div class="city-label-name">${city.name}</div>
             `;
 
-            // 🌟 Native MapLibre Marker anchored precisely at [lng, lat] center
             marker = new maplibregl.Marker({
                 element: node,
                 anchor: 'center'
@@ -174,7 +182,6 @@ function updateCityPositions() {
         marker.getElement().style.display = 'flex';
     });
 
-    // Hide markers for non-visible cities
     for (const name in cityMarkers) {
         if (!activeSet.has(name)) {
             cityMarkers[name].getElement().style.display = 'none';
