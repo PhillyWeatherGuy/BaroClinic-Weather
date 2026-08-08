@@ -3,10 +3,9 @@ import { stateManager } from './stateManager.js';
 export async function fetchManifest(run = null) {
     let fileName = 'manifest.json';
     
-    // If a specific historical run is selected from dropdown:
     if (run && run.year && run.month && run.day && run.cycle) {
         const dateStr = `${run.year}${run.month}${run.day}`;
-        const cycleStr = run.cycle.toLowerCase(); // e.g. "12z"
+        const cycleStr = run.cycle.toLowerCase();
         fileName = `ecmwf_${dateStr}_${cycleStr}_manifest.json`;
     }
 
@@ -44,15 +43,26 @@ export async function loadChunkBitmap(chunkIndex) {
     const imgResp = await fetch(chunkUrl);
     if (!imgResp.ok) throw new Error(`Failed to load chunk image: ${imgResp.status}`);
 
-    const bitmap = await createImageBitmap(await imgResp.blob());
+    const blob = await imgResp.blob();
+    const bitmap = await createImageBitmap(blob);
     stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
+
+    // Extract raw pixel Uint8Array ONCE when chunk loads
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = bitmap.width;
+    offCanvas.height = bitmap.height;
+    const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+    offCtx.drawImage(bitmap, 0, 0);
+    stateManager.chunkPixelData[chunkIndex] = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+
     return bitmap;
 }
 
 /**
- * 🌟 MEMORY CLEANUP: Closes CPU/RAM image bitmaps immediately to prevent memory leaks
+ * 🌟 UNIFIED APP MEMORY PURGER: Wipes 100% of RAM, VRAM, and Global Caches
  */
-export function purgeLoadedBitmaps() {
+export function purgeAllAppMemory(shaderLayerRef = null) {
+    // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
         const bitmap = stateManager.loadedChunkBitmaps[key];
         if (bitmap && typeof bitmap.close === 'function') {
@@ -60,4 +70,23 @@ export function purgeLoadedBitmaps() {
         }
     }
     stateManager.loadedChunkBitmaps = {};
+
+    // 2. Clear raw city temperature pixel memory arrays
+    stateManager.chunkPixelData = {};
+
+    // 3. Delete WebGL textures from GPU VRAM
+    if (shaderLayerRef && typeof shaderLayerRef.clearTextures === 'function') {
+        shaderLayerRef.clearTextures();
+    }
+
+    // 4. Clear global state references
+    stateManager.manifest = null;
+    stateManager.globalSteps = [];
+    stateManager.currentStepIndex = 0;
+    stateManager.activeFrameState = null;
+    stateManager.initTime = null;
+
+    // 5. Clear overlay window caches
+    window.lastActiveFrameState = null;
+    window.lastManifest = null;
 }
