@@ -6,6 +6,7 @@ import {
     initViewerUI, 
     syncTimelineWithManifest, 
     syncModelRunDropdown,
+    setShaderLayerReference,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
@@ -24,6 +25,7 @@ const map = new maplibregl.Map({
 
 function initLayer() {
     customShaderLayer = createScalarShaderLayer(map);
+    setShaderLayerReference(customShaderLayer);
     
     let firstOverlayId = null;
     const layers = map.getStyle().layers || [];
@@ -37,17 +39,34 @@ function initLayer() {
 }
 
 async function renderFrame(globalIdx) {
-    if (!stateManager.manifest || stateManager.globalSteps.length === 0) return;
+    if (!stateManager.manifest || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
     
     const frameInfo = stateManager.globalSteps[globalIdx];
-    const chunkInfo = stateManager.manifest.chunks[frameInfo.chunkIndex];
-    if (!stateManager.loadedChunkBitmaps[frameInfo.chunkIndex]) return;
+    if (!frameInfo) return;
+
+    const chunkIdx = frameInfo.chunkIndex;
+    const chunkInfo = stateManager.manifest.chunks[chunkIdx];
+
+    // 🌟 On-demand chunk loading if missing when scrubbing slider!
+    if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
+        try {
+            showToast(`Loading forecast chunk ${chunkIdx + 1}...`);
+            const bitmap = await loadChunkBitmap(chunkIdx);
+            if (customShaderLayer) {
+                customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
+            }
+            hideToast();
+        } catch (err) {
+            console.error(`Error loading chunk ${chunkIdx}:`, err);
+            return;
+        }
+    }
 
     stateManager.activeFrameState = {
-        chunkIndex: frameInfo.chunkIndex,
+        chunkIndex: chunkIdx,
         col: frameInfo.col,
         row: frameInfo.row,
-        chunkImg: stateManager.loadedChunkBitmaps[frameInfo.chunkIndex],
+        chunkImg: stateManager.loadedChunkBitmaps[chunkIdx],
         uvOffset: [frameInfo.col / chunkInfo.columns, frameInfo.row / chunkInfo.rows],
         uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
     };
@@ -57,7 +76,6 @@ async function renderFrame(globalIdx) {
     }
 }
 
-// 🌟 Initialize UI listeners & register GPU redraw callback
 initViewerUI((stepIndex) => {
     if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
     renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
@@ -68,26 +86,21 @@ map.on('load', async () => {
         await fetchManifest();
         initLayer();
 
-        // 🌟 Re-sync dropdown with real initTime from Cloudflare manifest
         syncModelRunDropdown();
 
         const bitmap0 = await loadChunkBitmap(0);
         customShaderLayer.preloadChunkTexture(0, bitmap0);
 
-        // Sync slider min/max/value & label with manifest step length
         syncTimelineWithManifest();
 
-        // Render initial frame (F000)
         await renderFrame(0);
         hideToast();
 
-        // 🌟 Initialize the home hub screen sequence once the map is painted
         initHubTransition();
 
-        // Preload next chunk if present
         if (stateManager.manifest.chunks.length > 1) {
             loadChunkBitmap(1).then((bitmap1) => {
-                customShaderLayer.preloadChunkTexture(1, bitmap1);
+                if (customShaderLayer) customShaderLayer.preloadChunkTexture(1, bitmap1);
             });
         }
     } catch (err) {
