@@ -12,6 +12,49 @@ export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
 }
 
+/**
+ * 🌟 Returns the highest step index whose chunk bitmap is currently loaded
+ */
+export function getMaxLoadedStepIndex() {
+    if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) return 0;
+    let maxIdx = 0;
+    for (let i = 0; i < stateManager.globalSteps.length; i++) {
+        const chunkIdx = stateManager.globalSteps[i].chunkIndex;
+        if (stateManager.loadedChunkBitmaps[chunkIdx]) {
+            maxIdx = i;
+        } else {
+            break; // Stop at the first missing chunk!
+        }
+    }
+    return maxIdx;
+}
+
+/**
+ * 🌟 Updates the slider background gradient (Blue = Loaded, Red = Unloaded) and restricts scrub bounds
+ */
+export function updateSliderTrackAndBounds() {
+    const slider = document.getElementById('timeline-slider');
+    if (!slider || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
+
+    const totalSteps = stateManager.globalSteps.length - 1;
+    if (totalSteps <= 0) return;
+
+    const maxLoadedIdx = getMaxLoadedStepIndex();
+    const currentIdx = stateManager.currentStepIndex;
+
+    const currentPercent = (currentIdx / totalSteps) * 100;
+    const loadedPercent = (maxLoadedIdx / totalSteps) * 100;
+
+    // Gradient: Blue (Active) -> Muted Blue (Loaded) -> Translucent Red (Unloaded)
+    slider.style.background = `linear-gradient(to right, 
+        #38bdf8 0%, 
+        #38bdf8 ${currentPercent}%, 
+        rgba(56, 189, 248, 0.35) ${currentPercent}%, 
+        rgba(56, 189, 248, 0.35) ${loadedPercent}%, 
+        rgba(239, 68, 68, 0.5) ${loadedPercent}%, 
+        rgba(239, 68, 68, 0.5) 100%)`;
+}
+
 export function initViewerUI(stepCallback) {
     onStepChangeCallback = stepCallback;
 
@@ -26,8 +69,18 @@ export function initViewerUI(stepCallback) {
     if (slider) {
         slider.addEventListener('input', (e) => {
             if (isPlaying) pausePlayback();
-            const targetIndex = parseInt(e.target.value, 10);
+
+            const maxLoadedIdx = getMaxLoadedStepIndex();
+            let targetIndex = parseInt(e.target.value, 10);
+
+            // 🛑 Restrict slider from dragging past loaded chunks into the red zone
+            if (targetIndex > maxLoadedIdx) {
+                targetIndex = maxLoadedIdx;
+                slider.value = maxLoadedIdx.toString();
+            }
+
             setStepIndex(targetIndex);
+            updateSliderTrackAndBounds();
         });
     }
 
@@ -158,7 +211,6 @@ function initModelRunDropdown() {
 
                 hideToast();
 
-                // 🌟 Preload ALL remaining chunks in background for the new run!
                 preloadRemainingChunks(thisGen);
 
             } catch (err) {
@@ -195,9 +247,20 @@ export function startPlayback() {
     updatePlayPauseUI();
 
     playInterval = setInterval(() => {
+        const maxLoadedIdx = getMaxLoadedStepIndex();
         let nextIndex = stateManager.currentStepIndex + 1;
-        if (nextIndex >= stateManager.globalSteps.length) nextIndex = 0;
+
+        // Loop back to 0 if full run is loaded, or wait at max loaded frame
+        if (nextIndex > maxLoadedIdx) {
+            if (maxLoadedIdx === stateManager.globalSteps.length - 1) {
+                nextIndex = 0;
+            } else {
+                nextIndex = maxLoadedIdx;
+            }
+        }
+
         setStepIndex(nextIndex);
+        updateSliderTrackAndBounds();
     }, PLAYBACK_SPEED_MS);
 }
 
@@ -212,13 +275,14 @@ export function pausePlayback() {
 
 function stepRelative(delta) {
     if (!stateManager.globalSteps) return;
-    const maxIndex = stateManager.globalSteps.length - 1;
+    const maxLoadedIdx = getMaxLoadedStepIndex();
     let targetIndex = stateManager.currentStepIndex + delta;
 
-    if (targetIndex < 0) targetIndex = maxIndex;
-    if (targetIndex > maxIndex) targetIndex = 0;
+    if (targetIndex < 0) targetIndex = maxLoadedIdx;
+    if (targetIndex > maxLoadedIdx) targetIndex = 0;
 
     setStepIndex(targetIndex);
+    updateSliderTrackAndBounds();
 }
 
 function updatePlayPauseUI() {
@@ -242,6 +306,7 @@ export function syncTimelineWithManifest() {
     slider.value = stateManager.currentStepIndex.toString();
 
     updateTimeLabel(stateManager.currentStepIndex);
+    updateSliderTrackAndBounds();
 }
 
 export function setStepIndex(index) {
@@ -253,6 +318,7 @@ export function setStepIndex(index) {
     if (slider) slider.value = index.toString();
 
     updateTimeLabel(index);
+    updateSliderTrackAndBounds();
 
     if (typeof onStepChangeCallback === 'function') {
         onStepChangeCallback(index, stateManager.globalSteps[index]);
