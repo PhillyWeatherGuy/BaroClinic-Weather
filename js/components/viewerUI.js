@@ -1,5 +1,5 @@
 import { stateManager } from '../core/stateManager.js';
-import { fetchManifest, loadChunkBitmap, purgeLoadedBitmaps } from '../core/dataLoader.js';
+import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 
 let onStepChangeCallback = null;
 let isPlaying = false;
@@ -46,6 +46,7 @@ export function initViewerUI(stepCallback) {
         });
     }
 
+    // 🌟 Navigation tab selection: Purges memory when navigating between pages/views
     navButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
             navButtons.forEach((b) => b.classList.remove('active'));
@@ -53,6 +54,12 @@ export function initViewerUI(stepCallback) {
             
             const targetMode = e.currentTarget.getAttribute('data-target');
             console.log(`[UI] Active view switched to: ${targetMode}`);
+
+            // 🛑 Purges memory when navigating away from model viewer
+            if (targetMode !== 'modelViewer') {
+                showToast(`Switching view...`);
+                purgeAllAppMemory(shaderLayerRef);
+            }
         });
     });
 }
@@ -124,17 +131,8 @@ function initModelRunDropdown() {
 
             showToast(`Unloading previous run data...`);
             
-            // 🛑 FULL MEMORY PURGE: Clears RAM & WebGL VRAM
-            purgeLoadedBitmaps();
-            if (shaderLayerRef && typeof shaderLayerRef.clearTextures === 'function') {
-                shaderLayerRef.clearTextures();
-            }
-
-            stateManager.manifest = null;
-            stateManager.globalSteps = [];
-            stateManager.currentStepIndex = 0;
-            stateManager.activeFrameState = null;
-            stateManager.initTime = null;
+            // 🛑 FULL SYSTEM MEMORY PURGE: Wipes 100% of RAM & WebGL VRAM
+            purgeAllAppMemory(shaderLayerRef);
 
             showToast(`Loading model run ${run.id}...`);
             try {
@@ -159,7 +157,7 @@ function initModelRunDropdown() {
 
                 hideToast();
 
-                // 4. Preload Chunk 1 in background (identical to initial site launch!)
+                // 4. Preload Chunk 1 in background
                 if (stateManager.manifest.chunks && stateManager.manifest.chunks.length > 1) {
                     loadChunkBitmap(1).then((bitmap1) => {
                         if (shaderLayerRef) shaderLayerRef.preloadChunkTexture(1, bitmap1);
