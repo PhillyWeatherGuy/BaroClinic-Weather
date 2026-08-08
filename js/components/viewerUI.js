@@ -142,18 +142,30 @@ function initModelRunDropdown() {
                 
                 await fetchManifest(run); 
 
+                // 1. Load Chunk 0
                 const bitmap0 = await loadChunkBitmap(0);
                 if (shaderLayerRef) {
                     shaderLayerRef.preloadChunkTexture(0, bitmap0);
                 }
                 
+                // 2. Sync timeline min/max and reset index to F000
                 syncTimelineWithManifest();
+                setStepIndex(0);
 
+                // 3. Render initial frame F000
                 if (typeof onStepChangeCallback === 'function') {
                     onStepChangeCallback(0, stateManager.globalSteps[0]);
                 }
 
                 hideToast();
+
+                // 4. Preload Chunk 1 in background (identical to initial site launch!)
+                if (stateManager.manifest.chunks && stateManager.manifest.chunks.length > 1) {
+                    loadChunkBitmap(1).then((bitmap1) => {
+                        if (shaderLayerRef) shaderLayerRef.preloadChunkTexture(1, bitmap1);
+                    }).catch(err => console.warn("Chunk 1 preload:", err));
+                }
+
             } catch (err) {
                 console.error(err);
                 showToast(`❌ Failed to load run ${run.id}`);
