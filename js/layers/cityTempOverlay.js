@@ -9,7 +9,7 @@ let cityMarkers = {};
 let isLoaded = false;
 let mapInstance = null;
 
-// 🌟 Bigger typography & enhanced black halos
+// 🌟 Minimalist Dot-Free Typography Layout
 const style = document.createElement('style');
 style.textContent = `
     .city-label-node {
@@ -22,14 +22,6 @@ style.textContent = `
         font-family: 'Rajdhani', -apple-system, sans-serif;
         text-transform: uppercase;
     }
-    .city-dot {
-        width: 5px;
-        height: 5px;
-        background-color: #ffffff;
-        border-radius: 50%;
-        box-shadow: 0 0 4px #000, 0 0 8px #000;
-        margin: 2px 0;
-    }
     .city-label-val {
         font-size: 18px;
         font-weight: 800;
@@ -39,12 +31,13 @@ style.textContent = `
         text-shadow: 0 0 3px #000, 0 1px 5px #000, 0 0 8px #000, 0 0 14px #000;
     }
     .city-label-name {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 700;
         line-height: 1.1;
         letter-spacing: 0.5px;
         color: #f1f5f9;
         text-shadow: 0 0 3px #000, 0 1px 4px #000, 0 0 8px #000;
+        margin-top: 1px;
     }
 `;
 document.head.appendChild(style);
@@ -88,11 +81,10 @@ export async function initCityTempOverlay(map) {
         allGlobalCities = data.features.map((f, i) => {
             const pop = f.properties.POP_MAX || f.properties.pop_max || 0;
             
-            // 🌟 Assign minimum zoom based on city population
             let minZoom = 6;
-            if (pop >= 2000000) minZoom = 2;      // Mega Metros (NYC, LA, Chicago, Phoenix, Mexico City)
-            else if (pop >= 500000) minZoom = 4;  // Major Cities (Denver, Salt Lake, Seattle)
-            else if (pop >= 100000) minZoom = 5;  // Mid-size Cities (Trenton, Atlantic City)
+            if (pop >= 2000000) minZoom = 2;      // Mega Metros
+            else if (pop >= 500000) minZoom = 4;  // Major Cities
+            else if (pop >= 100000) minZoom = 5;  // Mid-size Cities
             else minZoom = 6;                     // Towns
 
             return {
@@ -138,11 +130,10 @@ function updateCityPositions() {
         return c.lng >= west || c.lng <= east;
     });
 
-    // 🌟 Sort strictly by Population Descending (Highest population gets placed first!)
     visible.sort((a, b) => b.pop - a.pop);
 
     const placedScreenPoints = [];
-    const minDistancePx = 42; // Buffer spacing for 18px text
+    const minDistancePx = 40;
     activeCities = [];
 
     for (let i = 0; i < visible.length; i++) {
@@ -167,7 +158,6 @@ function updateCityPositions() {
             node.className = 'city-label-node';
             node.innerHTML = `
                 <div class="city-label-val">--°</div>
-                <div class="city-dot"></div>
                 <div class="city-label-name">${city.name}</div>
             `;
 
