@@ -5,37 +5,22 @@ const GLOBAL_CITIES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vec
 
 let allGlobalCities = [];
 let activeCities = [];
-let cityDOMNodes = {};
+let cityMarkers = {}; // Stores native MapLibre Marker instances
 let isLoaded = false;
-
-let overlayContainer = null;
 let mapInstance = null;
 
-// 🌟 Added city dot marker & cleaned up typography
+// 🌟 Clean WeatherFront typography
 const style = document.createElement('style');
 style.textContent = `
-    #city-temp-overlay-container {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        overflow: hidden;
-        z-index: 5;
-    }
     .city-label-node {
-        position: absolute;
-        top: 0;
-        left: 0;
-        transform: translate3d(-50%, -50%, 0);
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         pointer-events: none;
         user-select: none;
-        will-change: transform;
+        font-family: 'Rajdhani', -apple-system, sans-serif;
+        text-transform: uppercase;
     }
     .city-dot {
         width: 4px;
@@ -64,7 +49,7 @@ style.textContent = `
 document.head.appendChild(style);
 
 /**
- * 🌟 Hides native basemap city, town, state, region, and country text labels
+ * 🌟 Hides native basemap text layers
  */
 function hideBasemapCityLabels(map) {
     const style = map.getStyle();
@@ -92,14 +77,7 @@ function hideBasemapCityLabels(map) {
 export async function initCityTempOverlay(map) {
     mapInstance = map;
 
-    // 🌟 Turn off MapTiler native city & state labels
     hideBasemapCityLabels(map);
-
-    if (!overlayContainer) {
-        overlayContainer = document.createElement('div');
-        overlayContainer.id = 'city-temp-overlay-container';
-        map.getContainer().appendChild(overlayContainer);
-    }
 
     map.on('move', updateCityPositions);
     map.on('zoom', updateCityPositions);
@@ -131,7 +109,7 @@ export async function initCityTempOverlay(map) {
 }
 
 /**
- * 🌟 Position DOM nodes with city dots & screen-space collision checks
+ * 🌟 ZERO-DRIFT PRECISION ANCHORING using native MapLibre Markers
  */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
@@ -165,7 +143,6 @@ function updateCityPositions() {
 
         if (!collides) {
             placedScreenPoints.push(pos);
-            city.screenPos = pos;
             activeCities.push(city);
             if (activeCities.length >= 45) break;
         }
@@ -173,27 +150,34 @@ function updateCityPositions() {
 
     const activeSet = new Set(activeCities.map(c => c.name));
 
+    // Create or show native MapLibre Markers
     activeCities.forEach(city => {
-        let node = cityDOMNodes[city.name];
-        if (!node) {
-            node = document.createElement('div');
+        let marker = cityMarkers[city.name];
+        if (!marker) {
+            const node = document.createElement('div');
             node.className = 'city-label-node';
             node.innerHTML = `
                 <div class="city-label-val">--°</div>
                 <div class="city-dot"></div>
                 <div class="city-label-name">${city.name}</div>
             `;
-            overlayContainer.appendChild(node);
-            cityDOMNodes[city.name] = node;
+
+            // 🌟 Native MapLibre Marker anchored precisely at [lng, lat] center
+            marker = new maplibregl.Marker({
+                element: node,
+                anchor: 'center'
+            }).setLngLat([city.lng, city.lat]).addTo(mapInstance);
+
+            cityMarkers[city.name] = marker;
         }
 
-        node.style.transform = `translate3d(${Math.round(city.screenPos.x)}px, ${Math.round(city.screenPos.y)}px, 0)`;
-        node.style.display = 'flex';
+        marker.getElement().style.display = 'flex';
     });
 
-    for (const name in cityDOMNodes) {
+    // Hide markers for non-visible cities
+    for (const name in cityMarkers) {
         if (!activeSet.has(name)) {
-            cityDOMNodes[name].style.display = 'none';
+            cityMarkers[name].getElement().style.display = 'none';
         }
     }
 
@@ -248,9 +232,9 @@ export function updateCityTemperatures(map, activeFrameState, manifest) {
                 const tempC = tempK - 273.15;
                 const tempF = Math.round((tempC * 9 / 5) + 32);
 
-                const node = cityDOMNodes[city.name];
-                if (node) {
-                    const tempEl = node.querySelector('.city-label-val');
+                const marker = cityMarkers[city.name];
+                if (marker) {
+                    const tempEl = marker.getElement().querySelector('.city-label-val');
                     if (tempEl) tempEl.textContent = `${tempF}°`;
                 }
             }
