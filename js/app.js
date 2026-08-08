@@ -35,40 +35,18 @@ function initLayer() {
     map.addLayer(customShaderLayer, firstOverlayId);
 }
 
-async function renderFrame(globalIdx, resetRun = false) {
-    if (!stateManager.manifest || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
+async function renderFrame(globalIdx) {
+    if (!stateManager.manifest || stateManager.globalSteps.length === 0) return;
     
     const frameInfo = stateManager.globalSteps[globalIdx];
-    if (!frameInfo) return;
-
-    const chunkIdx = frameInfo.chunkIndex;
-    const chunkInfo = stateManager.manifest.chunks[chunkIdx];
-
-    if (resetRun && customShaderLayer) {
-        customShaderLayer.clearTextures();
-    }
-
-    // 🌟 On-demand chunk bitmap loading & WebGL texture upload!
-    if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
-        try {
-            showToast(`Loading forecast chunk ${chunkIdx + 1}...`);
-            const bitmap = await loadChunkBitmap(chunkIdx);
-            if (customShaderLayer) {
-                customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-            }
-            hideToast();
-        } catch (err) {
-            console.error(`Error loading chunk ${chunkIdx}:`, err);
-            showToast(`❌ Failed chunk load`);
-            return;
-        }
-    }
+    const chunkInfo = stateManager.manifest.chunks[frameInfo.chunkIndex];
+    if (!stateManager.loadedChunkBitmaps[frameInfo.chunkIndex]) return;
 
     stateManager.activeFrameState = {
-        chunkIndex: chunkIdx,
+        chunkIndex: frameInfo.chunkIndex,
         col: frameInfo.col,
         row: frameInfo.row,
-        chunkImg: stateManager.loadedChunkBitmaps[chunkIdx],
+        chunkImg: stateManager.loadedChunkBitmaps[frameInfo.chunkIndex],
         uvOffset: [frameInfo.col / chunkInfo.columns, frameInfo.row / chunkInfo.rows],
         uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
     };
@@ -78,10 +56,10 @@ async function renderFrame(globalIdx, resetRun = false) {
     }
 }
 
-// Register UI callback with support for run resetting
-initViewerUI((stepIndex, stepData, isNewRun = false) => {
+// 🌟 Initialize UI listeners & register GPU redraw callback
+initViewerUI((stepIndex) => {
     if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
-    renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex, isNewRun));
+    renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
 });
 
 map.on('load', async () => {
@@ -89,13 +67,25 @@ map.on('load', async () => {
         await fetchManifest();
         initLayer();
 
-        // Render initial frame (F000) - this will automatically load Chunk 0
-        await renderFrame(0);
+        const bitmap0 = await loadChunkBitmap(0);
+        customShaderLayer.preloadChunkTexture(0, bitmap0);
+
+        // Sync slider min/max/value & label with manifest step length
         syncTimelineWithManifest();
+
+        // Render initial frame (F000)
+        await renderFrame(0);
         hideToast();
 
-        // Reveal splash/home screen transition
+        // 🌟 Initialize the home hub screen sequence once the map is painted
         initHubTransition();
+
+        // Preload next chunk if present
+        if (stateManager.manifest.chunks.length > 1) {
+            loadChunkBitmap(1).then((bitmap1) => {
+                customShaderLayer.preloadChunkTexture(1, bitmap1);
+            });
+        }
     } catch (err) {
         showToast('❌ ' + err.message);
     }
