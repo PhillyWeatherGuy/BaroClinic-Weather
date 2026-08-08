@@ -3,9 +3,10 @@ export const stateManager = {
     manifest: null,
     initTime: null,
     loadedChunkBitmaps: {},
-    chunkPixelData: {}, // 🌟 INSTANT CPU MEMORY CACHE for zero-lag temperature lookups
+    chunkPixelData: {},
     globalSteps: [],
     activeFrameState: null,
     currentStepIndex: 0,
-    activeModelRun: null
+    activeModelRun: null,
+    loadGeneration: 0 // 🌟 Cancellation token to abort stale background promises
 };
