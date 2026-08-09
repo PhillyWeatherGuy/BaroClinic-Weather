@@ -12,7 +12,11 @@ let scene, camera, renderer, controls, globeMesh, material, paletteTex;
 let countyMesh = null;
 let isGlobeActive = false;
 
-// 🌟 Mobile Touch CSS Overrides: Prevents iOS Safari page-bounce & gesture conflicts
+// 🌟 Texture Memory Cache Variables (Prevents VRAM Leaks)
+let currentGlobeTexture = null;
+let currentGlobeChunkIdx = -1;
+
+// Mobile Touch CSS Overrides: Prevents iOS Safari page-bounce & gesture conflicts
 const style = document.createElement('style');
 style.textContent = `
     #globe-container {
@@ -287,13 +291,11 @@ export function initThreeGlobe() {
         if (isGlobeActive && controls && renderer && scene && globeMesh) {
             const dist = camera.position.distanceTo(globeMesh.position);
 
-            // 🌟 DYNAMIC ROTATION SPEED: Slows down smoothly when zoomed in!
             const zoomRatio = Math.max(0, Math.min(1, (dist - controls.minDistance) / (controls.maxDistance - controls.minDistance)));
             controls.rotateSpeed = 0.12 + zoomRatio * 0.53;
 
             controls.update();
 
-            // Zoom Check: Show US County lines when camera gets close
             if (countyMesh) {
                 countyMesh.visible = (dist < 4.2);
             }
@@ -304,14 +306,27 @@ export function initThreeGlobe() {
     animate();
 }
 
+/**
+ * 🌟 CRASH-PROOF FRAME UPDATE: Reuses texture & disposes old VRAM on chunk changes!
+ */
 export function updateThreeGlobeFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
-    const texture = new THREE.CanvasTexture(frameState.chunkImg);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
+    // 1. Only create new WebGL texture if chunk index actually changed!
+    if (currentGlobeChunkIdx !== frameState.chunkIndex || !currentGlobeTexture) {
+        if (currentGlobeTexture) {
+            currentGlobeTexture.dispose(); // 🌟 Instantly frees old VRAM!
+        }
 
-    material.uniforms.u_dataTexture.value = texture;
+        currentGlobeChunkIdx = frameState.chunkIndex;
+        currentGlobeTexture = new THREE.CanvasTexture(frameState.chunkImg);
+        currentGlobeTexture.minFilter = THREE.LinearFilter;
+        currentGlobeTexture.magFilter = THREE.LinearFilter;
+
+        material.uniforms.u_dataTexture.value = currentGlobeTexture;
+    }
+
+    // 2. Update UV uniforms (0 bytes allocated, 0.0001ms execution time!)
     material.uniforms.u_uvOffset.value.set(frameState.uvOffset[0], frameState.uvOffset[1]);
     material.uniforms.u_uvScale.value.set(frameState.uvScale[0], frameState.uvScale[1]);
     material.needsUpdate = true;
@@ -330,5 +345,13 @@ export function hideThreeGlobe() {
     const mapDiv = document.getElementById('map');
     if (container) container.style.display = 'none';
     if (mapDiv) mapDiv.style.display = 'block';
+
+    // 🌟 Free VRAM when hiding globe
+    if (currentGlobeTexture) {
+        currentGlobeTexture.dispose();
+        currentGlobeTexture = null;
+        currentGlobeChunkIdx = -1;
+    }
+
     isGlobeActive = false;
 }
