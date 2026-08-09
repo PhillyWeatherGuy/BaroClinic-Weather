@@ -1,9 +1,10 @@
 // js/layers/threeGlobe.js
 import { HEX_PALETTE } from '../shaders/scalarShader.js';
 
-// 🌐 Free Country & US State Border Vector Datasets
-const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
-const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_1_states_provinces_lines.geojson';
+// 🌐 High-Definition 10m Vector Country, State, & Coastline Datasets (Identical to MapTiler Transparent Map)
+const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_0_boundary_lines_land.geojson';
+const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_1_states_provinces_lines.geojson';
+const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_coastline.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
 let isGlobeActive = false;
@@ -35,7 +36,6 @@ const fsThreeGlobe = `
         vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
-        // Rich, saturated weather temperature color
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
@@ -77,12 +77,12 @@ function lngLatToVector3(lng, lat, radius = 2.003) {
 }
 
 /**
- * 🌟 Loads 3D Country & US State Border Lines
+ * 🌟 Loads HD Country, State, and Coastline 3D Vector Lines
  */
 async function load3DBorderLines(parentMesh) {
     const linePoints = [];
+    const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
 
-    const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL];
     for (const url of urls) {
         try {
             const resp = await fetch(url);
@@ -117,14 +117,14 @@ async function load3DBorderLines(parentMesh) {
 
         const lineMaterial = new THREE.LineBasicMaterial({
             color: 0x000000,
-            opacity: 0.75,
+            opacity: 0.85,
             transparent: true,
             linewidth: 1.5
         });
 
         const linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
         parentMesh.add(linesMesh); // Rotates in 3D sync with Earth!
-        console.log("🌟 3D Country & State Border Lines Active!");
+        console.log("🌟 HD Country, State, & Coastline Borders Active!");
     }
 }
 
@@ -171,7 +171,7 @@ export function initThreeGlobe() {
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
-    // 🌟 Load 3D Country & US State Border Lines
+    // 🌟 Load HD Country, State, & Coastline 3D Vector Lines
     load3DBorderLines(globeMesh);
 
     window.addEventListener('resize', () => {
