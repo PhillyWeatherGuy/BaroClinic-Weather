@@ -22,7 +22,7 @@ const vsThreeGlobe = `
 const fsThreeGlobe = `
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
-    uniform sampler2D u_borderTexture; // 🌟 Bold Black Vector Border Overlay
+    uniform sampler2D u_borderTexture; // 🌟 5px Bold Black Vector Border Overlay
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
     uniform float u_opacity;
@@ -30,20 +30,21 @@ const fsThreeGlobe = `
     varying vec3 v_normal;
 
     void main() {
+        // Mercator V coordinate calculation for weather temperature spritesheet
         float latRad = (v_uv.y - 0.5) * 3.14159265359;
         float mercY = log(tan(0.78539816339 + latRad / 2.0));
         float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
 
-        // 🌟 1.0 - normY maps North Pole to TOP and South Pole to BOTTOM
-        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - normY);
+        // 🌟 normY aligns cold polar air over Arctic/Canada and tropical heat over Mexico/Equator!
+        vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         // Sample rich weather temperature color
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 tempColor = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // Sample 3D border texture
-        vec4 borderData = texture2D(u_borderTexture, v_uv);
+        // Sample Equirectangular 3D border texture
+        vec4 borderData = texture2D(u_borderTexture, vec2(v_uv.x, 1.0 - v_uv.y));
 
         // Mix pitch-black border lines over temperature color
         vec3 finalColor = mix(tempColor.rgb, vec3(0.0), borderData.a * 0.95);
@@ -72,7 +73,7 @@ function createPaletteTexture() {
 }
 
 /**
- * 🌟 BOLD BLACK BORDER TEXTURE (Fresh isolated paths per line to prevent horizontal equator lines)
+ * 🌟 EQUIRECTANGULAR BORDER TEXTURE (Zero polar stretching & Antimeridian jump protection)
  */
 async function createBorderCanvasTexture() {
     const canvas = document.createElement('canvas');
@@ -82,7 +83,7 @@ async function createBorderCanvasTexture() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 🌟 Bold 3.5px black vector lines
+    // Bold 3.5px black vector lines
     ctx.strokeStyle = '#000000';
     ctx.lineWidth = 3.5; 
     ctx.lineCap = 'round';
@@ -107,21 +108,27 @@ async function createBorderCanvasTexture() {
                 else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
 
                 lineStrings.forEach(coords => {
-                    // 🌟 fresh beginPath per line string prevents horizontal equator lines!
+                    // 🌟 Fresh path per line prevents horizontal equator lines!
                     ctx.beginPath();
                     for (let i = 0; i < coords.length; i++) {
-                        let normX = (coords[i][0] + 180) / 360;
-                        normX = ((normX % 1) + 1) % 1;
+                        const lng = coords[i][0];
+                        const lat = coords[i][1];
 
-                        const latRad = coords[i][1] * Math.PI / 180;
-                        const mercY = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
-                        const normY = 0.5 - (mercY / (2 * Math.PI));
+                        // 🌟 Equirectangular projection: eliminates high-latitude polar stretching!
+                        const px = ((lng + 180) / 360) * canvas.width;
+                        const py = ((90 - lat) / 180) * canvas.height;
 
-                        const px = normX * canvas.width;
-                        const py = normY * canvas.height;
-
-                        if (i === 0) ctx.moveTo(px, py);
-                        else ctx.lineTo(px, py);
+                        if (i === 0) {
+                            ctx.moveTo(px, py);
+                        } else {
+                            // 🌟 Antimeridian Jump Protection (prevents lines drawing across -180 to +180)
+                            const prevLng = coords[i - 1][0];
+                            if (Math.abs(lng - prevLng) > 180) {
+                                ctx.moveTo(px, py);
+                            } else {
+                                ctx.lineTo(px, py);
+                            }
+                        }
                     }
                     ctx.stroke();
                 });
@@ -186,12 +193,12 @@ export function initThreeGlobe() {
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
-    // 🌟 Render Bold Black Vector Border Overlay Texture
+    // 🌟 Render HD Equirectangular Vector Border Overlay Texture
     createBorderCanvasTexture().then(tex => {
         borderTex = tex;
         material.uniforms.u_borderTexture.value = borderTex;
         material.needsUpdate = true;
-        console.log("🌟 Bold Black Borders Rendered on 3D Globe!");
+        console.log("🌟 HD Distortion-Free Borders Active on 3D Globe!");
     });
 
     window.addEventListener('resize', () => {
