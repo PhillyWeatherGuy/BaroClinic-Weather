@@ -1,3 +1,4 @@
+// js/app.js
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
@@ -8,11 +9,13 @@ import {
     syncModelRunDropdown,
     setShaderLayerReference,
     updateSliderTrackAndBounds,
+    initGlobeToggle,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
+import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -53,7 +56,9 @@ async function renderFrame(globalIdx) {
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
-            if (customShaderLayer) customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
+            if (customShaderLayer) {
+                customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
+            }
             updateSliderTrackAndBounds();
         } catch (err) {
             return;
@@ -69,11 +74,20 @@ async function renderFrame(globalIdx) {
         uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
     };
     
-    if (customShaderLayer) customShaderLayer.updateFrame(stateManager.activeFrameState);
+    if (customShaderLayer) {
+        customShaderLayer.updateFrame(stateManager.activeFrameState);
+    }
 
+    // 🌟 Update 3D Three.js Globe Frame Texture
+    updateThreeGlobeFrame(stateManager.activeFrameState);
+
+    // 🌟 Update 2D City Temperature Callouts
     updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
 }
 
+/**
+ * 🌟 SEQUENTIAL PRELOADER: Updates slider red/blue progress as each chunk finishes downloading
+ */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
     const totalChunks = stateManager.manifest.chunks.length;
@@ -85,7 +99,9 @@ export async function preloadRemainingChunks(currentGen) {
             try {
                 const bitmap = await loadChunkBitmap(i, currentGen);
                 if (currentGen === stateManager.loadGeneration) {
-                    if (customShaderLayer) customShaderLayer.preloadChunkTexture(i, bitmap);
+                    if (customShaderLayer) {
+                        customShaderLayer.preloadChunkTexture(i, bitmap);
+                    }
                 }
                 updateSliderTrackAndBounds();
             } catch (err) {
@@ -106,6 +122,13 @@ initViewerUI((stepIndex) => {
 map.on('load', async () => {
     initHubTransition();
 
+    // 🌟 Initialize Three.js 3D Globe Engine
+    try {
+        initThreeGlobe();
+    } catch (err) {
+        console.error("Three.js globe init error:", err);
+    }
+
     try {
         await fetchManifest();
     } catch (err) {
@@ -124,10 +147,16 @@ map.on('load', async () => {
         syncModelRunDropdown();
     } catch (err) {}
 
+    try {
+        initGlobeToggle(map);
+    } catch (err) {}
+
     if (stateManager.manifest && stateManager.manifest.chunks) {
         try {
             const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
-            if (customShaderLayer) customShaderLayer.preloadChunkTexture(0, bitmap0);
+            if (customShaderLayer) {
+                customShaderLayer.preloadChunkTexture(0, bitmap0);
+            }
 
             syncTimelineWithManifest();
             await renderFrame(0);
