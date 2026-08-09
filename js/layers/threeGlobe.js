@@ -35,15 +35,15 @@ const fsThreeGlobe = `
         float mercY = log(tan(0.78539816339 + latRad / 2.0));
         float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
 
-        // 🌟 1.0 - normY maps North Pole (v_uv.y = 1.0) to Top of spritesheet (row 0)
-        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - normY);
+        // 🌟 normY aligns weather layer right-side up with base map borders!
+        vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         // Sample rich weather temperature color
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 tempColor = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // Sample 3D border texture (v_uv is right-side up!)
+        // Sample 3D border texture
         vec4 borderData = texture2D(u_borderTexture, v_uv);
 
         // Mix pitch-black border lines over temperature color
@@ -73,7 +73,7 @@ function createPaletteTexture() {
 }
 
 /**
- * 🌟 EQUIRECTANGULAR BORDER TEXTURE (Right-side-up, zero polar stretching, antimeridian jump protection)
+ * 🌟 EQUIRECTANGULAR BORDER TEXTURE
  */
 async function createBorderCanvasTexture() {
     const canvas = document.createElement('canvas');
@@ -113,7 +113,7 @@ async function createBorderCanvasTexture() {
                         const lng = coords[i][0];
                         const lat = coords[i][1];
 
-                        // Equirectangular projection: py = 0 is North Pole (Top of canvas)
+                        // Equirectangular projection
                         const px = ((lng + 180) / 360) * canvas.width;
                         const py = ((90 - lat) / 180) * canvas.height;
 
@@ -137,7 +137,6 @@ async function createBorderCanvasTexture() {
     }
 
     const texture = new THREE.CanvasTexture(canvas);
-    // 🌟 Keeps default flipY = true so py = 0 (North Pole) maps to v_uv.y = 1.0 (Top of sphere!)
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     return texture;
