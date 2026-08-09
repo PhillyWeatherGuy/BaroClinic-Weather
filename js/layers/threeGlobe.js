@@ -5,7 +5,7 @@ import { HEX_PALETTE } from '../shaders/scalarShader.js';
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
-// 🌟 US County Borders (Loaded dynamically on zoom-in)
+// US County Borders (Loaded dynamically on zoom-in)
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
@@ -86,7 +86,6 @@ async function load3DVectorBorders(parentMesh) {
     const linePoints = [];
     const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
 
-    // Micro-offsets (0.005° = 500m) for thick bold lines without double-line splitting
     const lineOffsets = [
         [0, 0],
         [0.005, 0],
@@ -148,7 +147,6 @@ async function load3DVectorBorders(parentMesh) {
         console.log("🌟 Bold Thick 3D Country & State Borders Active!");
     }
 
-    // 🌟 Load US County Borders in background
     load3DCountyBorders(parentMesh);
 }
 
@@ -200,7 +198,7 @@ async function load3DCountyBorders(parentMesh) {
             });
 
             countyMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
-            countyMesh.visible = false; // Hidden until zoomed in!
+            countyMesh.visible = false;
             parentMesh.add(countyMesh);
             console.log("🌟 US County Borders Active!");
         }
@@ -222,6 +220,7 @@ export function initThreeGlobe() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
+    // 🌟 FIXED Y-AXIS GLOBE ORBIT CONTROLS
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
@@ -229,6 +228,11 @@ export function initThreeGlobe() {
     controls.zoomSpeed = 0.8;
     controls.minDistance = 2.8;
     controls.maxDistance = 12;
+
+    // 🌟 Locks Earth at center & keeps North Pole pointing UP!
+    controls.enablePan = false; // Disables dragging Earth off-center
+    controls.minPolarAngle = Math.PI * 0.08; // Prevents camera flipping over North Pole
+    controls.maxPolarAngle = Math.PI * 0.92; // Prevents camera flipping under South Pole
 
     paletteTex = createPaletteTexture();
 
@@ -252,7 +256,6 @@ export function initThreeGlobe() {
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
-    // 🌟 Load Bold 3D Borders + US County Lines
     load3DVectorBorders(globeMesh);
 
     window.addEventListener('resize', () => {
@@ -267,10 +270,10 @@ export function initThreeGlobe() {
         if (isGlobeActive && controls && renderer && scene) {
             controls.update();
 
-            // 🌟 Zoom Check: Show US County lines when camera gets close!
+            // Zoom Check: Show US County lines when camera gets close
             if (countyMesh) {
                 const dist = camera.position.distanceTo(globeMesh.position);
-                countyMesh.visible = (dist < 4.2); // Toggles county lines on zoom
+                countyMesh.visible = (dist < 4.2);
             }
 
             renderer.render(scene, camera);
