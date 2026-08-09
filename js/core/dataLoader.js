@@ -1,4 +1,6 @@
+// js/core/dataLoader.js
 import { stateManager } from './stateManager.js';
+import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 Clears 3D VRAM
 
 export async function fetchManifest(run = null) {
     let fileName = 'manifest.json';
@@ -88,11 +90,14 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 }
 
 /**
- * 🌟 UNIFIED APP MEMORY PURGER: Immediately aborts stale loads & wipes VRAM
+ * 🌟 UNIFIED APP MEMORY PURGER: Immediately aborts stale loads & wipes 2D + 3D VRAM
  */
 export function purgeAllAppMemory(shaderLayerRef = null) {
     // Increment generation token to instantly cancel all pending loads
     stateManager.loadGeneration++;
+
+    // 🌟 Disposes Three.js 3D Globe GPU VRAM textures
+    clearThreeGlobeTextures();
 
     // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
@@ -106,7 +111,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
     // 2. Clear raw city temperature pixel memory
     stateManager.chunkPixelData = {};
 
-    // 3. Delete WebGL textures from GPU VRAM
+    // 3. Delete 2D WebGL textures from GPU VRAM
     if (shaderLayerRef && typeof shaderLayerRef.clearTextures === 'function') {
         shaderLayerRef.clearTextures();
     }
