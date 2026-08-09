@@ -1,4 +1,6 @@
+// js/core/dataLoader.js
 import { stateManager } from './stateManager.js';
+import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
 
 export async function fetchManifest(run = null) {
     let fileName = 'manifest.json';
@@ -36,7 +38,6 @@ export async function fetchManifest(run = null) {
 }
 
 export async function loadChunkBitmap(chunkIndex, currentGen = null) {
-    // 🌟 Cancel if a new run was selected
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
         throw new Error("Load cancelled");
     }
@@ -62,7 +63,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
     stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
 
-    // 🌟 75% LIGHTER MEMORY: Extract 67 MB single-channel Uint8Array instead of 268 MB RGBA
     let offCanvas = document.createElement('canvas');
     offCanvas.width = bitmap.width;
     offCanvas.height = bitmap.height;
@@ -73,12 +73,11 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const singleChannel = new Uint8Array(bitmap.width * bitmap.height);
 
     for (let i = 0; i < singleChannel.length; i++) {
-        singleChannel[i] = rgba[i * 4]; // Extract Red channel luminance
+        singleChannel[i] = rgba[i * 4];
     }
 
     stateManager.chunkPixelData[chunkIndex] = singleChannel;
 
-    // Release temporary canvas memory
     offCanvas.width = 0;
     offCanvas.height = 0;
     offCanvas = null;
@@ -88,11 +87,13 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 }
 
 /**
- * 🌟 UNIFIED APP MEMORY PURGER: Immediately aborts stale loads & wipes VRAM
+ * 🌟 UNIFIED APP MEMORY PURGER: Wipes 2D & 3D GPU VRAM + CPU RAM
  */
 export function purgeAllAppMemory(shaderLayerRef = null) {
-    // Increment generation token to instantly cancel all pending loads
     stateManager.loadGeneration++;
+
+    // 🌟 Disposes Three.js 3D Globe GPU VRAM textures
+    clearThreeGlobeTextures();
 
     // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
@@ -106,7 +107,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
     // 2. Clear raw city temperature pixel memory
     stateManager.chunkPixelData = {};
 
-    // 3. Delete WebGL textures from GPU VRAM
+    // 3. Delete 2D WebGL textures from GPU VRAM
     if (shaderLayerRef && typeof shaderLayerRef.clearTextures === 'function') {
         shaderLayerRef.clearTextures();
     }
