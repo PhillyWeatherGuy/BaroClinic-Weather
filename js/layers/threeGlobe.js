@@ -29,17 +29,18 @@ const fsThreeGlobe = `
         float mercY = log(tan(0.78539816339 + latRad / 2.0));
         float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
 
-        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - normY);
+        // 🌟 Right-Side-Up Vertical Orientation
+        vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // 🌟 Subtle 3D atmospheric limb glow
+        // 🌟 3D atmospheric limb depth glow
         float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
         vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
 
-        gl_FragColor = vec4(color.rgb + atmosphere * 0.25, color.a * u_opacity);
+        gl_FragColor = vec4(color.rgb + atmosphere * 0.2, color.a * u_opacity);
     }
 `;
 
@@ -101,6 +102,9 @@ export function initThreeGlobe() {
     // 5. 3D Earth Sphere Geometry
     const geometry = new THREE.SphereGeometry(2, 64, 64);
     globeMesh = new THREE.Mesh(geometry, material);
+    
+    // 🌟 Rotate globe -90° on load so North America faces front!
+    globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
     window.addEventListener('resize', () => {
