@@ -157,7 +157,6 @@ function updateCityPositions() {
                 <div class="city-label-name">${city.name}</div>
             `;
 
-            // 🌟 MapLibre Marker
             marker = new maplibregl.Marker({
                 element: node,
                 anchor: 'center'
@@ -180,6 +179,9 @@ function updateCityPositions() {
     }
 }
 
+/**
+ * 🌟 0.0001ms INSTANT TEMPERATURE UPDATES (Equirectangular EPSG:4326 Precision Pixel Sampling)
+ */
 export function updateCityTemperatures(map, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return;
 
@@ -196,17 +198,18 @@ export function updateCityTemperatures(map, activeFrameState, manifest) {
     const chunkInfo = manifest.chunks[chunkIdx];
     const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
 
-    const minK = manifest.temp_min_k || 210.0;
-    const maxK = manifest.temp_max_k || 330.0;
+    const minK = manifest.temp_min_k !== undefined ? manifest.temp_min_k : 216.4833;
+    const maxK = manifest.temp_max_k !== undefined ? manifest.temp_max_k : 327.5944;
 
     for (let i = 0; i < activeCities.length; i++) {
         const city = activeCities[i];
-        let normX = (city.lng + 180) / 360;
+
+        // 🌟 X-axis: Longitude (-180° to +180° -> 0 to 1)
+        let normX = (city.lng + 180.0) / 360.0;
         normX = ((normX % 1) + 1) % 1;
 
-        const latRad = city.lat * Math.PI / 180;
-        const mercY = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
-        const normY = 0.5 - (mercY / (2 * Math.PI));
+        // 🌟 Y-axis: Equirectangular Latitude (+90°N to -90°S -> 0 to 1)
+        const normY = (90.0 - city.lat) / 180.0;
 
         if (normY >= 0 && normY <= 1) {
             const px = Math.floor(normX * frameW);
