@@ -16,7 +16,7 @@ export function setShaderLayerReference(layer) {
 }
 
 /**
- * 🌟 2D Map <-> 3D Three.js Globe Engine Switcher
+ * 🌟 2D Map <-> 3D Three.js Globe Engine Switcher with Glowing Icon
  */
 export function initGlobeToggle(map) {
     const globeBtn = document.getElementById('btn-globe');
@@ -27,20 +27,14 @@ export function initGlobeToggle(map) {
         isGlobe = !isGlobe;
 
         if (isGlobe) {
-            // 🌟 Activate 3D Three.js Globe Engine
+            // 🌟 Activate 3D Three.js Globe Engine & Turn ON Glow
             showThreeGlobe();
-            globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
-            globeBtn.style.borderColor = '#38bdf8';
-            globeBtn.style.color = '#38bdf8';
-            globeBtn.textContent = '3D';
+            globeBtn.classList.add('active');
             console.log("🌐 3D Three.js Globe Engine Activated");
         } else {
-            // 🌟 Return to 2D MapLibre Map Engine
+            // 🌟 Return to 2D MapLibre Engine & Turn OFF Glow
             hideThreeGlobe();
-            globeBtn.style.background = 'rgba(255, 255, 255, 0.08)';
-            globeBtn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-            globeBtn.style.color = '#ffffff';
-            globeBtn.textContent = '2D';
+            globeBtn.classList.remove('active');
             console.log("🗺️ 2D MapLibre Map Engine Activated");
         }
     };
