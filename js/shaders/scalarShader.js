@@ -26,7 +26,7 @@ const fsSource = `
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // 🌟 normY aligns North Pole (+90°N) to Top of 2D Map with ZERO inversion!
+        // 🌟 Fixed: normY aligns North Pole to Top of 2D Map
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
@@ -76,6 +76,9 @@ export function createScalarShaderLayer(mapInstance) {
             this.activeTex = null;
         },
 
+        /**
+         * 🌟 DYNAMIC PALETTE SWAP: Swaps GPU palette texture when picking a new parameter
+         */
         updatePalette: function(paramIdOrHexArray) {
             if (!this.gl) return;
             const hexArray = Array.isArray(paramIdOrHexArray) 
@@ -164,4 +167,16 @@ export function createScalarShaderLayer(mapInstance) {
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
             gl.uniform1f(this.uOpacity, 0.65);
-            gl.uniform2f(this.uUvOffset, thi
+            gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
+            gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+            gl.enableVertexAttribArray(this.aPos);
+            gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0);
+
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.drawArrays(gl.TRIANGLES, 0, 30);
+        }
+    };
+}
