@@ -7,14 +7,35 @@ let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 400;
 let shaderLayerRef = null;
+let isGlobe = false;
 
 export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
 }
 
 /**
- * 🌟 Returns the highest step index whose chunk bitmap is currently loaded
+ * 🌟 3D Globe Projection Toggle (2D Flat Map <-> 3D Interactive Globe)
  */
+export function initGlobeToggle(map) {
+    const globeBtn = document.getElementById('btn-globe');
+    if (!globeBtn) return;
+
+    globeBtn.addEventListener('click', () => {
+        isGlobe = !isGlobe;
+        if (isGlobe) {
+            map.setProjection({ type: 'globe' });
+            globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
+            globeBtn.style.borderColor = '#38bdf8';
+            globeBtn.style.color = '#38bdf8';
+        } else {
+            map.setProjection({ type: 'mercator' });
+            globeBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+            globeBtn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+            globeBtn.style.color = '#ffffff';
+        }
+    });
+}
+
 export function getMaxLoadedStepIndex() {
     if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) return 0;
     let maxIdx = 0;
@@ -23,15 +44,12 @@ export function getMaxLoadedStepIndex() {
         if (stateManager.loadedChunkBitmaps[chunkIdx]) {
             maxIdx = i;
         } else {
-            break; // Stop at first missing chunk
+            break;
         }
     }
     return maxIdx;
 }
 
-/**
- * 🌟 Updates slider background (Blue = Active, Dark = Loaded, Red = Unloaded)
- */
 export function updateSliderTrackAndBounds() {
     const slider = document.getElementById('timeline-slider');
     if (!slider || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
@@ -40,11 +58,9 @@ export function updateSliderTrackAndBounds() {
     if (totalSteps <= 0) return;
 
     const maxLoadedIdx = getMaxLoadedStepIndex();
-    const currentIdx = stateManager.currentStepIndex;
-
     const loadedPercent = (maxLoadedIdx / totalSteps) * 100;
 
-    // 🌟 Dark Glass Track for loaded region -> Red for unloaded region
+    // Dark Glass Track for loaded region -> Red Track for unloaded background downloading frames
     slider.style.background = `linear-gradient(to right, 
         rgba(255, 255, 255, 0.15) 0%, 
         rgba(255, 255, 255, 0.15) ${loadedPercent}%, 
@@ -70,7 +86,6 @@ export function initViewerUI(stepCallback) {
             const maxLoadedIdx = getMaxLoadedStepIndex();
             let targetIndex = parseInt(e.target.value, 10);
 
-            // 🛑 Lock slider from dragging into the red unloaded section
             if (targetIndex > maxLoadedIdx) {
                 targetIndex = maxLoadedIdx;
                 slider.value = maxLoadedIdx.toString();
