@@ -1,8 +1,6 @@
-// js/app.js
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
-import { createGlobeShaderLayer } from './shaders/globeShader.js'; // 🌟 3D Globe Shader
 import { initHubTransition } from './components/homeScreen.js'; 
 import { 
     initViewerUI, 
@@ -10,7 +8,6 @@ import {
     syncModelRunDropdown,
     setShaderLayerReference,
     updateSliderTrackAndBounds,
-    initGlobeToggle,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
@@ -18,26 +15,21 @@ import {
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
 
 let customShaderLayer = null;
-let globeShaderLayer = null;
 let renderDebounceId = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
-// 🌟 Map instance with 3D Globe Projection enabled on startup
 const map = new maplibregl.Map({
     container: 'map',
     style: 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG',
     center: [-74.4, 39.3], 
-    zoom: 3,
-    projection: 'globe' // 🌟 3D Spherical Earth Globe!
+    zoom: 7
 });
 
 function initLayer() {
     customShaderLayer = createScalarShaderLayer(map);
-    globeShaderLayer = createGlobeShaderLayer(map);
+    setShaderLayerReference(customShaderLayer);
     
-    setShaderLayerReference(globeShaderLayer);
-
     let firstOverlayId = null;
     const layers = map.getStyle().layers || [];
     for (const layer of layers) {
@@ -47,7 +39,6 @@ function initLayer() {
         }
     }
     map.addLayer(customShaderLayer, firstOverlayId);
-    map.addLayer(globeShaderLayer, firstOverlayId);
 }
 
 async function renderFrame(globalIdx) {
@@ -63,7 +54,6 @@ async function renderFrame(globalIdx) {
         try {
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
             if (customShaderLayer) customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-            if (globeShaderLayer) globeShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             updateSliderTrackAndBounds();
         } catch (err) {
             return;
@@ -80,7 +70,6 @@ async function renderFrame(globalIdx) {
     };
     
     if (customShaderLayer) customShaderLayer.updateFrame(stateManager.activeFrameState);
-    if (globeShaderLayer) globeShaderLayer.updateFrame(stateManager.activeFrameState);
 
     updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
 }
@@ -97,7 +86,6 @@ export async function preloadRemainingChunks(currentGen) {
                 const bitmap = await loadChunkBitmap(i, currentGen);
                 if (currentGen === stateManager.loadGeneration) {
                     if (customShaderLayer) customShaderLayer.preloadChunkTexture(i, bitmap);
-                    if (globeShaderLayer) globeShaderLayer.preloadChunkTexture(i, bitmap);
                 }
                 updateSliderTrackAndBounds();
             } catch (err) {
@@ -136,15 +124,10 @@ map.on('load', async () => {
         syncModelRunDropdown();
     } catch (err) {}
 
-    try {
-        initGlobeToggle(map);
-    } catch (err) {}
-
     if (stateManager.manifest && stateManager.manifest.chunks) {
         try {
             const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
             if (customShaderLayer) customShaderLayer.preloadChunkTexture(0, bitmap0);
-            if (globeShaderLayer) globeShaderLayer.preloadChunkTexture(0, bitmap0);
 
             syncTimelineWithManifest();
             await renderFrame(0);
