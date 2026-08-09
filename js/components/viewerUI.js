@@ -1,3 +1,4 @@
+// js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks } from '../app.js';
@@ -7,22 +8,31 @@ let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 400;
 let shaderLayerRef = null;
-let isGlobe = false;
-let savedCamera = null;
+let isGlobe = true; // Starts in 3D Globe mode
 
 export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
 }
 
 /**
- * 🌟 Native Mapbox GL v3 3D Globe Projection Toggle
+ * 🌟 3D Spherical Earth Globe Toggle (Swaps between 2D Flat Shader & 3D Globe Shader)
  */
 export function initGlobeToggle(map) {
     const globeBtn = document.getElementById('btn-globe');
-    if (!globeBtn) {
-        console.warn("⚠️ #btn-globe element missing from DOM.");
-        return;
-    }
+    if (!globeBtn) return;
+
+    // Highlight 3D button by default on load
+    globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
+    globeBtn.style.borderColor = '#38bdf8';
+    globeBtn.style.color = '#38bdf8';
+    globeBtn.textContent = '3D';
+
+    // Hide 2D flat shader on startup (since map opens in 3D Globe mode)
+    try {
+        if (map.getLayer('weather-gpu-shader')) {
+            map.setLayoutProperty('weather-gpu-shader', 'visibility', 'none');
+        }
+    } catch (e) {}
 
     globeBtn.onclick = (e) => {
         e.stopPropagation();
@@ -30,44 +40,38 @@ export function initGlobeToggle(map) {
 
         try {
             if (isGlobe) {
-                savedCamera = {
-                    center: map.getCenter(),
-                    zoom: map.getZoom()
-                };
+                // 🌟 3D Globe Mode: Activate 3D Globe Shader & 3D Projection
+                map.setProjection({ type: 'globe' });
 
-                // 🌟 Native Mapbox GL v3 3D Globe Projection
-                if (typeof map.setProjection === 'function') {
-                    map.setProjection('globe');
+                if (map.getLayer('weather-globe-shader')) {
+                    map.setLayoutProperty('weather-globe-shader', 'visibility', 'visible');
                 }
-
-                map.flyTo({
-                    zoom: 1.8,
-                    duration: 1200
-                });
+                if (map.getLayer('weather-gpu-shader')) {
+                    map.setLayoutProperty('weather-gpu-shader', 'visibility', 'none');
+                }
 
                 globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
                 globeBtn.style.borderColor = '#38bdf8';
                 globeBtn.style.color = '#38bdf8';
                 globeBtn.textContent = '3D';
-                console.log("🌐 3D Globe Projection Activated");
-            } else {
-                if (typeof map.setProjection === 'function') {
-                    map.setProjection('mercator');
-                }
+                console.log("🌐 3D Globe Shader Activated");
 
-                if (savedCamera) {
-                    map.flyTo({
-                        center: savedCamera.center,
-                        zoom: savedCamera.zoom,
-                        duration: 1200
-                    });
+            } else {
+                // 🌟 2D Flat Mode: Activate 2D Flat Shader & Mercator Projection
+                map.setProjection({ type: 'mercator' });
+
+                if (map.getLayer('weather-gpu-shader')) {
+                    map.setLayoutProperty('weather-gpu-shader', 'visibility', 'visible');
+                }
+                if (map.getLayer('weather-globe-shader')) {
+                    map.setLayoutProperty('weather-globe-shader', 'visibility', 'none');
                 }
 
                 globeBtn.style.background = 'rgba(255, 255, 255, 0.08)';
                 globeBtn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
                 globeBtn.style.color = '#ffffff';
                 globeBtn.textContent = '2D';
-                console.log("🗺️ 2D Mercator Projection Activated");
+                console.log("🗺️ 2D Flat Shader Activated");
             }
         } catch (err) {
             console.error("Globe toggle error:", err);
