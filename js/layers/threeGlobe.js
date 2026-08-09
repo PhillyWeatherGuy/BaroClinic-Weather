@@ -1,12 +1,15 @@
 // js/layers/threeGlobe.js
 import { HEX_PALETTE } from '../shaders/scalarShader.js';
 
-// 🌐 Lightweight (<400 KB total) 10m/50m Vector Line Datasets
+// 🌐 High-Definition 3D Vector Line Datasets
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
+// 🌟 US County Borders (Loaded dynamically on zoom-in)
+const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
+let countyMesh = null; // Separate mesh for zoom-triggered US county borders
 let isGlobeActive = false;
 
 const vsThreeGlobe = `
@@ -33,19 +36,17 @@ const fsThreeGlobe = `
         float mercY = log(tan(0.78539816339 + latRad / 2.0));
         float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
 
-        // 🌟 normY maps weather layer right-side up
         vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
-        // Sample rich weather temperature color
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
-        vec4 tempColor = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
+        vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
         // Subtle 3D atmospheric limb depth glow
         float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
         vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
 
-        gl_FragColor = vec4(tempColor.rgb + atmosphere * 0.2, tempColor.a * u_opacity);
+        gl_FragColor = vec4(color.rgb + atmosphere * 0.2, color.a * u_opacity);
     }
 `;
 
@@ -67,7 +68,7 @@ function createPaletteTexture() {
 /**
  * 🌟 Converts [lng, lat] to 3D sphere coordinate (x, y, z)
  */
-function lngLatToVector3(lng, lat, radius = 2.004) {
+function lngLatToVector3(lng, lat, radius = 2.003) {
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lng + 180) * (Math.PI / 180);
 
@@ -79,19 +80,19 @@ function lngLatToVector3(lng, lat, radius = 2.004) {
 }
 
 /**
- * 🌟 RAZOR-SHARP 3D VECTOR BORDERS: Never pixelates at any zoom level!
+ * 🌟 BOLD THICK 3D VECTOR BORDERS: Micro-offsets (0.005°) for thick black state & country lines
  */
 async function load3DVectorBorders(parentMesh) {
     const linePoints = [];
     const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
 
-    // Multi-pass offsets for bold, thick 3D lines
+    // Micro-offsets (0.005° = 500m) for thick bold lines without double-line splitting
     const lineOffsets = [
         [0, 0],
-        [0.05, 0],
-        [-0.05, 0],
-        [0, 0.05],
-        [0, -0.05]
+        [0.005, 0],
+        [-0.005, 0],
+        [0, 0.005],
+        [0, -0.005]
     ];
 
     for (const url of urls) {
@@ -115,12 +116,11 @@ async function load3DVectorBorders(parentMesh) {
                         const p1Base = coords[i];
                         const p2Base = coords[i+1];
 
-                        // Antimeridian jump protection (prevents lines drawing across -180 to +180)
                         if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
 
                         lineOffsets.forEach(([dLng, dLat]) => {
-                            const p1 = lngLatToVector3(p1Base[0] + dLng, p1Base[1] + dLat, 2.004);
-                            const p2 = lngLatToVector3(p2Base[0] + dLng, p2Base[1] + dLat, 2.004);
+                            const p1 = lngLatToVector3(p1Base[0] + dLng, p1Base[1] + dLat, 2.003);
+                            const p2 = lngLatToVector3(p2Base[0] + dLng, p2Base[1] + dLat, 2.003);
 
                             linePoints.push(p1.x, p1.y, p1.z);
                             linePoints.push(p2.x, p2.y, p2.z);
@@ -139,13 +139,73 @@ async function load3DVectorBorders(parentMesh) {
 
         const lineMaterial = new THREE.LineBasicMaterial({
             color: 0x000000,
-            opacity: 0.92,
+            opacity: 0.95,
             transparent: true
         });
 
         const linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
-        parentMesh.add(linesMesh); // Rotates in 3D sync with Earth!
-        console.log("🌟 Razor-Sharp 3D Vector Borders Active!");
+        parentMesh.add(linesMesh);
+        console.log("🌟 Bold Thick 3D Country & State Borders Active!");
+    }
+
+    // 🌟 Load US County Borders in background
+    load3DCountyBorders(parentMesh);
+}
+
+/**
+ * 🌟 US COUNTY BORDERS: Automatically pop into view when zooming in close
+ */
+async function load3DCountyBorders(parentMesh) {
+    try {
+        const resp = await fetch(COUNTY_BORDERS_URL);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const linePoints = [];
+
+        data.features.forEach(feature => {
+            const geom = feature.geometry;
+            if (!geom) return;
+
+            let lineStrings = [];
+            if (geom.type === 'LineString') lineStrings = [geom.coordinates];
+            else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
+            else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
+            else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
+
+            lineStrings.forEach(coords => {
+                for (let i = 0; i < coords.length - 1; i++) {
+                    const p1Base = coords[i];
+                    const p2Base = coords[i+1];
+
+                    if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
+
+                    const p1 = lngLatToVector3(p1Base[0], p1Base[1], 2.004);
+                    const p2 = lngLatToVector3(p2Base[0], p2Base[1], 2.004);
+
+                    linePoints.push(p1.x, p1.y, p1.z);
+                    linePoints.push(p2.x, p2.y, p2.z);
+                }
+            });
+        });
+
+        if (linePoints.length > 0) {
+            const lineGeometry = new THREE.BufferGeometry();
+            lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
+
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: 0x000000,
+                opacity: 0.55,
+                transparent: true
+            });
+
+            countyMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
+            countyMesh.visible = false; // Hidden until zoomed in!
+            parentMesh.add(countyMesh);
+            console.log("🌟 US County Borders Active!");
+        }
+    } catch (err) {
+        console.warn("County border load error:", err);
     }
 }
 
@@ -192,7 +252,7 @@ export function initThreeGlobe() {
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
-    // 🌟 Load Razor-Sharp 3D Vector Borders
+    // 🌟 Load Bold 3D Borders + US County Lines
     load3DVectorBorders(globeMesh);
 
     window.addEventListener('resize', () => {
@@ -206,6 +266,13 @@ export function initThreeGlobe() {
         requestAnimationFrame(animate);
         if (isGlobeActive && controls && renderer && scene) {
             controls.update();
+
+            // 🌟 Zoom Check: Show US County lines when camera gets close!
+            if (countyMesh) {
+                const dist = camera.position.distanceTo(globeMesh.position);
+                countyMesh.visible = (dist < 4.2); // Toggles county lines on zoom
+            }
+
             renderer.render(scene, camera);
         }
     }
