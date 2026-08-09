@@ -1,3 +1,4 @@
+// js/shaders/scalarShader.js
 export const HEX_PALETTE = [
     "#E4E3E7", "#B3B1B7", "#ADACB5", "#A8A6B2", "#9E9DAC", "#9D9CAF", "#9897AE", "#9693AF",
     "#908BAB", "#8E89AC", "#8E85AC", "#887BA6", "#806D9E", "#8169A0", "#8367A2", "#8467A3",
@@ -72,8 +73,14 @@ const fsSource = `
     uniform vec2 u_uvScale;
 
     void main() {
-        vec2 wrapped_uv = vec2(fract(v_texcoord.x), v_texcoord.y);
+        // 🌟 Mercator UV coordinate transform for Equirectangular input images
+        float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
+        float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
+        float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
+
+        vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
+
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
         gl_FragColor = vec4(color.rgb, color.a * u_opacity);
@@ -108,9 +115,6 @@ export function createScalarShaderLayer(mapInstance) {
         uvOffset: [0, 0],
         uvScale: [1, 1],
 
-        /**
-         * 🌟 VRAM MEMORY CLEANUP: Deletes WebGL textures from the GPU card directly
-         */
         clearTextures: function() {
             if (!this.gl) return;
             for (const key in this.chunkTextures) {
