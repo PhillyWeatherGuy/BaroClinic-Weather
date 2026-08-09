@@ -234,21 +234,17 @@ export function initThreeGlobe() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    // 🌟 OPTIMIZED MOBILE TOUCH ORBIT CONTROLS
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.04;  // 🌟 Flywheel momentum flick
-    controls.rotateSpeed = 0.55;    // 🌟 Mobile-tuned gesture sensitivity
-    controls.zoomSpeed = 0.7;      // 🌟 Smooth pinch-to-zoom
+    controls.dampingFactor = 0.04;
+    controls.zoomSpeed = 0.7;
     controls.minDistance = 2.8;
     controls.maxDistance = 12;
 
-    // 🌟 Locks Earth at screen center & keeps North Pole pointing UP!
     controls.enablePan = false;
     controls.minPolarAngle = Math.PI * 0.08;
     controls.maxPolarAngle = Math.PI * 0.92;
 
-    // 🌟 Explicit Mobile Touch Gesture Mapping
     if (THREE.TOUCH) {
         controls.touches = {
             ONE: THREE.TOUCH.ROTATE,
@@ -274,7 +270,6 @@ export function initThreeGlobe() {
     const geometry = new THREE.SphereGeometry(2, 64, 64);
     globeMesh = new THREE.Mesh(geometry, material);
     
-    // Rotate globe -90° on load so North America faces front
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
@@ -289,11 +284,17 @@ export function initThreeGlobe() {
 
     function animate() {
         requestAnimationFrame(animate);
-        if (isGlobeActive && controls && renderer && scene) {
+        if (isGlobeActive && controls && renderer && scene && globeMesh) {
+            const dist = camera.position.distanceTo(globeMesh.position);
+
+            // 🌟 DYNAMIC ROTATION SPEED: Slows down smoothly when zoomed in!
+            const zoomRatio = Math.max(0, Math.min(1, (dist - controls.minDistance) / (controls.maxDistance - controls.minDistance)));
+            controls.rotateSpeed = 0.12 + zoomRatio * 0.53;
+
             controls.update();
 
+            // Zoom Check: Show US County lines when camera gets close
             if (countyMesh) {
-                const dist = camera.position.distanceTo(globeMesh.position);
                 countyMesh.visible = (dist < 4.2);
             }
 
