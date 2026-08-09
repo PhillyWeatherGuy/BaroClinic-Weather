@@ -9,8 +9,33 @@ const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
-let countyMesh = null; // Separate mesh for zoom-triggered US county borders
+let countyMesh = null;
 let isGlobeActive = false;
+
+// 🌟 Mobile Touch CSS Overrides: Prevents iOS Safari page-bounce & gesture conflicts
+const style = document.createElement('style');
+style.textContent = `
+    #globe-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 2;
+        touch-action: none !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+    }
+    #globe-container canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        touch-action: none !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+    }
+`;
+document.head.appendChild(style);
 
 const vsThreeGlobe = `
     varying vec2 v_uv;
@@ -65,9 +90,6 @@ function createPaletteTexture() {
     return texture;
 }
 
-/**
- * 🌟 Converts [lng, lat] to 3D sphere coordinate (x, y, z)
- */
 function lngLatToVector3(lng, lat, radius = 2.003) {
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lng + 180) * (Math.PI / 180);
@@ -79,9 +101,6 @@ function lngLatToVector3(lng, lat, radius = 2.003) {
     return new THREE.Vector3(x, y, z);
 }
 
-/**
- * 🌟 BOLD THICK 3D VECTOR BORDERS: Micro-offsets (0.005°) for thick black state & country lines
- */
 async function load3DVectorBorders(parentMesh) {
     const linePoints = [];
     const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
@@ -144,15 +163,11 @@ async function load3DVectorBorders(parentMesh) {
 
         const linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
         parentMesh.add(linesMesh);
-        console.log("🌟 Bold Thick 3D Country & State Borders Active!");
     }
 
     load3DCountyBorders(parentMesh);
 }
 
-/**
- * 🌟 US COUNTY BORDERS: Automatically pop into view when zooming in close
- */
 async function load3DCountyBorders(parentMesh) {
     try {
         const resp = await fetch(COUNTY_BORDERS_URL);
@@ -200,7 +215,6 @@ async function load3DCountyBorders(parentMesh) {
             countyMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
             countyMesh.visible = false;
             parentMesh.add(countyMesh);
-            console.log("🌟 US County Borders Active!");
         }
     } catch (err) {
         console.warn("County border load error:", err);
@@ -220,19 +234,27 @@ export function initThreeGlobe() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    // 🌟 FIXED Y-AXIS GLOBE ORBIT CONTROLS
+    // 🌟 OPTIMIZED MOBILE TOUCH ORBIT CONTROLS
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.rotateSpeed = 0.8;
-    controls.zoomSpeed = 0.8;
+    controls.dampingFactor = 0.04;  // 🌟 Flywheel momentum flick
+    controls.rotateSpeed = 0.55;    // 🌟 Mobile-tuned gesture sensitivity
+    controls.zoomSpeed = 0.7;      // 🌟 Smooth pinch-to-zoom
     controls.minDistance = 2.8;
     controls.maxDistance = 12;
 
-    // 🌟 Locks Earth at center & keeps North Pole pointing UP!
-    controls.enablePan = false; // Disables dragging Earth off-center
-    controls.minPolarAngle = Math.PI * 0.08; // Prevents camera flipping over North Pole
-    controls.maxPolarAngle = Math.PI * 0.92; // Prevents camera flipping under South Pole
+    // 🌟 Locks Earth at screen center & keeps North Pole pointing UP!
+    controls.enablePan = false;
+    controls.minPolarAngle = Math.PI * 0.08;
+    controls.maxPolarAngle = Math.PI * 0.92;
+
+    // 🌟 Explicit Mobile Touch Gesture Mapping
+    if (THREE.TOUCH) {
+        controls.touches = {
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY_PAN
+        };
+    }
 
     paletteTex = createPaletteTexture();
 
@@ -270,7 +292,6 @@ export function initThreeGlobe() {
         if (isGlobeActive && controls && renderer && scene) {
             controls.update();
 
-            // Zoom Check: Show US County lines when camera gets close
             if (countyMesh) {
                 const dist = camera.position.distanceTo(globeMesh.position);
                 countyMesh.visible = (dist < 4.2);
