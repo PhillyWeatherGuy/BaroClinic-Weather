@@ -1,6 +1,7 @@
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
+import { createGlobeShaderLayer } from './shaders/globeShader.js'; // 🌟 3D Globe Shader
 import { initHubTransition } from './components/homeScreen.js'; 
 import { 
     initViewerUI, 
@@ -16,6 +17,8 @@ import {
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
 
 let customShaderLayer = null;
+let globeShaderLayer = null;
+let activeShaderRef = null;
 let renderDebounceId = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
@@ -29,8 +32,11 @@ const map = new maplibregl.Map({
 
 function initLayer() {
     customShaderLayer = createScalarShaderLayer(map);
-    setShaderLayerReference(customShaderLayer);
+    globeShaderLayer = createGlobeShaderLayer(map);
     
+    activeShaderRef = customShaderLayer;
+    setShaderLayerReference(activeShaderRef);
+
     let firstOverlayId = null;
     const layers = map.getStyle().layers || [];
     for (const layer of layers) {
@@ -40,6 +46,7 @@ function initLayer() {
         }
     }
     map.addLayer(customShaderLayer, firstOverlayId);
+    map.addLayer(globeShaderLayer, firstOverlayId);
 }
 
 async function renderFrame(globalIdx) {
@@ -54,9 +61,8 @@ async function renderFrame(globalIdx) {
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
-            if (customShaderLayer) {
-                customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-            }
+            if (customShaderLayer) customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
+            if (globeShaderLayer) globeShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             updateSliderTrackAndBounds();
         } catch (err) {
             return;
@@ -72,16 +78,12 @@ async function renderFrame(globalIdx) {
         uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
     };
     
-    if (customShaderLayer) {
-        customShaderLayer.updateFrame(stateManager.activeFrameState);
-    }
+    if (customShaderLayer) customShaderLayer.updateFrame(stateManager.activeFrameState);
+    if (globeShaderLayer) globeShaderLayer.updateFrame(stateManager.activeFrameState);
 
     updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
 }
 
-/**
- * 🌟 SEQUENTIAL PRELOADER: Updates slider red/blue progress as each chunk finishes downloading
- */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
     const totalChunks = stateManager.manifest.chunks.length;
@@ -92,8 +94,9 @@ export async function preloadRemainingChunks(currentGen) {
         if (!stateManager.loadedChunkBitmaps[i]) {
             try {
                 const bitmap = await loadChunkBitmap(i, currentGen);
-                if (customShaderLayer && currentGen === stateManager.loadGeneration) {
-                    customShaderLayer.preloadChunkTexture(i, bitmap);
+                if (currentGen === stateManager.loadGeneration) {
+                    if (customShaderLayer) customShaderLayer.preloadChunkTexture(i, bitmap);
+                    if (globeShaderLayer) globeShaderLayer.preloadChunkTexture(i, bitmap);
                 }
                 updateSliderTrackAndBounds();
             } catch (err) {
@@ -111,48 +114,36 @@ initViewerUI((stepIndex) => {
     renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
 });
 
-// 🌟 BULLETPROOF FAIL-SAFE MAP LOAD SEQUENCE
 map.on('load', async () => {
-    // Always trigger hub transition timer immediately so splash screen reveals READY
     initHubTransition();
 
     try {
         await fetchManifest();
     } catch (err) {
-        console.error("Manifest load error:", err);
         showToast('❌ ' + err.message);
     }
 
     try {
         initLayer();
-    } catch (err) {
-        console.error("Layer init error:", err);
-    }
+    } catch (err) {}
 
     try {
         initCityTempOverlay(map);
-    } catch (err) {
-        console.error("City overlay init error:", err);
-    }
+    } catch (err) {}
 
     try {
         syncModelRunDropdown();
-    } catch (err) {
-        console.error("Dropdown sync error:", err);
-    }
+    } catch (err) {}
 
     try {
         initGlobeToggle(map);
-    } catch (err) {
-        console.error("Globe toggle error:", err);
-    }
+    } catch (err) {}
 
     if (stateManager.manifest && stateManager.manifest.chunks) {
         try {
             const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
-            if (customShaderLayer) {
-                customShaderLayer.preloadChunkTexture(0, bitmap0);
-            }
+            if (customShaderLayer) customShaderLayer.preloadChunkTexture(0, bitmap0);
+            if (globeShaderLayer) globeShaderLayer.preloadChunkTexture(0, bitmap0);
 
             syncTimelineWithManifest();
             await renderFrame(0);
@@ -160,7 +151,6 @@ map.on('load', async () => {
 
             preloadRemainingChunks(stateManager.loadGeneration);
         } catch (err) {
-            console.error("Chunk 0 load error:", err);
             showToast('❌ ' + err.message);
         }
     }
