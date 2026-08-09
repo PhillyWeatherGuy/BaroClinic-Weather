@@ -1,12 +1,12 @@
 // js/layers/threeGlobe.js
 import { HEX_PALETTE } from '../shaders/scalarShader.js';
 
-// 🌐 10m High-Definition World Country, US State, & Coastline Vector Datasets
+// 🌐 10m High-Definition Vector Datasets
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_1_states_provinces.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_coastline.geojson';
 
-let scene, camera, renderer, controls, globeMesh, material, paletteTex;
+let scene, camera, renderer, controls, globeMesh, material, paletteTex, borderTex;
 let isGlobeActive = false;
 
 const vsThreeGlobe = `
@@ -22,6 +22,7 @@ const vsThreeGlobe = `
 const fsThreeGlobe = `
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
+    uniform sampler2D u_borderTexture; // 🌟 5px Bold Black Vector Border Overlay
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
     uniform float u_opacity;
@@ -36,14 +37,21 @@ const fsThreeGlobe = `
         vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
+        // Sample rich weather temperature color
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
-        vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
+        vec4 tempColor = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
+
+        // Sample 5px thick black vector border overlay
+        vec4 borderData = texture2D(u_borderTexture, wrapped_uv);
+
+        // Mix pitch-black border lines over temperature color
+        vec3 finalColor = mix(tempColor.rgb, vec3(0.0), borderData.a * 0.95);
 
         // Subtle 3D atmospheric limb depth glow
         float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
         vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
 
-        gl_FragColor = vec4(color.rgb + atmosphere * 0.2, color.a * u_opacity);
+        gl_FragColor = vec4(finalColor + atmosphere * 0.2, tempColor.a * u_opacity);
     }
 `;
 
@@ -63,34 +71,24 @@ function createPaletteTexture() {
 }
 
 /**
- * 🌟 Converts [lng, lat] to 3D sphere coordinate (x, y, z)
+ * 🌟 BOLD 5-PIXEL THICK BLACK BORDER TEXTURE
+ * Draws country borders, coastlines, and ALL 50 US state lines in 5px bold black strokes
  */
-function lngLatToVector3(lng, lat, radius = 2.003) {
-    const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lng + 180) * (Math.PI / 180);
+async function createBorderCanvasTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 4096;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
 
-    const x = -(radius * Math.sin(phi) * Math.cos(theta));
-    const z = (radius * Math.sin(phi) * Math.sin(theta));
-    const y = (radius * Math.cos(phi));
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    return new THREE.Vector3(x, y, z);
-}
+    // 🌟 BOLD 5-PIXEL THICK BLACK STROKES
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 5.0; 
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
-/**
- * 🌟 THICK BOLD 3D VECTOR LINES: Multi-offset geometry for heavy pitch-black state & country lines
- */
-async function load3DBorderLines(parentMesh) {
-    const linePoints = [];
     const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
-
-    // Multi-pass pixel offsets to force thick bold 3D lines in WebGL
-    const lineOffsets = [
-        [0, 0],
-        [0.05, 0],
-        [-0.05, 0],
-        [0, 0.05],
-        [0, -0.05]
-    ];
 
     for (const url of urls) {
         try {
@@ -98,57 +96,44 @@ async function load3DBorderLines(parentMesh) {
             if (!resp.ok) continue;
             const data = await resp.json();
 
+            ctx.beginPath();
             data.features.forEach(feature => {
                 const geom = feature.geometry;
                 if (!geom) return;
 
                 let lineStrings = [];
-                if (geom.type === 'LineString') {
-                    lineStrings = [geom.coordinates];
-                } else if (geom.type === 'MultiLineString') {
-                    lineStrings = geom.coordinates;
-                } else if (geom.type === 'Polygon') {
-                    lineStrings = geom.coordinates;
-                } else if (geom.type === 'MultiPolygon') {
-                    geom.coordinates.forEach(poly => {
-                        poly.forEach(ring => lineStrings.push(ring));
-                    });
-                }
+                if (geom.type === 'LineString') lineStrings = [geom.coordinates];
+                else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
+                else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
+                else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
 
                 lineStrings.forEach(coords => {
-                    for (let i = 0; i < coords.length - 1; i++) {
-                        const p1Base = coords[i];
-                        const p2Base = coords[i+1];
+                    for (let i = 0; i < coords.length; i++) {
+                        let normX = (coords[i][0] + 180) / 360;
+                        normX = ((normX % 1) + 1) % 1;
 
-                        lineOffsets.forEach(([dLng, dLat]) => {
-                            const p1 = lngLatToVector3(p1Base[0] + dLng, p1Base[1] + dLat);
-                            const p2 = lngLatToVector3(p2Base[0] + dLng, p2Base[1] + dLat);
+                        const latRad = coords[i][1] * Math.PI / 180;
+                        const mercY = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+                        const normY = 0.5 - (mercY / (2 * Math.PI));
 
-                            linePoints.push(p1.x, p1.y, p1.z);
-                            linePoints.push(p2.x, p2.y, p2.z);
-                        });
+                        const px = normX * canvas.width;
+                        const py = normY * canvas.height;
+
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
                     }
                 });
             });
-        } catch (err) {
-            console.warn("3D border line load error for:", url, err);
+            ctx.stroke();
+        } catch (e) {
+            console.warn("Border texture draw error:", e);
         }
     }
 
-    if (linePoints.length > 0) {
-        const lineGeometry = new THREE.BufferGeometry();
-        lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
-
-        const lineMaterial = new THREE.LineBasicMaterial({
-            color: 0x000000,
-            opacity: 0.95,
-            transparent: true
-        });
-
-        const linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
-        parentMesh.add(linesMesh); // Rotates in 3D sync with Earth!
-        console.log("🌟 Heavy Bold 3D Country, US State, & Coastline Borders Active!");
-    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
 }
 
 export function initThreeGlobe() {
@@ -174,12 +159,19 @@ export function initThreeGlobe() {
 
     paletteTex = createPaletteTexture();
 
+    // Default 1x1 empty border texture until HD canvas texture finishes rendering
+    const emptyCanvas = document.createElement('canvas');
+    emptyCanvas.width = 1;
+    emptyCanvas.height = 1;
+    borderTex = new THREE.CanvasTexture(emptyCanvas);
+
     material = new THREE.ShaderMaterial({
         vertexShader: vsThreeGlobe,
         fragmentShader: fsThreeGlobe,
         uniforms: {
             u_dataTexture: { value: null },
             u_paletteTexture: { value: paletteTex },
+            u_borderTexture: { value: borderTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
             u_opacity: { value: 0.85 }
@@ -194,8 +186,13 @@ export function initThreeGlobe() {
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
-    // 🌟 Load Bold 3D Country, US State, & Coastline Vector Lines
-    load3DBorderLines(globeMesh);
+    // 🌟 Render 5px Bold Black Vector Border Overlay Texture
+    createBorderCanvasTexture().then(tex => {
+        borderTex = tex;
+        material.uniforms.u_borderTexture.value = borderTex;
+        material.needsUpdate = true;
+        console.log("🌟 Bold 5px Black Borders Rendered on 3D Globe!");
+    });
 
     window.addEventListener('resize', () => {
         if (!renderer || !camera) return;
