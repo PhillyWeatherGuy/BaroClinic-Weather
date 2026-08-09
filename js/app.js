@@ -111,31 +111,58 @@ initViewerUI((stepIndex) => {
     renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
 });
 
+// 🌟 BULLETPROOF FAIL-SAFE MAP LOAD SEQUENCE
 map.on('load', async () => {
+    // Always trigger hub transition timer immediately so splash screen reveals READY
+    initHubTransition();
+
     try {
         await fetchManifest();
-        initLayer();
-
-        initCityTempOverlay(map);
-        syncModelRunDropdown();
-
-        // 🌟 Initialize 3D Globe Projection Toggle
-        initGlobeToggle(map);
-
-        const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
-        customShaderLayer.preloadChunkTexture(0, bitmap0);
-
-        syncTimelineWithManifest();
-
-        await renderFrame(0);
-        hideToast();
-
-        initHubTransition();
-
-        preloadRemainingChunks(stateManager.loadGeneration);
-
     } catch (err) {
+        console.error("Manifest load error:", err);
         showToast('❌ ' + err.message);
+    }
+
+    try {
+        initLayer();
+    } catch (err) {
+        console.error("Layer init error:", err);
+    }
+
+    try {
+        initCityTempOverlay(map);
+    } catch (err) {
+        console.error("City overlay init error:", err);
+    }
+
+    try {
+        syncModelRunDropdown();
+    } catch (err) {
+        console.error("Dropdown sync error:", err);
+    }
+
+    try {
+        initGlobeToggle(map);
+    } catch (err) {
+        console.error("Globe toggle error:", err);
+    }
+
+    if (stateManager.manifest && stateManager.manifest.chunks) {
+        try {
+            const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
+            if (customShaderLayer) {
+                customShaderLayer.preloadChunkTexture(0, bitmap0);
+            }
+
+            syncTimelineWithManifest();
+            await renderFrame(0);
+            hideToast();
+
+            preloadRemainingChunks(stateManager.loadGeneration);
+        } catch (err) {
+            console.error("Chunk 0 load error:", err);
+            showToast('❌ ' + err.message);
+        }
     }
 });
 
