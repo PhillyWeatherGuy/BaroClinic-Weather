@@ -157,8 +157,8 @@ function updateCityPositions() {
                 <div class="city-label-name">${city.name}</div>
             `;
 
-            // 🌟 Updated to Mapbox GL JS Marker
-            marker = new mapboxgl.Marker({
+            // 🌟 MapLibre Marker
+            marker = new maplibregl.Marker({
                 element: node,
                 anchor: 'center'
             }).setLngLat([city.lng, city.lat]).addTo(mapInstance);
