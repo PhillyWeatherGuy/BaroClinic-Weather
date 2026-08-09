@@ -1,4 +1,3 @@
-// js/app.js
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
@@ -17,9 +16,6 @@ import {
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
 import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js';
-
-// 🌟 Start splash screen timer IMMEDIATELY on app load (Guarantees READY transition after 3s)
-initHubTransition();
 
 let customShaderLayer = null;
 let globeShaderLayer = null;
@@ -118,7 +114,8 @@ initViewerUI((stepIndex) => {
 });
 
 map.on('load', async () => {
-    // 🌟 Initialize Three.js 3D Globe Engine
+    initHubTransition();
+
     try {
         initThreeGlobe();
     } catch (err) {
