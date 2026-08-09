@@ -81,10 +81,10 @@ export async function initCityTempOverlay(map) {
             const pop = f.properties.POP_MAX || f.properties.pop_max || 0;
             
             let minZoom = 6;
-            if (pop >= 2000000) minZoom = 2;      // Mega Metros
-            else if (pop >= 500000) minZoom = 4;  // Major Cities
-            else if (pop >= 100000) minZoom = 5;  // Mid-size Cities
-            else minZoom = 6;                     // Towns
+            if (pop >= 2000000) minZoom = 2;
+            else if (pop >= 500000) minZoom = 4;
+            else if (pop >= 100000) minZoom = 5;
+            else minZoom = 6;
 
             return {
                 id: i,
@@ -108,9 +108,6 @@ export async function initCityTempOverlay(map) {
     }
 }
 
-/**
- * 🌟 Population-Ranked Screen Collision System
- */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
 
@@ -160,7 +157,8 @@ function updateCityPositions() {
                 <div class="city-label-name">${city.name}</div>
             `;
 
-            marker = new maplibregl.Marker({
+            // 🌟 Updated to Mapbox GL JS Marker
+            marker = new mapboxgl.Marker({
                 element: node,
                 anchor: 'center'
             }).setLngLat([city.lng, city.lat]).addTo(mapInstance);
@@ -182,9 +180,6 @@ function updateCityPositions() {
     }
 }
 
-/**
- * 🌟 0.0001ms INSTANT TEMPERATURE UPDATES
- */
 export function updateCityTemperatures(map, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return;
 
