@@ -48,9 +48,6 @@ function createPaletteTexture(gl) {
     return paletteTex;
 }
 
-/**
- * 🌟 3D GLOBE MESH SUBDIVISION: Generates 16,384 micro-triangles to curve around 3D Earth sphere (like earth.nullschool)
- */
 function generateSubdividedGlobeGrid(cols = 128, rows = 64) {
     const vertices = [];
     const xMin = -2.0;
@@ -68,9 +65,7 @@ function generateSubdividedGlobeGrid(cols = 128, rows = 64) {
             const x1 = xMin + c * dx;
             const x2 = x1 + dx;
 
-            // Triangle 1
             vertices.push(x1, y1,  x2, y1,  x1, y2);
-            // Triangle 2
             vertices.push(x1, y2,  x2, y1,  x2, y2);
         }
     }
@@ -124,7 +119,6 @@ export function createGlobeShaderLayer(mapInstance) {
             this.uUvOffset = gl.getUniformLocation(this.program, 'u_uvOffset');
             this.uUvScale = gl.getUniformLocation(this.program, 'u_uvScale');
 
-            // 🌟 16,384 micro-triangle vertex mesh for 3D Globe curvature
             const quadVertices = generateSubdividedGlobeGrid(gridCols, gridRows);
 
             this.vertexBuffer = gl.createBuffer();
