@@ -9,8 +9,50 @@ const PLAYBACK_SPEED_MS = 400;
 let shaderLayerRef = null;
 let isGlobe = false;
 
-export function setShaderLayerReference(layer) {
-    shaderLayerRef = layer;
+let isGlobe = false;
+
+export function initGlobeToggle(map) {
+    const globeBtn = document.getElementById('btn-globe');
+    if (!globeBtn) {
+        console.warn("⚠️ #btn-globe element missing from DOM. Make sure it is saved in index.html!");
+        return;
+    }
+
+    globeBtn.onclick = (e) => {
+        e.stopPropagation();
+        isGlobe = !isGlobe;
+
+        try {
+            if (isGlobe) {
+                // 🌟 Try both MapLibre GL v4 object and string projection syntax
+                if (typeof map.setProjection === 'function') {
+                    try {
+                        map.setProjection({ type: 'globe' });
+                    } catch (err) {
+                        map.setProjection('globe');
+                    }
+                }
+                globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
+                globeBtn.style.borderColor = '#38bdf8';
+                globeBtn.style.color = '#38bdf8';
+                console.log("🌐 3D Globe Projection Activated");
+            } else {
+                if (typeof map.setProjection === 'function') {
+                    try {
+                        map.setProjection({ type: 'mercator' });
+                    } catch (err) {
+                        map.setProjection('mercator');
+                    }
+                }
+                globeBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+                globeBtn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                globeBtn.style.color = '#ffffff';
+                console.log("🗺️ 2D Mercator Projection Activated");
+            }
+        } catch (err) {
+            console.error("Projection toggle error:", err);
+        }
+    };
 }
 
 /**
