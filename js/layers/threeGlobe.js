@@ -1,14 +1,14 @@
 // js/layers/threeGlobe.js
 import { HEX_PALETTE } from '../shaders/scalarShader.js';
 
-// 🌐 Lightweight (<400 KB total) 10m/50m Vector Line Datasets
+// 🌐 10m High-Definition Vector Datasets
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
-let globeChunkTextures = {}; // 🌟 Texture cache per chunk index
+let globeChunkTextures = {};
 let countyMesh = null;
 let isGlobeActive = false;
 
@@ -63,9 +63,11 @@ const fsThreeGlobe = `
         float mercY = log(tan(0.78539816339 + clampedLat / 2.0));
         float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
 
-        // 🌟 1.0 - normY maps Web Mercator spritesheets onto 3D Sphere with ZERO STRETCHING
-        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - normY);
-        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
+        // 🌟 3D Globe Y-UV Mapping: Maps Mercator row 0 to North Pole seamlessly!
+        vec2 sprite_uv = vec2(
+            u_uvOffset.x + v_uv.x * u_uvScale.x,
+            u_uvOffset.y + normY * u_uvScale.y
+        );
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
