@@ -1,7 +1,7 @@
 // js/layers/threeGlobe.js
 import { HEX_PALETTE } from '../shaders/scalarShader.js';
 
-// 🌐 10m High-Definition World Country & US State/Province Datasets
+// 🌐 10m High-Definition World Country, US State, & Coastline Vector Datasets
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_1_states_provinces.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_coastline.geojson';
@@ -77,11 +77,20 @@ function lngLatToVector3(lng, lat, radius = 2.003) {
 }
 
 /**
- * 🌟 Loads HD Country, US State, and Coastline 3D Vector Lines
+ * 🌟 THICK BOLD 3D VECTOR LINES: Multi-offset geometry for heavy pitch-black state & country lines
  */
 async function load3DBorderLines(parentMesh) {
     const linePoints = [];
     const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
+
+    // Multi-pass pixel offsets to force thick bold 3D lines in WebGL
+    const lineOffsets = [
+        [0, 0],
+        [0.05, 0],
+        [-0.05, 0],
+        [0, 0.05],
+        [0, -0.05]
+    ];
 
     for (const url of urls) {
         try {
@@ -108,16 +117,21 @@ async function load3DBorderLines(parentMesh) {
 
                 lineStrings.forEach(coords => {
                     for (let i = 0; i < coords.length - 1; i++) {
-                        const p1 = lngLatToVector3(coords[i][0], coords[i][1]);
-                        const p2 = lngLatToVector3(coords[i+1][0], coords[i+1][1]);
+                        const p1Base = coords[i];
+                        const p2Base = coords[i+1];
 
-                        linePoints.push(p1.x, p1.y, p1.z);
-                        linePoints.push(p2.x, p2.y, p2.z);
+                        lineOffsets.forEach(([dLng, dLat]) => {
+                            const p1 = lngLatToVector3(p1Base[0] + dLng, p1Base[1] + dLat);
+                            const p2 = lngLatToVector3(p2Base[0] + dLng, p2Base[1] + dLat);
+
+                            linePoints.push(p1.x, p1.y, p1.z);
+                            linePoints.push(p2.x, p2.y, p2.z);
+                        });
                     }
                 });
             });
         } catch (err) {
-            console.warn("3D line load error for:", url, err);
+            console.warn("3D border line load error for:", url, err);
         }
     }
 
@@ -127,14 +141,13 @@ async function load3DBorderLines(parentMesh) {
 
         const lineMaterial = new THREE.LineBasicMaterial({
             color: 0x000000,
-            opacity: 0.85,
-            transparent: true,
-            linewidth: 1.5
+            opacity: 0.95,
+            transparent: true
         });
 
         const linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
         parentMesh.add(linesMesh); // Rotates in 3D sync with Earth!
-        console.log("🌟 HD Country, US State, & Coastline Borders Active!");
+        console.log("🌟 Heavy Bold 3D Country, US State, & Coastline Borders Active!");
     }
 }
 
@@ -181,7 +194,7 @@ export function initThreeGlobe() {
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
-    // 🌟 Load HD Country, US State, & Coastline 3D Vector Lines
+    // 🌟 Load Bold 3D Country, US State, & Coastline Vector Lines
     load3DBorderLines(globeMesh);
 
     window.addEventListener('resize', () => {
