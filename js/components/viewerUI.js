@@ -1,15 +1,49 @@
+// js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks } from '../app.js';
+import { showThreeGlobe, hideThreeGlobe } from '../layers/threeGlobe.js';
 
 let onStepChangeCallback = null;
 let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 400;
 let shaderLayerRef = null;
+let isGlobe = false;
 
 export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
+}
+
+/**
+ * 🌟 2D Map <-> 3D Three.js Globe Engine Switcher
+ */
+export function initGlobeToggle(map) {
+    const globeBtn = document.getElementById('btn-globe');
+    if (!globeBtn) return;
+
+    globeBtn.onclick = (e) => {
+        e.stopPropagation();
+        isGlobe = !isGlobe;
+
+        if (isGlobe) {
+            // 🌟 Activate 3D Three.js Globe Engine
+            showThreeGlobe();
+            globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
+            globeBtn.style.borderColor = '#38bdf8';
+            globeBtn.style.color = '#38bdf8';
+            globeBtn.textContent = '3D';
+            console.log("🌐 3D Three.js Globe Engine Activated");
+        } else {
+            // 🌟 Return to 2D MapLibre Map Engine
+            hideThreeGlobe();
+            globeBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+            globeBtn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+            globeBtn.style.color = '#ffffff';
+            globeBtn.textContent = '2D';
+            console.log("🗺️ 2D MapLibre Map Engine Activated");
+        }
+    };
 }
 
 export function getMaxLoadedStepIndex() {
