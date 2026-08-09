@@ -1,12 +1,11 @@
 // js/layers/threeGlobe.js
 import { HEX_PALETTE } from '../shaders/scalarShader.js';
 
-// 🌟 Your Exact Custom MapTiler Style ID and API Key!
-const MAPTILER_STYLE_ID = '019fc9f8-1ca6-7efe-b666-aba0ef35bce8';
-const MAPTILER_KEY = 'f9fTA5Ce0HKefPDICSVG';
-const MAPTILER_BASEMAP_URL = `https://api.maptiler.com/maps/${MAPTILER_STYLE_ID}/static/0,0,0/2048x1024.png?key=${MAPTILER_KEY}`;
+// 🌐 Free Country & US State Border Vector Datasets
+const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
+const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_1_states_provinces_lines.geojson';
 
-let scene, camera, renderer, controls, globeMesh, material, paletteTex, basemapTex;
+let scene, camera, renderer, controls, globeMesh, material, paletteTex;
 let isGlobeActive = false;
 
 const vsThreeGlobe = `
@@ -22,7 +21,6 @@ const vsThreeGlobe = `
 const fsThreeGlobe = `
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
-    uniform sampler2D u_basemapTexture; // 🌟 Custom MapTiler Basemap Texture
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
     uniform float u_opacity;
@@ -37,21 +35,15 @@ const fsThreeGlobe = `
         vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
-        // Sample weather temperature value
+        // Rich, saturated weather temperature color
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
-        vec4 tempColor = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
+        vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // Sample MapTiler custom dark basemap texture
-        vec4 baseColor = texture2D(u_basemapTexture, wrapped_uv);
-
-        // 🌟 Blend MapTiler custom basemap lines & dark land shapes over temperature shader
-        vec3 blendedColor = tempColor.rgb * (baseColor.rgb * 1.4 + 0.25);
-
-        // 🌟 Subtle 3D atmospheric limb depth glow
+        // Subtle 3D atmospheric limb depth glow
         float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
         vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
 
-        gl_FragColor = vec4(blendedColor + atmosphere * 0.2, tempColor.a * u_opacity);
+        gl_FragColor = vec4(color.rgb + atmosphere * 0.2, color.a * u_opacity);
     }
 `;
 
@@ -68,6 +60,72 @@ function createPaletteTexture() {
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     return texture;
+}
+
+/**
+ * 🌟 Converts [lng, lat] to 3D sphere coordinate (x, y, z)
+ */
+function lngLatToVector3(lng, lat, radius = 2.003) {
+    const phi = (90 - lat) * (Math.PI / 180);
+    const theta = (lng + 180) * (Math.PI / 180);
+
+    const x = -(radius * Math.sin(phi) * Math.cos(theta));
+    const z = (radius * Math.sin(phi) * Math.sin(theta));
+    const y = (radius * Math.cos(phi));
+
+    return new THREE.Vector3(x, y, z);
+}
+
+/**
+ * 🌟 Loads 3D Country & US State Border Lines
+ */
+async function load3DBorderLines(parentMesh) {
+    const linePoints = [];
+
+    const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL];
+    for (const url of urls) {
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) continue;
+            const data = await resp.json();
+
+            data.features.forEach(feature => {
+                const geom = feature.geometry;
+                if (!geom) return;
+
+                const lineStrings = geom.type === 'LineString' ? [geom.coordinates] : 
+                                    geom.type === 'MultiLineString' ? geom.coordinates : [];
+
+                lineStrings.forEach(coords => {
+                    for (let i = 0; i < coords.length - 1; i++) {
+                        const p1 = lngLatToVector3(coords[i][0], coords[i][1]);
+                        const p2 = lngLatToVector3(coords[i+1][0], coords[i+1][1]);
+
+                        linePoints.push(p1.x, p1.y, p1.z);
+                        linePoints.push(p2.x, p2.y, p2.z);
+                    }
+                });
+            });
+        } catch (err) {
+            console.warn("3D border line load skipped:", err);
+        }
+    }
+
+    if (linePoints.length > 0) {
+        const lineGeometry = new THREE.BufferGeometry();
+        lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
+
+        const lineMaterial = new THREE.LineBasicMaterial({
+            color: 0x000000,
+            opacity: 0.75,
+            transparent: true,
+            linewidth: 1.5
+        });
+
+        const linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
+        parentMesh.add(linesMesh); // Rotates in 3D sync with Earth!
+        console.log("🌟 3D Country & State Border Lines Active!");
+    }
 }
 
 export function initThreeGlobe() {
@@ -93,19 +151,12 @@ export function initThreeGlobe() {
 
     paletteTex = createPaletteTexture();
 
-    // 🌟 Load Your Custom MapTiler Basemap Style Texture
-    const textureLoader = new THREE.TextureLoader();
-    basemapTex = textureLoader.load(MAPTILER_BASEMAP_URL);
-    basemapTex.minFilter = THREE.LinearFilter;
-    basemapTex.magFilter = THREE.LinearFilter;
-
     material = new THREE.ShaderMaterial({
         vertexShader: vsThreeGlobe,
         fragmentShader: fsThreeGlobe,
         uniforms: {
             u_dataTexture: { value: null },
             u_paletteTexture: { value: paletteTex },
-            u_basemapTexture: { value: basemapTex }, // Passed to WebGL shader
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
             u_opacity: { value: 0.85 }
@@ -119,6 +170,9 @@ export function initThreeGlobe() {
     // Rotate globe -90° on load so North America faces front
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
+
+    // 🌟 Load 3D Country & US State Border Lines
+    load3DBorderLines(globeMesh);
 
     window.addEventListener('resize', () => {
         if (!renderer || !camera) return;
