@@ -1,7 +1,7 @@
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
-import { createGlobeShaderLayer } from './shaders/globeShader.js'; // 🌟 3D Globe Shader
+import { createGlobeShaderLayer } from './shaders/globeShader.js';
 import { initHubTransition } from './components/homeScreen.js'; 
 import { 
     initViewerUI, 
@@ -18,12 +18,11 @@ import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOv
 
 let customShaderLayer = null;
 let globeShaderLayer = null;
-let activeShaderRef = null;
 let renderDebounceId = null;
 
-const popup = new maplibregl.Popup({ closeButton: false });
+const popup = new mapboxgl.Popup({ closeButton: false });
 
-const map = new maplibregl.Map({
+const map = new mapboxgl.Map({
     container: 'map',
     style: 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG',
     center: [-74.4, 39.3], 
@@ -34,8 +33,7 @@ function initLayer() {
     customShaderLayer = createScalarShaderLayer(map);
     globeShaderLayer = createGlobeShaderLayer(map);
     
-    activeShaderRef = customShaderLayer;
-    setShaderLayerReference(activeShaderRef);
+    setShaderLayerReference(customShaderLayer);
 
     let firstOverlayId = null;
     const layers = map.getStyle().layers || [];
