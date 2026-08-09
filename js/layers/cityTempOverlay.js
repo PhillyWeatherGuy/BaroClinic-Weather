@@ -9,7 +9,6 @@ let cityMarkers = {};
 let isLoaded = false;
 let mapInstance = null;
 
-// 🌟 Scaled up 21px / 13px typography with expanded black halos
 const style = document.createElement('style');
 style.textContent = `
     .city-label-node {
@@ -110,7 +109,7 @@ export async function initCityTempOverlay(map) {
 }
 
 /**
- * 🌟 Population-Ranked Screen Collision System with Expanded 52px Spacing
+ * 🌟 Population-Ranked Screen Collision System
  */
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
@@ -133,7 +132,7 @@ function updateCityPositions() {
     visible.sort((a, b) => b.pop - a.pop);
 
     const placedScreenPoints = [];
-    const minDistancePx = 52; // 🌟 Expanded 52px breathing room buffer
+    const minDistancePx = 52;
     activeCities = [];
 
     for (let i = 0; i < visible.length; i++) {
@@ -145,7 +144,7 @@ function updateCityPositions() {
         if (!collides) {
             placedScreenPoints.push(pos);
             activeCities.push(city);
-            if (activeCities.length >= 40) break; // Max 40 spaced-out labels visible
+            if (activeCities.length >= 40) break;
         }
     }
 
