@@ -1,5 +1,5 @@
 // js/layers/threeGlobe.js
-import { HEX_PALETTE } from '../shaders/scalarShader.js';
+import { getPaletteForParameter, TEMP_PALETTE } from '../config/palettes.js';
 
 // 🌐 10m High-Definition Vector Datasets
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
@@ -8,9 +8,33 @@ const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
-let globeChunkTextures = {}; // 🌟 Texture cache per chunk index
+let globeChunkTextures = {}; // Texture cache per chunk index
 let countyMesh = null;
 let isGlobeActive = false;
+
+const style = document.createElement('style');
+style.textContent = `
+    #globe-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 2;
+        touch-action: none !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+    }
+    #globe-container canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        touch-action: none !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+    }
+`;
+document.head.appendChild(style);
 
 const vsThreeGlobe = `
     varying vec2 v_uv;
@@ -47,12 +71,12 @@ const fsThreeGlobe = `
     }
 `;
 
-function createPaletteTexture() {
+function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     const canvas = document.createElement('canvas');
-    canvas.width = HEX_PALETTE.length;
+    canvas.width = paletteHexArray.length;
     canvas.height = 1;
     const ctx = canvas.getContext('2d');
-    HEX_PALETTE.forEach((hex, i) => {
+    paletteHexArray.forEach((hex, i) => {
         ctx.fillStyle = hex;
         ctx.fillRect(i, 0, 1, 1);
     });
@@ -224,7 +248,7 @@ export function initThreeGlobe() {
         };
     }
 
-    paletteTex = createPaletteTexture();
+    paletteTex = createPaletteTexture(TEMP_PALETTE);
 
     material = new THREE.ShaderMaterial({
         vertexShader: vsThreeGlobe,
@@ -276,14 +300,27 @@ export function initThreeGlobe() {
 }
 
 /**
- * 🌟 0-LEAK TEXTURE REUSE: Caches Three.js textures per chunk during fast scrubbing
+ * 🌟 DYNAMIC PALETTE SWAP FOR 3D GLOBE: Swaps 3D GPU palette texture when picking a new parameter
  */
+export function updateThreeGlobePalette(paramIdOrHexArray) {
+    if (!material) return;
+    const hexArray = Array.isArray(paramIdOrHexArray) 
+        ? paramIdOrHexArray 
+        : getPaletteForParameter(paramIdOrHexArray);
+    
+    if (paletteTex) {
+        paletteTex.dispose();
+    }
+    paletteTex = createPaletteTexture(hexArray);
+    material.uniforms.u_paletteTexture.value = paletteTex;
+    material.needsUpdate = true;
+}
+
 export function updateThreeGlobeFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
     const chunkIdx = frameState.chunkIndex;
 
-    // 🌟 Create texture ONCE per chunk and reuse it across frames!
     if (!globeChunkTextures[chunkIdx]) {
         const texture = new THREE.CanvasTexture(frameState.chunkImg);
         texture.minFilter = THREE.LinearFilter;
@@ -297,9 +334,6 @@ export function updateThreeGlobeFrame(frameState) {
     material.needsUpdate = true;
 }
 
-/**
- * 🌟 Clears Three.js GPU VRAM textures when switching model runs
- */
 export function clearThreeGlobeTextures() {
     for (const key in globeChunkTextures) {
         if (globeChunkTextures[key]) {
