@@ -1,3 +1,4 @@
+// js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks } from '../app.js';
@@ -14,12 +15,12 @@ export function setShaderLayerReference(layer) {
 }
 
 /**
- * 🌟 3D Globe Projection Toggle (2D Flat Map <-> 3D Interactive Globe)
+ * 🌟 3D Spherical Earth Globe Toggle (like earth.nullschool)
  */
 export function initGlobeToggle(map) {
     const globeBtn = document.getElementById('btn-globe');
     if (!globeBtn) {
-        console.warn("⚠️ #btn-globe element missing from DOM. Make sure it is saved in index.html!");
+        console.warn("⚠️ #btn-globe element missing from DOM.");
         return;
     }
 
@@ -29,6 +30,7 @@ export function initGlobeToggle(map) {
 
         try {
             if (isGlobe) {
+                // 🌟 Switch to 3D Spherical Globe Projection
                 if (typeof map.setProjection === 'function') {
                     try {
                         map.setProjection({ type: 'globe' });
@@ -39,8 +41,10 @@ export function initGlobeToggle(map) {
                 globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
                 globeBtn.style.borderColor = '#38bdf8';
                 globeBtn.style.color = '#38bdf8';
-                console.log("🌐 3D Globe Projection Activated");
+                globeBtn.textContent = '3D';
+                console.log("🌐 3D Spherical Globe Projection Activated");
             } else {
+                // 🌟 Switch back to 2D Mercator Map
                 if (typeof map.setProjection === 'function') {
                     try {
                         map.setProjection({ type: 'mercator' });
@@ -51,14 +55,18 @@ export function initGlobeToggle(map) {
                 globeBtn.style.background = 'rgba(255, 255, 255, 0.08)';
                 globeBtn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
                 globeBtn.style.color = '#ffffff';
+                globeBtn.textContent = '2D';
                 console.log("🗺️ 2D Mercator Projection Activated");
             }
         } catch (err) {
-            console.error("Projection toggle error:", err);
+            console.error("3D Globe Projection Error:", err);
         }
     };
 }
 
+/**
+ * 🌟 Returns the highest step index whose chunk bitmap is currently loaded
+ */
 export function getMaxLoadedStepIndex() {
     if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) return 0;
     let maxIdx = 0;
@@ -73,6 +81,9 @@ export function getMaxLoadedStepIndex() {
     return maxIdx;
 }
 
+/**
+ * 🌟 Updates slider background: Dark Glass Track for loaded region -> Red for unloaded region
+ */
 export function updateSliderTrackAndBounds() {
     const slider = document.getElementById('timeline-slider');
     if (!slider || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
@@ -83,7 +94,6 @@ export function updateSliderTrackAndBounds() {
     const maxLoadedIdx = getMaxLoadedStepIndex();
     const loadedPercent = (maxLoadedIdx / totalSteps) * 100;
 
-    // Dark Glass Track for loaded region -> Red Track for unloaded background downloading frames
     slider.style.background = `linear-gradient(to right, 
         rgba(255, 255, 255, 0.15) 0%, 
         rgba(255, 255, 255, 0.15) ${loadedPercent}%, 
