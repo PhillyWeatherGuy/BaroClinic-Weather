@@ -22,7 +22,7 @@ const vsThreeGlobe = `
 const fsThreeGlobe = `
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
-    uniform sampler2D u_borderTexture; // 🌟 5px Bold Black Vector Border Overlay
+    uniform sampler2D u_borderTexture; // 🌟 Bold Black Vector Border Overlay
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
     uniform float u_opacity;
@@ -34,15 +34,16 @@ const fsThreeGlobe = `
         float mercY = log(tan(0.78539816339 + latRad / 2.0));
         float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
 
-        vec2 wrapped_uv = vec2(v_uv.x, normY);
+        // 🌟 1.0 - normY maps North Pole to TOP and South Pole to BOTTOM
+        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         // Sample rich weather temperature color
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 tempColor = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // Sample 5px thick black vector border overlay
-        vec4 borderData = texture2D(u_borderTexture, wrapped_uv);
+        // Sample 3D border texture
+        vec4 borderData = texture2D(u_borderTexture, v_uv);
 
         // Mix pitch-black border lines over temperature color
         vec3 finalColor = mix(tempColor.rgb, vec3(0.0), borderData.a * 0.95);
@@ -71,8 +72,7 @@ function createPaletteTexture() {
 }
 
 /**
- * 🌟 BOLD 5-PIXEL THICK BLACK BORDER TEXTURE
- * Draws country borders, coastlines, and ALL 50 US state lines in 5px bold black strokes
+ * 🌟 BOLD BLACK BORDER TEXTURE (Fresh isolated paths per line to prevent horizontal equator lines)
  */
 async function createBorderCanvasTexture() {
     const canvas = document.createElement('canvas');
@@ -82,9 +82,9 @@ async function createBorderCanvasTexture() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 🌟 BOLD 5-PIXEL THICK BLACK STROKES
+    // 🌟 Bold 3.5px black vector lines
     ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 5.0; 
+    ctx.lineWidth = 3.5; 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
@@ -96,7 +96,6 @@ async function createBorderCanvasTexture() {
             if (!resp.ok) continue;
             const data = await resp.json();
 
-            ctx.beginPath();
             data.features.forEach(feature => {
                 const geom = feature.geometry;
                 if (!geom) return;
@@ -108,6 +107,8 @@ async function createBorderCanvasTexture() {
                 else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
 
                 lineStrings.forEach(coords => {
+                    // 🌟 fresh beginPath per line string prevents horizontal equator lines!
+                    ctx.beginPath();
                     for (let i = 0; i < coords.length; i++) {
                         let normX = (coords[i][0] + 180) / 360;
                         normX = ((normX % 1) + 1) % 1;
@@ -122,9 +123,9 @@ async function createBorderCanvasTexture() {
                         if (i === 0) ctx.moveTo(px, py);
                         else ctx.lineTo(px, py);
                     }
+                    ctx.stroke();
                 });
             });
-            ctx.stroke();
         } catch (e) {
             console.warn("Border texture draw error:", e);
         }
@@ -159,7 +160,6 @@ export function initThreeGlobe() {
 
     paletteTex = createPaletteTexture();
 
-    // Default 1x1 empty border texture until HD canvas texture finishes rendering
     const emptyCanvas = document.createElement('canvas');
     emptyCanvas.width = 1;
     emptyCanvas.height = 1;
@@ -186,12 +186,12 @@ export function initThreeGlobe() {
     globeMesh.rotation.y = -Math.PI / 2;
     scene.add(globeMesh);
 
-    // 🌟 Render 5px Bold Black Vector Border Overlay Texture
+    // 🌟 Render Bold Black Vector Border Overlay Texture
     createBorderCanvasTexture().then(tex => {
         borderTex = tex;
         material.uniforms.u_borderTexture.value = borderTex;
         material.needsUpdate = true;
-        console.log("🌟 Bold 5px Black Borders Rendered on 3D Globe!");
+        console.log("🌟 Bold Black Borders Rendered on 3D Globe!");
     });
 
     window.addEventListener('resize', () => {
