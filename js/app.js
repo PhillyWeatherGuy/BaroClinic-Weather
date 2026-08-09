@@ -8,6 +8,7 @@ import {
     syncModelRunDropdown,
     setShaderLayerReference,
     updateSliderTrackAndBounds,
+    initGlobeToggle,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
@@ -50,7 +51,6 @@ async function renderFrame(globalIdx) {
     const chunkIdx = frameInfo.chunkIndex;
     const chunkInfo = stateManager.manifest.chunks[chunkIdx];
 
-    // Fallback load if bitmap missing
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
@@ -95,7 +95,6 @@ export async function preloadRemainingChunks(currentGen) {
                 if (customShaderLayer && currentGen === stateManager.loadGeneration) {
                     customShaderLayer.preloadChunkTexture(i, bitmap);
                 }
-                // 🌟 Dynamically turns red section blue on timeline slider!
                 updateSliderTrackAndBounds();
             } catch (err) {
                 if (err.message !== "Load cancelled") {
@@ -119,6 +118,9 @@ map.on('load', async () => {
 
         initCityTempOverlay(map);
         syncModelRunDropdown();
+
+        // 🌟 Initialize 3D Globe Projection Toggle
+        initGlobeToggle(map);
 
         const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
         customShaderLayer.preloadChunkTexture(0, bitmap0);
