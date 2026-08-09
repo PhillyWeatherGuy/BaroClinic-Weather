@@ -572,3 +572,33 @@
     background: rgba(255, 255, 255, 0.2);
     border-radius: 3px;
 }
+/* Add this at the bottom of css/ui.css: */
+
+/* ==========================================
+   GLOBE BUTTON & GLOW STYLING
+   ========================================== */
+.globe-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #94a3b8;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s ease;
+}
+
+.globe-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+/* 🌟 Active / Glowing 3D Mode State */
+.globe-btn.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: rgba(56, 189, 248, 0.6) !important;
+    color: #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.4), inset 0 0 8px rgba(56, 189, 248, 0.2) !important;
+}
