@@ -8,33 +8,9 @@ const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
-let globeChunkTextures = {};
+let globeChunkTextures = {}; // 🌟 Texture cache per chunk index
 let countyMesh = null;
 let isGlobeActive = false;
-
-const style = document.createElement('style');
-style.textContent = `
-    #globe-container {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 2;
-        touch-action: none !important;
-        user-select: none !important;
-        -webkit-user-select: none !important;
-    }
-    #globe-container canvas {
-        display: block;
-        width: 100% !important;
-        height: 100% !important;
-        touch-action: none !important;
-        user-select: none !important;
-        -webkit-user-select: none !important;
-    }
-`;
-document.head.appendChild(style);
 
 const vsThreeGlobe = `
     varying vec2 v_uv;
@@ -56,18 +32,9 @@ const fsThreeGlobe = `
     varying vec3 v_normal;
 
     void main() {
-        float latRad = (v_uv.y - 0.5) * 3.14159265359;
-
-        // Clamps latitude bounds to ±85.0511° to fill polar cap smoothly
-        float clampedLat = clamp(latRad, -1.4844, 1.4844);
-        float mercY = log(tan(0.78539816339 + clampedLat / 2.0));
-        float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
-
-        // 🌟 3D Globe Y-UV Mapping: Maps Mercator row 0 to North Pole seamlessly!
-        vec2 sprite_uv = vec2(
-            u_uvOffset.x + v_uv.x * u_uvScale.x,
-            u_uvOffset.y + normY * u_uvScale.y
-        );
+        // 🌟 100% Pure 1:1 Equirectangular UV Mapping (Full 90°N to -90°S Polar Coverage!)
+        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - v_uv.y);
+        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
@@ -308,11 +275,15 @@ export function initThreeGlobe() {
     animate();
 }
 
+/**
+ * 🌟 0-LEAK TEXTURE REUSE: Caches Three.js textures per chunk during fast scrubbing
+ */
 export function updateThreeGlobeFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
     const chunkIdx = frameState.chunkIndex;
 
+    // 🌟 Create texture ONCE per chunk and reuse it across frames!
     if (!globeChunkTextures[chunkIdx]) {
         const texture = new THREE.CanvasTexture(frameState.chunkImg);
         texture.minFilter = THREE.LinearFilter;
@@ -326,6 +297,9 @@ export function updateThreeGlobeFrame(frameState) {
     material.needsUpdate = true;
 }
 
+/**
+ * 🌟 Clears Three.js GPU VRAM textures when switching model runs
+ */
 export function clearThreeGlobeTextures() {
     for (const key in globeChunkTextures) {
         if (globeChunkTextures[key]) {
