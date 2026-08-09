@@ -9,8 +9,13 @@ const PLAYBACK_SPEED_MS = 400;
 let shaderLayerRef = null;
 let isGlobe = false;
 
-let isGlobe = false;
+export function setShaderLayerReference(layer) {
+    shaderLayerRef = layer;
+}
 
+/**
+ * 🌟 3D Globe Projection Toggle (2D Flat Map <-> 3D Interactive Globe)
+ */
 export function initGlobeToggle(map) {
     const globeBtn = document.getElementById('btn-globe');
     if (!globeBtn) {
@@ -24,7 +29,6 @@ export function initGlobeToggle(map) {
 
         try {
             if (isGlobe) {
-                // 🌟 Try both MapLibre GL v4 object and string projection syntax
                 if (typeof map.setProjection === 'function') {
                     try {
                         map.setProjection({ type: 'globe' });
@@ -53,29 +57,6 @@ export function initGlobeToggle(map) {
             console.error("Projection toggle error:", err);
         }
     };
-}
-
-/**
- * 🌟 3D Globe Projection Toggle (2D Flat Map <-> 3D Interactive Globe)
- */
-export function initGlobeToggle(map) {
-    const globeBtn = document.getElementById('btn-globe');
-    if (!globeBtn) return;
-
-    globeBtn.addEventListener('click', () => {
-        isGlobe = !isGlobe;
-        if (isGlobe) {
-            map.setProjection({ type: 'globe' });
-            globeBtn.style.background = 'rgba(56, 189, 248, 0.3)';
-            globeBtn.style.borderColor = '#38bdf8';
-            globeBtn.style.color = '#38bdf8';
-        } else {
-            map.setProjection({ type: 'mercator' });
-            globeBtn.style.background = 'rgba(255, 255, 255, 0.08)';
-            globeBtn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-            globeBtn.style.color = '#ffffff';
-        }
-    });
 }
 
 export function getMaxLoadedStepIndex() {
