@@ -8,6 +8,7 @@ const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeMesh, material, paletteTex;
+let globeChunkTextures = {}; // 🌟 Texture cache per chunk index
 let countyMesh = null;
 let isGlobeActive = false;
 
@@ -31,8 +32,14 @@ const fsThreeGlobe = `
     varying vec3 v_normal;
 
     void main() {
-        // 🌟 100% Pure 1:1 Equirectangular UV Mapping (Full 90°N to -90°S Polar Coverage!)
-        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - v_uv.y);
+        float latRad = (v_uv.y - 0.5) * 3.14159265359;
+
+        // Clamps latitude bounds to ±85.0511° to fill polar cap smoothly
+        float clampedLat = clamp(latRad, -1.4844, 1.4844);
+        float mercY = log(tan(0.78539816339 + clampedLat / 2.0));
+        float normY = clamp(0.5 - (mercY / (2.0 * 3.14159265359)), 0.0, 1.0);
+
+        vec2 wrapped_uv = vec2(v_uv.x, normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
@@ -274,17 +281,38 @@ export function initThreeGlobe() {
     animate();
 }
 
+/**
+ * 🌟 0-LEAK TEXTURE REUSE: Caches Three.js textures per chunk during fast scrubbing
+ */
 export function updateThreeGlobeFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
-    const texture = new THREE.CanvasTexture(frameState.chunkImg);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
+    const chunkIdx = frameState.chunkIndex;
 
-    material.uniforms.u_dataTexture.value = texture;
+    // 🌟 Create texture ONCE per chunk and reuse it across frames!
+    if (!globeChunkTextures[chunkIdx]) {
+        const texture = new THREE.CanvasTexture(frameState.chunkImg);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        globeChunkTextures[chunkIdx] = texture;
+    }
+
+    material.uniforms.u_dataTexture.value = globeChunkTextures[chunkIdx];
     material.uniforms.u_uvOffset.value.set(frameState.uvOffset[0], frameState.uvOffset[1]);
     material.uniforms.u_uvScale.value.set(frameState.uvScale[0], frameState.uvScale[1]);
     material.needsUpdate = true;
+}
+
+/**
+ * 🌟 Clears Three.js GPU VRAM textures when switching model runs
+ */
+export function clearThreeGlobeTextures() {
+    for (const key in globeChunkTextures) {
+        if (globeChunkTextures[key]) {
+            globeChunkTextures[key].dispose();
+        }
+    }
+    globeChunkTextures = {};
 }
 
 export function showThreeGlobe() {
