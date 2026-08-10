@@ -16,9 +16,12 @@ import {
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
 import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
+import { initVectorContours, updateVectorContours, clearVectorContours } from './layers/vectorContours.js'; // 🌟 Master Vector Contour Engine
 
 let customShaderLayer = null;
 let renderDebounceId = null;
+let modelsConfig = null;
+let activeParamId = 'tmp2m';
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -28,6 +31,17 @@ const map = new maplibregl.Map({
     center: [-74.4, 39.3], 
     zoom: 7
 });
+
+async function loadModelsConfig() {
+    try {
+        const resp = await fetch('./config/models.json');
+        if (resp.ok) {
+            modelsConfig = await resp.json();
+        }
+    } catch (err) {
+        console.warn("Could not load models.json, using parameter config defaults", err);
+    }
+}
 
 function initLayer() {
     customShaderLayer = createScalarShaderLayer(map);
@@ -83,6 +97,23 @@ async function renderFrame(globalIdx) {
 
     // 🌟 Update 2D City Temperature Callouts
     updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
+
+    // 🌟 Update Master Vector Contour Lines (32°F Freezing Line & Future Parameters)
+    const paramConfig = modelsConfig?.parameters?.[activeParamId] || {
+        contours: [
+            {
+                id: "freezing_32f",
+                name: "32°F Freezing Line",
+                type: "single",
+                value: 32.0,
+                unit: "°F",
+                color: "#4169E1",
+                width: 2.0,
+                opacity: 0.95
+            }
+        ]
+    };
+    updateVectorContours(stateManager.activeFrameState, stateManager.manifest, paramConfig);
 }
 
 /**
@@ -121,12 +152,20 @@ initViewerUI((stepIndex) => {
 
 map.on('load', async () => {
     initHubTransition();
+    await loadModelsConfig();
 
     // 🌟 Initialize Three.js 3D Globe Engine
     try {
         initThreeGlobe();
     } catch (err) {
         console.error("Three.js globe init error:", err);
+    }
+
+    // 🌟 Initialize Master Vector Contour Layer
+    try {
+        initVectorContours(map);
+    } catch (err) {
+        console.error("Vector contours init error:", err);
     }
 
     try {
