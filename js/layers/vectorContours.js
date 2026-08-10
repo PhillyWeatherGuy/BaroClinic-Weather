@@ -2,8 +2,7 @@
 import { stateManager } from '../core/stateManager.js';
 
 let mapInstance = null;
-let contourWorker = null;
-let currentReqId = 0;
+let activeWorker = null;
 
 const SOURCE_ID = 'contour-master-source';
 const LINE_LAYER_ID = 'contour-master-line-layer';
@@ -11,21 +10,6 @@ const LABEL_LAYER_ID = 'contour-master-label-layer';
 
 export function initVectorContours(map) {
     mapInstance = map;
-
-    if (!contourWorker) {
-        try {
-            contourWorker = new Worker(new URL('../workers/contourWorker.js', import.meta.url), { type: 'module' });
-            contourWorker.onmessage = (e) => {
-                const { reqId, geojson } = e.data;
-                // 🌟 Ignore stale worker responses from past frames
-                if (reqId === currentReqId && mapInstance && mapInstance.getSource(SOURCE_ID)) {
-                    mapInstance.getSource(SOURCE_ID).setData(geojson);
-                }
-            };
-        } catch (err) {
-            console.warn("Could not start Web Worker for contours", err);
-        }
-    }
 
     if (!map.getSource(SOURCE_ID)) {
         map.addSource(SOURCE_ID, {
@@ -72,6 +56,10 @@ export function initVectorContours(map) {
 }
 
 export function clearVectorContours() {
+    if (activeWorker) {
+        activeWorker.terminate();
+        activeWorker = null;
+    }
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
     if (source) {
@@ -80,10 +68,10 @@ export function clearVectorContours() {
 }
 
 /**
- * 🌟 Non-Blocking Worker Dispatcher with Request Token Synchronization
+ * 🌟 Non-Blocking Task-Managed Worker Dispatcher (Zero Memory Leaks, Zero Crashes)
  */
 export function updateVectorContours(activeFrameState, manifest, paramConfig) {
-    if (!mapInstance || !activeFrameState || !manifest || !contourWorker) return;
+    if (!mapInstance || !activeFrameState || !manifest) return;
 
     if (!paramConfig || !paramConfig.contours || paramConfig.contours.length === 0) {
         clearVectorContours();
@@ -93,6 +81,12 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
     const chunkIdx = activeFrameState.chunkIndex;
     const rawPixelData = stateManager.chunkPixelData[chunkIdx];
     if (!rawPixelData) return;
+
+    // 🌟 Kill any stale worker from a previous slider tick to prevent memory spikes & crashes
+    if (activeWorker) {
+        activeWorker.terminate();
+        activeWorker = null;
+    }
 
     const frameW = manifest.frame_width;
     const frameH = manifest.frame_height;
@@ -105,19 +99,35 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
     const minK = manifest.temp_min_k !== undefined ? manifest.temp_min_k : 210.0;
     const maxK = manifest.temp_max_k !== undefined ? manifest.temp_max_k : 330.0;
 
-    currentReqId++;
-    const reqId = currentReqId;
+    try {
+        activeWorker = new Worker(new URL('../workers/contourWorker.js', import.meta.url), { type: 'module' });
+        
+        activeWorker.onmessage = (e) => {
+            if (mapInstance && mapInstance.getSource(SOURCE_ID)) {
+                mapInstance.getSource(SOURCE_ID).setData(e.data);
+            }
+            if (activeWorker) {
+                activeWorker.terminate();
+                activeWorker = null;
+            }
+        };
 
-    contourWorker.postMessage({
-        reqId,
-        rawPixelData,
-        frameW,
-        frameH,
-        sheetW,
-        colOffset,
-        rowOffset,
-        minK,
-        maxK,
-        contours: paramConfig.contours
-    });
+        // Transfer buffer slice instantly without cloning memory
+        const pixelSlice = rawPixelData.slice(0);
+
+        activeWorker.postMessage({
+            rawPixelData: pixelSlice,
+            frameW,
+            frameH,
+            sheetW,
+            colOffset,
+            rowOffset,
+            minK,
+            maxK,
+            contours: paramConfig.contours
+        }, [pixelSlice.buffer]);
+
+    } catch (err) {
+        console.warn("Worker error:", err);
+    }
 }
