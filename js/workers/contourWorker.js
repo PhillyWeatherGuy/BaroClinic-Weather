@@ -1,7 +1,7 @@
 // js/workers/contourWorker.js
 
 /**
- * 🌟 2D Gaussian Kernel Blur (Runs in Background Worker Thread)
+ * 🌟 2D Gaussian Pre-Filter
  */
 function applyGaussianFilter2D(src, width, height) {
     const dst = new Uint8Array(src.length);
@@ -19,9 +19,61 @@ function applyGaussianFilter2D(src, width, height) {
 }
 
 /**
- * 🌟 Chaikin's Corner-Smoothing Curve Algorithm
+ * 🌟 Chains individual cell segments into continuous polylines
  */
-function chaikinSmoothPath(points, iterations = 1) {
+function chainSegmentsIntoPaths(segments, tolerance = 0.0001) {
+    if (segments.length === 0) return [];
+    const lines = [];
+    const remaining = [...segments];
+
+    while (remaining.length > 0) {
+        let currentLine = remaining.pop();
+        let added = true;
+
+        while (added) {
+            added = false;
+            const head = currentLine[0];
+            const tail = currentLine[currentLine.length - 1];
+
+            for (let i = remaining.length - 1; i >= 0; i--) {
+                const seg = remaining[i];
+                const p0 = seg[0];
+                const p1 = seg[1];
+
+                if (Math.hypot(tail[0] - p0[0], tail[1] - p0[1]) < tolerance) {
+                    currentLine.push(p1);
+                    remaining.splice(i, 1);
+                    added = true;
+                    break;
+                } else if (Math.hypot(tail[0] - p1[0], tail[1] - p1[1]) < tolerance) {
+                    currentLine.push(p0);
+                    remaining.splice(i, 1);
+                    added = true;
+                    break;
+                } else if (Math.hypot(head[0] - p0[0], head[1] - p0[1]) < tolerance) {
+                    currentLine.unshift(p1);
+                    remaining.splice(i, 1);
+                    added = true;
+                    break;
+                } else if (Math.hypot(head[0] - p1[0], head[1] - p1[1]) < tolerance) {
+                    currentLine.unshift(p0);
+                    remaining.splice(i, 1);
+                    added = true;
+                    break;
+                }
+            }
+        }
+        if (currentLine.length >= 2) {
+            lines.push(currentLine);
+        }
+    }
+    return lines;
+}
+
+/**
+ * 🌟 Chaikin's Corner-Smoothing Curve Algorithm (3 Passes)
+ */
+function chaikinSmoothPath(points, iterations = 3) {
     if (points.length < 3) return points;
     let current = points;
     for (let iter = 0; iter < iterations; iter++) {
@@ -40,14 +92,13 @@ function chaikinSmoothPath(points, iterations = 1) {
 }
 
 self.onmessage = function (e) {
-    const { rawPixelData, frameW, frameH, sheetW, colOffset, rowOffset, minK, maxK, contours } = e.data;
+    const { reqId, rawPixelData, frameW, frameH, sheetW, colOffset, rowOffset, minK, maxK, contours } = e.data;
 
     if (!rawPixelData || !contours || contours.length === 0) {
-        self.postMessage({ type: 'FeatureCollection', features: [] });
+        self.postMessage({ reqId, geojson: { type: 'FeatureCollection', features: [] } });
         return;
     }
 
-    // Run Gaussian Pre-Filter in background thread
     const pixelData = applyGaussianFilter2D(rawPixelData, sheetW, frameH);
 
     const edgeTable = [
@@ -123,16 +174,16 @@ self.onmessage = function (e) {
                     const interpolate = (vA, vB) => Math.max(0, Math.min(1, (targetByte - vA) / (vB - vA || 0.0001)));
 
                     const getEdgePoint = (edge) => {
-                        if (edge === 0) {
+                        if (edge === 0) { // Top
                             const t = interpolate(v0, v1);
                             return [lng0 + t * (lng1 - lng0), lat0];
-                        } else if (edge === 1) {
+                        } else if (edge === 1) { // Right
                             const t = interpolate(v1, v2);
                             return [lng1, lat0 + t * (lat1 - lat0)];
-                        } else if (edge === 2) {
+                        } else if (edge === 2) { // Bottom
                             const t = interpolate(v3, v2);
                             return [lng0 + t * (lng1 - lng0), lat1];
-                        } else {
+                        } else { // Left
                             const t = interpolate(v0, v3);
                             return [lng0, lat0 + t * (lat1 - lat0)];
                         }
@@ -142,18 +193,23 @@ self.onmessage = function (e) {
                     for (let e = 0; e < edges.length; e += 2) {
                         const p1 = getEdgePoint(edges[e]);
                         const p2 = getEdgePoint(edges[e + 1]);
-                        const smoothedSeg = chaikinSmoothPath([p1, p2], 1);
-                        segments.push(smoothedSeg);
+                        segments.push([p1, p2]);
                     }
                 }
             }
 
             if (segments.length > 0) {
+                // 🌟 Chain cell segments into continuous paths
+                const chainedLines = chainSegmentsIntoPaths(segments);
+
+                // 🌟 Apply 3-Pass Chaikin curve smoothing across chained paths
+                const smoothedCoordinates = chainedLines.map(line => chaikinSmoothPath(line, 3));
+
                 features.push({
                     type: 'Feature',
                     geometry: {
                         type: 'MultiLineString',
-                        coordinates: segments
+                        coordinates: smoothedCoordinates
                     },
                     properties: {
                         name: targetObj.def.name || '32°F',
@@ -167,7 +223,10 @@ self.onmessage = function (e) {
     }
 
     self.postMessage({
-        type: 'FeatureCollection',
-        features: features
+        reqId,
+        geojson: {
+            type: 'FeatureCollection',
+            features: features
+        }
     });
 };
