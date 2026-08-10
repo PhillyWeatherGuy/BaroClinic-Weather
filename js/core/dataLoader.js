@@ -1,15 +1,16 @@
 // js/core/dataLoader.js
-import { clearVectorContours } from '../layers/vectorContours.js';
 import { stateManager } from './stateManager.js';
 import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
+import { clearVectorContours } from '../layers/vectorContours.js'; // 🌟 Vector Contour Disposer
 
 export async function fetchManifest(run = null) {
     let fileName = 'manifest.json';
     
     if (run && run.year && run.month && run.day && run.cycle) {
+        const modelStr = run.model ? run.model.toLowerCase() : 'ecmwf';
         const dateStr = `${run.year}${run.month}${run.day}`;
         const cycleStr = run.cycle.toLowerCase();
-        fileName = `ecmwf_${dateStr}_${cycleStr}_manifest.json`;
+        fileName = `${modelStr}_${dateStr}_${cycleStr}_manifest.json`;
     }
 
     const resp = await fetch(stateManager.BASE_URL + fileName);
@@ -88,12 +89,12 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 }
 
 /**
- * 🌟 UNIFIED APP MEMORY PURGER: Wipes 2D & 3D GPU VRAM + CPU RAM
+ * 🌟 UNIFIED APP MEMORY PURGER: Wipes 2D & 3D GPU VRAM + CPU RAM + Vector Contours
  */
 export function purgeAllAppMemory(shaderLayerRef = null) {
     stateManager.loadGeneration++;
 
-    // 🌟 Disposes Three.js 3D Globe GPU VRAM textures
+    // 🌟 Disposes 3D Globe GPU VRAM textures & vector contour features
     clearThreeGlobeTextures();
     clearVectorContours();
 
