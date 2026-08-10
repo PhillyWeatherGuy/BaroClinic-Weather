@@ -70,11 +70,13 @@ export function clearVectorContours() {
 
 /**
  * 🌟 Instant 0.00ms Static Vector Contour Loader (RAM Cached)
+ * @param {number|string} step Forecast step hour
+ * @param {boolean} isPreload If true, silently saves to RAM without changing the map screen
  */
-export async function updateVectorContours(step) {
+export async function updateVectorContours(step, isPreload = false) {
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
-    if (!source) return;
+    if (!source && !isPreload) return;
 
     let stepNum = 0;
     if (typeof step === 'number') stepNum = step;
@@ -90,7 +92,9 @@ export async function updateVectorContours(step) {
 
     // 🌟 1. INSTANT 0.00ms RAM CACHE READ
     if (contourCache.has(cacheKey)) {
-        source.setData(contourCache.get(cacheKey));
+        if (!isPreload && source) {
+            source.setData(contourCache.get(cacheKey));
+        }
         return;
     }
 
@@ -104,39 +108,52 @@ export async function updateVectorContours(step) {
         const resp = await fetch(contourUrl);
         if (resp.ok) {
             const geojson = await resp.json();
-            contourCache.set(cacheKey, geojson);
-            source.setData(geojson);
+            contourCache.set(cacheKey, geojson); // Save to RAM
+            
+            // 🌟 ONLY update map screen if NOT preloading and step matches active frame
+            if (!isPreload && source) {
+                const activeStep = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
+                if (activeStep === step || activeStep === stepNum) {
+                    source.setData(geojson);
+                }
+            }
         } else {
             const fallbackUrl = `${stateManager.BASE_URL}${model}_${param}_f${formattedStep}_contours.json`;
             const fbResp = await fetch(fallbackUrl);
             if (fbResp.ok) {
                 const fbGeojson = await fbResp.json();
                 contourCache.set(cacheKey, fbGeojson);
-                source.setData(fbGeojson);
+                
+                if (!isPreload && source) {
+                    const activeStep = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
+                    if (activeStep === step || activeStep === stepNum) {
+                        source.setData(fbGeojson);
+                    }
+                }
             }
         }
     } catch (err) {
-        // Ignore fetch errors during rapid scrubbing
+        // Ignore fetch errors during preloading or rapid scrubbing
     }
 }
 
 /**
- * 🌟 PARAMETER-SPECIFIC BACKGROUND PRELOADER
- * Pre-fetches steps for the ACTIVE parameter only.
- * Aborts immediately if the user switches parameters/models.
+ * 🌟 SILENT BACKGROUND CONTOUR PRELOADER
+ * Pre-fetches upcoming step JSON files into RAM silently in the background
+ * WITHOUT animating or moving the map layer on screen!
  */
 export async function preloadAllContours(currentGen) {
     if (!stateManager.globalSteps || stateManager.globalSteps.length <= 1) return;
 
     for (let i = 1; i < stateManager.globalSteps.length; i++) {
-        // 🌟 Abort background preloading if user switches parameters or model runs
+        // Abort background preloading if user switches parameters or model runs
         if (currentGen !== undefined && currentGen !== stateManager.loadGeneration) {
             break;
         }
 
         const stepInfo = stateManager.globalSteps[i];
         if (stepInfo) {
-            await updateVectorContours(stepInfo.step);
+            await updateVectorContours(stepInfo.step, true); // 🌟 isPreload = true (SILENT SAVE TO RAM!)
         }
     }
 }
