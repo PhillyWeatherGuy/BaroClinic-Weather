@@ -1,4 +1,5 @@
 // js/shaders/scalarShader.js
+// COME BACK TO THIS IF SOMETHING BREAKS
 import { getPaletteForParameter, TEMP_PALETTE } from '../config/palettes.js';
 
 const vsSource = `
@@ -20,46 +21,18 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
-    // 🌟 Isothermal Contour Uniforms
-    uniform float u_contourEnabled;
-    uniform float u_contourTarget;  // Normalized target value [0.0, 1.0]
-    uniform vec4 u_contourColor;   // RGBA Royal Blue
-    uniform float u_contourWidth;   // Line width factor
-
     void main() {
         // Mercator UV coordinate transform for Equirectangular input images
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // NormY aligns North Pole to Top of 2D Map
+        // 🌟 Fixed: normY aligns North Pole to Top of 2D Map
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
-
-        // 🌟 100% Pure WebGL 1 Contour Line (Zero Extensions Needed!)
-        if (u_contourEnabled > 0.5) {
-            vec2 stepUV = vec2(0.0008, 0.0008) * u_uvScale;
-            float valX = texture2D(u_dataTexture, sprite_uv + vec2(stepUV.x, 0.0)).r;
-            float valY = texture2D(u_dataTexture, sprite_uv + vec2(0.0, stepUV.y)).r;
-
-            float grad = length(vec2(valX - rawVal, valY - rawVal));
-            float diff = abs(rawVal - u_contourTarget);
-
-            if (grad > 0.00005) {
-                float dist = diff / grad;
-                if (dist < u_contourWidth) {
-                    float alpha = smoothstep(u_contourWidth, 0.0, dist);
-                    color.rgb = mix(color.rgb, u_contourColor.rgb, alpha * u_contourColor.a);
-                }
-            } else if (diff < 0.002) {
-                float alpha = smoothstep(0.002, 0.0, diff);
-                color.rgb = mix(color.rgb, u_contourColor.rgb, alpha * u_contourColor.a);
-            }
-        }
-
         gl_FragColor = vec4(color.rgb, color.a * u_opacity);
     }
 `;
@@ -83,16 +56,6 @@ function createPaletteTexture(gl, paletteHexArray = TEMP_PALETTE) {
     return paletteTex;
 }
 
-function hexToRgba(hex, alpha = 1.0) {
-    const num = parseInt(hex.replace('#', ''), 16);
-    return [
-        ((num >> 16) & 255) / 255.0,
-        ((num >> 8) & 255) / 255.0,
-        (num & 255) / 255.0,
-        alpha
-    ];
-}
-
 export function createScalarShaderLayer(mapInstance) {
     return {
         id: 'weather-gpu-shader',
@@ -103,12 +66,6 @@ export function createScalarShaderLayer(mapInstance) {
         uvOffset: [0, 0],
         uvScale: [1, 1],
 
-        // Contour settings (Defaults to 32°F Royal Blue)
-        contourEnabled: true,
-        contourTarget: 0.52625, // 32°F in 210K-330K range
-        contourColor: hexToRgba('#4169E1'), // Royal Blue
-        contourWidth: 1.5,
-
         clearTextures: function() {
             if (!this.gl) return;
             for (const key in this.chunkTextures) {
@@ -118,37 +75,6 @@ export function createScalarShaderLayer(mapInstance) {
             }
             this.chunkTextures = {};
             this.activeTex = null;
-        },
-
-        /**
-         * 🌟 DYNAMIC CONTOUR UPDATE: Reads manifest min/max & parameter contour config
-         */
-        updateContour: function (manifest, paramConfig) {
-            if (!paramConfig || !paramConfig.contours || paramConfig.contours.length === 0) {
-                this.contourEnabled = false;
-                mapInstance.triggerRepaint();
-                return;
-            }
-
-            const contour = paramConfig.contours[0];
-            const minK = manifest.temp_min_k !== undefined ? manifest.temp_min_k : 210.0;
-            const maxK = manifest.temp_max_k !== undefined ? manifest.temp_max_k : 330.0;
-
-            let targetK = 273.15; // 32°F = 273.15K
-            if (contour.unit === '°F' || contour.value === 32.0) {
-                targetK = (contour.value - 32.0) * (5.0 / 9.0) + 273.15;
-            } else if (contour.unit === '°C') {
-                targetK = contour.value + 273.15;
-            } else if (contour.unit === 'K') {
-                targetK = contour.value;
-            }
-
-            this.contourTarget = Math.max(0.0, Math.min(1.0, (targetK - minK) / (maxK - minK)));
-            this.contourColor = hexToRgba(contour.color || '#4169E1');
-            this.contourWidth = contour.width || 1.5;
-            this.contourEnabled = true;
-
-            mapInstance.triggerRepaint();
         },
 
         /**
@@ -169,28 +95,18 @@ export function createScalarShaderLayer(mapInstance) {
         
         onAdd: function (map, gl) {
             this.gl = gl;
-
             const vs = gl.createShader(gl.VERTEX_SHADER);
             gl.shaderSource(vs, vsSource);
             gl.compileShader(vs);
-            if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-                console.error("[Vertex Shader Error]:", gl.getShaderInfoLog(vs));
-            }
 
             const fs = gl.createShader(gl.FRAGMENT_SHADER);
             gl.shaderSource(fs, fsSource);
             gl.compileShader(fs);
-            if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-                console.error("[Fragment Shader Error]:", gl.getShaderInfoLog(fs));
-            }
 
             this.program = gl.createProgram();
             gl.attachShader(this.program, vs);
             gl.attachShader(this.program, fs);
             gl.linkProgram(this.program);
-            if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
-                console.error("[Program Link Error]:", gl.getProgramInfoLog(this.program));
-            }
 
             this.aPos = gl.getAttribLocation(this.program, 'a_pos');
             this.uMatrix = gl.getUniformLocation(this.program, 'u_matrix');
@@ -199,12 +115,6 @@ export function createScalarShaderLayer(mapInstance) {
             this.uOpacity = gl.getUniformLocation(this.program, 'u_opacity');
             this.uUvOffset = gl.getUniformLocation(this.program, 'u_uvOffset');
             this.uUvScale = gl.getUniformLocation(this.program, 'u_uvScale');
-
-            // Uniform locations for contour line
-            this.uContourEnabled = gl.getUniformLocation(this.program, 'u_contourEnabled');
-            this.uContourTarget  = gl.getUniformLocation(this.program, 'u_contourTarget');
-            this.uContourColor   = gl.getUniformLocation(this.program, 'u_contourColor');
-            this.uContourWidth   = gl.getUniformLocation(this.program, 'u_contourWidth');
 
             const quadVertices = new Float32Array([
                 -2,0,  -1,0,  -2,1,   -2,1,  -1,0,  -1,1,
@@ -260,12 +170,6 @@ export function createScalarShaderLayer(mapInstance) {
             gl.uniform1f(this.uOpacity, 0.65);
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
-
-            // Set contour uniforms safely
-            if (this.uContourEnabled !== null) gl.uniform1f(this.uContourEnabled, this.contourEnabled ? 1.0 : 0.0);
-            if (this.uContourTarget !== null) gl.uniform1f(this.uContourTarget, this.contourTarget);
-            if (this.uContourColor !== null) gl.uniform4fv(this.uContourColor, this.contourColor);
-            if (this.uContourWidth !== null) gl.uniform1f(this.uContourWidth, this.contourWidth);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.enableVertexAttribArray(this.aPos);
