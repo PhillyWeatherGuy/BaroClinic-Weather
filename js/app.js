@@ -169,39 +169,41 @@ map.on('load', async () => {
     }
 });
 
-// Canvas for pixel inspection
-const sampleCanvas = document.createElement('canvas');
-sampleCanvas.width = 1;
-sampleCanvas.height = 1;
-const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
-
+// 🌟 Direct Uint8 Pixel Inspection on Click
 map.on('click', (e) => {
-    if (!stateManager.manifest || !stateManager.activeFrameState || !stateManager.activeFrameState.chunkImg) return;
+    if (!stateManager.manifest || !stateManager.activeFrameState) return;
+
+    const chunkIdx = stateManager.activeFrameState.chunkIndex;
+    const pixelData = stateManager.chunkPixelData[chunkIdx];
+    if (!pixelData) return;
 
     let lng = ((e.lngLat.lng % 360) + 360) % 360;
     if (lng > 180) lng -= 360;
 
-    const normX = (lng + 180) / 360;
-    const latRad = e.lngLat.lat * Math.PI / 180;
-    const mercY = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
-    const normY = 0.5 - (mercY / (2 * Math.PI));
+    const normX = (lng + 180.0) / 360.0;
+    // Equirectangular latitude conversion matching source chunk projection (+90°N to -90°S)
+    const normY = (90.0 - e.lngLat.lat) / 180.0;
 
     if (normY < 0 || normY > 1) return;
 
     const frameW = stateManager.manifest.frame_width;
     const frameH = stateManager.manifest.frame_height;
+    const chunkInfo = stateManager.manifest.chunks[chunkIdx];
+    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
 
-    sampleCtx.clearRect(0, 0, 1, 1);
-    sampleCtx.drawImage(
-        stateManager.activeFrameState.chunkImg,
-        stateManager.activeFrameState.col * frameW + Math.floor(normX * frameW), 
-        stateManager.activeFrameState.row * frameH + Math.floor(normY * frameH), 1, 1,
-        0, 0, 1, 1
-    );
+    const px = Math.floor(normX * frameW);
+    const py = Math.floor(normY * frameH);
 
-    const rawGrayValue = sampleCtx.getImageData(0, 0, 1, 1).data[0];
-    const minK = stateManager.manifest.temp_min_k || 210.0;
-    const maxK = stateManager.manifest.temp_max_k || 330.0;
+    const sheetX = stateManager.activeFrameState.col * frameW + px;
+    const sheetY = stateManager.activeFrameState.row * frameH + py;
+
+    const pixelIdx = sheetY * sheetW + sheetX;
+    const rawGrayValue = pixelData[pixelIdx];
+
+    if (rawGrayValue === undefined) return;
+
+    const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
+    const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
     const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
     const tempC = tempK - 273.15;
 
