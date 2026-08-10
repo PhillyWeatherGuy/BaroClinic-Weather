@@ -2,8 +2,6 @@
 import { stateManager } from '../core/stateManager.js';
 
 let mapInstance = null;
-let activeWorker = null;
-
 const SOURCE_ID = 'contour-master-source';
 const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
@@ -17,7 +15,7 @@ export function initVectorContours(map) {
             data: { type: 'FeatureCollection', features: [] }
         });
 
-        // 1. Vector Contour Lines
+        // 1. Smooth Vector Line Layer
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
@@ -33,7 +31,7 @@ export function initVectorContours(map) {
             }
         });
 
-        // 2. Inline Contour Labels
+        // 2. Inline Line Labels ("32°F Freezing Line", "1052", etc.)
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
@@ -56,10 +54,6 @@ export function initVectorContours(map) {
 }
 
 export function clearVectorContours() {
-    if (activeWorker) {
-        activeWorker.terminate();
-        activeWorker = null;
-    }
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
     if (source) {
@@ -68,66 +62,47 @@ export function clearVectorContours() {
 }
 
 /**
- * 🌟 Non-Blocking Task-Managed Worker Dispatcher (Zero Memory Leaks, Zero Crashes)
+ * 🌟 Static GeoJSON Vector Contour Loader
+ * Fetches pre-computed 32°F vector isolines directly from Backblaze B2 CDN (~5ms)
  */
-export function updateVectorContours(activeFrameState, manifest, paramConfig) {
-    if (!mapInstance || !activeFrameState || !manifest) return;
+export async function updateVectorContours(step) {
+    if (!mapInstance) return;
+    const source = mapInstance.getSource(SOURCE_ID);
+    if (!source) return;
 
-    if (!paramConfig || !paramConfig.contours || paramConfig.contours.length === 0) {
-        clearVectorContours();
-        return;
+    let stepNum = 0;
+    if (typeof step === 'number') stepNum = step;
+    else if (typeof step === 'string') stepNum = parseInt(step.replace(/\D/g, ''), 10) || 0;
+
+    const formattedStep = String(stepNum).padStart(3, '0');
+    const model = stateManager.manifest?.model || 'ecmwf';
+    const param = stateManager.manifest?.parameter || '2t';
+    const targetDate = stateManager.manifest?.date;
+    const runCycle = stateManager.manifest?.run ? stateManager.manifest.run.toLowerCase() : null;
+
+    // Try run-specific filename first (e.g., ecmwf_2t_20260810_00z_f006_contours.json)
+    let contourUrl = `${stateManager.BASE_URL}${model}_${param}_f${formattedStep}_contours.json`;
+    if (targetDate && runCycle) {
+        contourUrl = `${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_f${formattedStep}_contours.json`;
     }
-
-    const chunkIdx = activeFrameState.chunkIndex;
-    const rawPixelData = stateManager.chunkPixelData[chunkIdx];
-    if (!rawPixelData) return;
-
-    // 🌟 Kill any stale worker from a previous slider tick to prevent memory spikes & crashes
-    if (activeWorker) {
-        activeWorker.terminate();
-        activeWorker = null;
-    }
-
-    const frameW = manifest.frame_width;
-    const frameH = manifest.frame_height;
-    const chunkInfo = manifest.chunks[chunkIdx];
-    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
-
-    const colOffset = activeFrameState.col * frameW;
-    const rowOffset = activeFrameState.row * frameH;
-
-    const minK = manifest.temp_min_k !== undefined ? manifest.temp_min_k : 210.0;
-    const maxK = manifest.temp_max_k !== undefined ? manifest.temp_max_k : 330.0;
 
     try {
-        activeWorker = new Worker(new URL('../workers/contourWorker.js', import.meta.url), { type: 'module' });
-        
-        activeWorker.onmessage = (e) => {
-            if (mapInstance && mapInstance.getSource(SOURCE_ID)) {
-                mapInstance.getSource(SOURCE_ID).setData(e.data);
+        const resp = await fetch(contourUrl);
+        if (resp.ok) {
+            const geojson = await resp.json();
+            source.setData(geojson);
+        } else {
+            // Fallback to static reference copy
+            const fallbackUrl = `${stateManager.BASE_URL}${model}_${param}_f${formattedStep}_contours.json`;
+            const fbResp = await fetch(fallbackUrl);
+            if (fbResp.ok) {
+                const fbGeojson = await fbResp.json();
+                source.setData(fbGeojson);
+            } else {
+                clearVectorContours();
             }
-            if (activeWorker) {
-                activeWorker.terminate();
-                activeWorker = null;
-            }
-        };
-
-        // Transfer buffer slice instantly without cloning memory
-        const pixelSlice = rawPixelData.slice(0);
-
-        activeWorker.postMessage({
-            rawPixelData: pixelSlice,
-            frameW,
-            frameH,
-            sheetW,
-            colOffset,
-            rowOffset,
-            minK,
-            maxK,
-            contours: paramConfig.contours
-        }, [pixelSlice.buffer]);
-
+        }
     } catch (err) {
-        console.warn("Worker error:", err);
+        clearVectorContours();
     }
 }
