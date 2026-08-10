@@ -11,7 +11,7 @@ const vsSource = `
     }
 `;
 
-const fsSource = `#extension GL_OES_standard_derivatives : enable
+const fsSource = `
     precision mediump float;
     varying vec2 v_texcoord;
     uniform sampler2D u_dataTexture;
@@ -24,7 +24,7 @@ const fsSource = `#extension GL_OES_standard_derivatives : enable
     uniform float u_contourEnabled;
     uniform float u_contourTarget;  // Normalized target value [0.0, 1.0]
     uniform vec4 u_contourColor;   // RGBA Royal Blue
-    uniform float u_contourWidth;   // Screen-space pixel width (1.5px)
+    uniform float u_contourWidth;   // Line width factor
 
     void main() {
         // Mercator UV coordinate transform for Equirectangular input images
@@ -39,15 +39,24 @@ const fsSource = `#extension GL_OES_standard_derivatives : enable
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // 🌟 Razor-thin screen-space derivative contour line (1.5px at any zoom)
+        // 🌟 100% Pure WebGL 1 Contour Line (Zero Extensions Needed!)
         if (u_contourEnabled > 0.5) {
-            float grad = fwidth(rawVal);
-            if (grad > 0.000001) {
-                float distPx = abs(rawVal - u_contourTarget) / grad;
-                if (distPx < u_contourWidth) {
-                    float alpha = smoothstep(u_contourWidth, 0.0, distPx);
+            vec2 stepUV = vec2(0.0008, 0.0008) * u_uvScale;
+            float valX = texture2D(u_dataTexture, sprite_uv + vec2(stepUV.x, 0.0)).r;
+            float valY = texture2D(u_dataTexture, sprite_uv + vec2(0.0, stepUV.y)).r;
+
+            float grad = length(vec2(valX - rawVal, valY - rawVal));
+            float diff = abs(rawVal - u_contourTarget);
+
+            if (grad > 0.00005) {
+                float dist = diff / grad;
+                if (dist < u_contourWidth) {
+                    float alpha = smoothstep(u_contourWidth, 0.0, dist);
                     color.rgb = mix(color.rgb, u_contourColor.rgb, alpha * u_contourColor.a);
                 }
+            } else if (diff < 0.002) {
+                float alpha = smoothstep(0.002, 0.0, diff);
+                color.rgb = mix(color.rgb, u_contourColor.rgb, alpha * u_contourColor.a);
             }
         }
 
@@ -94,11 +103,11 @@ export function createScalarShaderLayer(mapInstance) {
         uvOffset: [0, 0],
         uvScale: [1, 1],
 
-        // Contour settings (Defaults to 32°F Royal Blue, 1.5px width)
+        // Contour settings (Defaults to 32°F Royal Blue)
         contourEnabled: true,
-        contourTarget: 0.52625, // 32°F in standard 210K-330K range
+        contourTarget: 0.52625, // 32°F in 210K-330K range
         contourColor: hexToRgba('#4169E1'), // Royal Blue
-        contourWidth: 1.5, // 1.5 SCREEN PIXELS
+        contourWidth: 1.5,
 
         clearTextures: function() {
             if (!this.gl) return;
@@ -125,7 +134,6 @@ export function createScalarShaderLayer(mapInstance) {
             const minK = manifest.temp_min_k !== undefined ? manifest.temp_min_k : 210.0;
             const maxK = manifest.temp_max_k !== undefined ? manifest.temp_max_k : 330.0;
 
-            // Convert contour target value to Kelvin
             let targetK = 273.15; // 32°F = 273.15K
             if (contour.unit === '°F' || contour.value === 32.0) {
                 targetK = (contour.value - 32.0) * (5.0 / 9.0) + 273.15;
@@ -135,7 +143,6 @@ export function createScalarShaderLayer(mapInstance) {
                 targetK = contour.value;
             }
 
-            // Normalize target into [0.0, 1.0] range
             this.contourTarget = Math.max(0.0, Math.min(1.0, (targetK - minK) / (maxK - minK)));
             this.contourColor = hexToRgba(contour.color || '#4169E1');
             this.contourWidth = contour.width || 1.5;
@@ -163,21 +170,27 @@ export function createScalarShaderLayer(mapInstance) {
         onAdd: function (map, gl) {
             this.gl = gl;
 
-            // Enable WebGL derivatives extension
-            gl.getExtension('OES_standard_derivatives');
-
             const vs = gl.createShader(gl.VERTEX_SHADER);
             gl.shaderSource(vs, vsSource);
             gl.compileShader(vs);
+            if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+                console.error("[Vertex Shader Error]:", gl.getShaderInfoLog(vs));
+            }
 
             const fs = gl.createShader(gl.FRAGMENT_SHADER);
             gl.shaderSource(fs, fsSource);
             gl.compileShader(fs);
+            if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+                console.error("[Fragment Shader Error]:", gl.getShaderInfoLog(fs));
+            }
 
             this.program = gl.createProgram();
             gl.attachShader(this.program, vs);
             gl.attachShader(this.program, fs);
             gl.linkProgram(this.program);
+            if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
+                console.error("[Program Link Error]:", gl.getProgramInfoLog(this.program));
+            }
 
             this.aPos = gl.getAttribLocation(this.program, 'a_pos');
             this.uMatrix = gl.getUniformLocation(this.program, 'u_matrix');
