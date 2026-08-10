@@ -35,7 +35,7 @@ export function initGlobeToggle(map) {
             // 🌟 Return to 2D MapLibre Engine & Turn OFF Glow
             hideThreeGlobe();
             globeBtn.classList.remove('active');
-            console.log("MAP 2D MapLibre Map Engine Activated");
+            console.log("🗺️ 2D MapLibre Map Engine Activated");
         }
     };
 }
@@ -144,16 +144,7 @@ function initModelRunDropdown() {
     if (!toggleBtn || !menu) return;
 
     let anchorDate = null;
-
-    // 🌟 1. Anchor #0 directly to active manifest's actual date & run cycle
-    if (stateManager.manifest && stateManager.manifest.date && stateManager.manifest.run) {
-        const yr = parseInt(stateManager.manifest.date.substring(0, 4), 10);
-        const mo = parseInt(stateManager.manifest.date.substring(4, 6), 10) - 1;
-        const dy = parseInt(stateManager.manifest.date.substring(6, 8), 10);
-        const hr = parseInt(stateManager.manifest.run.replace(/\D/g, ''), 10) || 0;
-        
-        anchorDate = new Date(Date.UTC(yr, mo, dy, hr, 0));
-    } else if (stateManager.initTime) {
+    if (stateManager.initTime) {
         let baseStr = stateManager.initTime;
         if (!baseStr.endsWith('Z') && !baseStr.includes('+') && !baseStr.includes('-')) {
             baseStr = baseStr.replace(' ', 'T') + 'Z';
@@ -161,23 +152,10 @@ function initModelRunDropdown() {
         anchorDate = new Date(baseStr);
     }
 
-    // 🌟 2. Fallback: Respect ECMWF ~7-8 hour publication lag if no manifest loaded yet
     if (!anchorDate || isNaN(anchorDate.getTime())) {
         const now = new Date();
         const currentHour = now.getUTCHours();
-        let latestRunHour = 12;
-        
-        if (currentHour >= 20) latestRunHour = 12;
-        else if (currentHour >= 14) latestRunHour = 6;
-        else if (currentHour >= 8) latestRunHour = 0;
-        else if (currentHour >= 2) {
-            latestRunHour = 18;
-            now.setUTCDate(now.getUTCDate() - 1);
-        } else {
-            latestRunHour = 12;
-            now.setUTCDate(now.getUTCDate() - 1);
-        }
-        
+        const latestRunHour = Math.floor(currentHour / 6) * 6;
         anchorDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), latestRunHour, 0));
     }
 
