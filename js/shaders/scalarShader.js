@@ -12,7 +12,6 @@ const vsSource = `
 `;
 
 const fsSource = `
-    #extension GL_OES_standard_derivatives : enable
     precision mediump float;
     varying vec2 v_texcoord;
     uniform sampler2D u_dataTexture;
@@ -24,8 +23,8 @@ const fsSource = `
     // 🌟 Isothermal Contour Uniforms
     uniform float u_contourEnabled;
     uniform float u_contourTarget;  // Normalized target value [0.0, 1.0]
-    uniform vec4 u_contourColor;   // RGBA Royal Blue color
-    uniform float u_contourWidth;   // Screen-space pixel width (e.g. 1.5px)
+    uniform vec4 u_contourColor;   // RGBA Royal Blue
+    uniform float u_contourWidth;   // Smooth threshold width
 
     void main() {
         // Mercator UV coordinate transform for Equirectangular input images
@@ -40,13 +39,12 @@ const fsSource = `
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // 🌟 Screen-space derivative contour line rendering
+        // 🌟 Smooth Contour Line Thresholding (No extensions required)
         if (u_contourEnabled > 0.5) {
-            float grad = fwidth(rawVal);
-            if (grad > 0.00001) {
-                float dist = abs(rawVal - u_contourTarget) / grad;
-                float lineAlpha = clamp(1.0 - dist / u_contourWidth, 0.0, 1.0);
-                color.rgb = mix(color.rgb, u_contourColor.rgb, lineAlpha * u_contourColor.a);
+            float diff = abs(rawVal - u_contourTarget);
+            if (diff < u_contourWidth) {
+                float edge = smoothstep(u_contourWidth, 0.0, diff);
+                color.rgb = mix(color.rgb, u_contourColor.rgb, edge * u_contourColor.a);
             }
         }
 
@@ -95,9 +93,9 @@ export function createScalarShaderLayer(mapInstance) {
 
         // Contour settings (Defaults to 32°F Royal Blue)
         contourEnabled: true,
-        contourTarget: 0.52625, // Default ~32°F normalized
+        contourTarget: 0.52625, // 32°F in standard 210K-330K range
         contourColor: hexToRgba('#4169E1'), // Royal Blue
-        contourWidth: 1.5,
+        contourWidth: 0.0035, // Sharp ~1.5px threshold line
 
         clearTextures: function() {
             if (!this.gl) return;
@@ -137,7 +135,7 @@ export function createScalarShaderLayer(mapInstance) {
             // Normalize target into [0.0, 1.0] range
             this.contourTarget = Math.max(0.0, Math.min(1.0, (targetK - minK) / (maxK - minK)));
             this.contourColor = hexToRgba(contour.color || '#4169E1');
-            this.contourWidth = contour.width || 1.5;
+            this.contourWidth = 0.0035;
             this.contourEnabled = true;
 
             mapInstance.triggerRepaint();
@@ -161,9 +159,6 @@ export function createScalarShaderLayer(mapInstance) {
         
         onAdd: function (map, gl) {
             this.gl = gl;
-
-            // Enable WebGL derivatives extension for crisp screen-space fwidth() lines
-            gl.getExtension('OES_standard_derivatives');
 
             const vs = gl.createShader(gl.VERTEX_SHADER);
             gl.shaderSource(vs, vsSource);
@@ -247,11 +242,11 @@ export function createScalarShaderLayer(mapInstance) {
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
 
-            // Set contour uniforms
-            gl.uniform1f(this.uContourEnabled, this.contourEnabled ? 1.0 : 0.0);
-            gl.uniform1f(this.uContourTarget, this.contourTarget);
-            gl.uniform4fv(this.uContourColor, this.contourColor);
-            gl.uniform1f(this.uContourWidth, this.contourWidth);
+            // Set contour uniforms safely
+            if (this.uContourEnabled !== null) gl.uniform1f(this.uContourEnabled, this.contourEnabled ? 1.0 : 0.0);
+            if (this.uContourTarget !== null) gl.uniform1f(this.uContourTarget, this.contourTarget);
+            if (this.uContourColor !== null) gl.uniform4fv(this.uContourColor, this.contourColor);
+            if (this.uContourWidth !== null) gl.uniform1f(this.uContourWidth, this.contourWidth);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.enableVertexAttribArray(this.aPos);
