@@ -13,15 +13,7 @@ export async function fetchManifest(run = null) {
         fileName = `${modelStr}_${dateStr}_${cycleStr}_manifest.json`;
     }
 
-    let resp = await fetch(stateManager.BASE_URL + fileName);
-    
-    // 🌟 Fallback: If requested run manifest isn't published on B2 yet, load latest default manifest.json
-    if (!resp.ok && fileName !== 'manifest.json') {
-        console.warn(`Manifest ${fileName} not found on B2 yet, falling back to latest manifest.json`);
-        fileName = 'manifest.json';
-        resp = await fetch(stateManager.BASE_URL + fileName);
-    }
-
+    const resp = await fetch(stateManager.BASE_URL + fileName);
     if (!resp.ok) throw new Error(`HTTP ${resp.status} - Run manifest ${fileName} not found`);
     stateManager.manifest = await resp.json();
     
