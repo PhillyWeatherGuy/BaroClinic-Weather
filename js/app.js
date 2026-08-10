@@ -16,7 +16,7 @@ import {
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
 import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
-import { initVectorContours, updateVectorContours, clearVectorContours } from './layers/vectorContours.js'; // 🌟 Master Vector Contour Engine
+import { initVectorContours, updateVectorContours } from './layers/vectorContours.js'; // 🌟 Master Vector Contour Engine
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -98,7 +98,7 @@ async function renderFrame(globalIdx) {
     // 🌟 Update 2D City Temperature Callouts
     updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
 
-    // 🌟 Update Master Vector Contour Lines (32°F Freezing Line & Future Parameters)
+    // 🌟 Update Master Vector Contour Engine (Non-blocking Web Worker Dispatch)
     const paramConfig = modelsConfig?.parameters?.[activeParamId] || {
         contours: [
             {
@@ -161,23 +161,25 @@ map.on('load', async () => {
         console.error("Three.js globe init error:", err);
     }
 
-    // 🌟 Initialize Master Vector Contour Layer
-    try {
-        initVectorContours(map);
-    } catch (err) {
-        console.error("Vector contours init error:", err);
-    }
-
     try {
         await fetchManifest();
     } catch (err) {
         showToast('❌ ' + err.message);
     }
 
+    // 1. Initialize Base Weather Heatmap Layer
     try {
         initLayer();
     } catch (err) {}
 
+    // 2. Initialize Master Vector Contour Engine Layer (Renders on top of heat map)
+    try {
+        initVectorContours(map);
+    } catch (err) {
+        console.error("Vector contours init error:", err);
+    }
+
+    // 3. Initialize Top Overlay Callouts
     try {
         initCityTempOverlay(map);
     } catch (err) {}
