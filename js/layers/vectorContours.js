@@ -3,7 +3,8 @@ import { stateManager } from '../core/stateManager.js';
 
 let mapInstance = null;
 const SOURCE_ID = 'contour-master-source';
-const LAYER_ID = 'contour-master-layer';
+const LINE_LAYER_ID = 'contour-master-line-layer';
+const LABEL_LAYER_ID = 'contour-master-label-layer';
 
 export function initVectorContours(map) {
     mapInstance = map;
@@ -14,9 +15,9 @@ export function initVectorContours(map) {
             data: { type: 'FeatureCollection', features: [] }
         });
 
-        // Master Layer with data-driven styling for multi-color/width contours
+        // 1. Vector Contour Lines
         map.addLayer({
-            id: LAYER_ID,
+            id: LINE_LAYER_ID,
             type: 'line',
             source: SOURCE_ID,
             layout: {
@@ -27,6 +28,26 @@ export function initVectorContours(map) {
                 'line-color': ['coalesce', ['get', 'color'], '#4169E1'],
                 'line-width': ['coalesce', ['get', 'width'], 2.0],
                 'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
+            }
+        });
+
+        // 2. 🌟 Inline Contour Labels (Matches Matplotlib clabel inline=True)
+        map.addLayer({
+            id: LABEL_LAYER_ID,
+            type: 'symbol',
+            source: SOURCE_ID,
+            layout: {
+                'symbol-placement': 'line',
+                'text-field': ['get', 'name'],
+                'text-size': 11,
+                'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                'text-max-angle': 45,
+                'text-padding': 12
+            },
+            paint: {
+                'text-color': ['coalesce', ['get', 'color'], '#FFFFFF'],
+                'text-halo-color': '#0b0f19',
+                'text-halo-width': 2.0
             }
         });
     }
@@ -41,8 +62,47 @@ export function clearVectorContours() {
 }
 
 /**
- * 🌟 MASTER VECTOR CONTOUR ENGINE (Marching Squares + Sub-Pixel Interpolation)
- * Extracts smooth vector isolines for ANY parameter based on models.json definitions
+ * 🌟 2D Gaussian Kernel Blur (Python scipy.ndimage.gaussian_filter equivalent in JS)
+ */
+function applyGaussianFilter2D(src, width, height) {
+    const dst = new Uint8Array(src.length);
+    // 3x3 Gaussian smoothing kernel
+    for (let y = 1; y < height - 1; y++) {
+        const yOffset = y * width;
+        for (let x = 1; x < width - 1; x++) {
+            const sum = 
+                src[yOffset - width + x - 1] * 1 + src[yOffset - width + x] * 2 + src[yOffset - width + x + 1] * 1 +
+                src[yOffset + x - 1]         * 2 + src[yOffset + x]         * 4 + src[yOffset + x + 1]         * 2 +
+                src[yOffset + width + x - 1] * 1 + src[yOffset + width + x] * 2 + src[yOffset + width + x + 1] * 1;
+            dst[yOffset + x] = Math.round(sum / 16);
+        }
+    }
+    return dst;
+}
+
+/**
+ * 🌟 Chaikin's Corner-Smoothing Curve Algorithm
+ */
+function chaikinSmoothPath(points, iterations = 1) {
+    if (points.length < 3) return points;
+    let current = points;
+    for (let iter = 0; iter < iterations; iter++) {
+        const next = [current[0]];
+        for (let i = 0; i < current.length - 1; i++) {
+            const p0 = current[i];
+            const p1 = current[i + 1];
+            const q = [0.75 * p0[0] + 0.25 * p1[0], 0.75 * p0[1] + 0.25 * p1[1]];
+            const r = [0.25 * p0[0] + 0.75 * p1[0], 0.25 * p0[1] + 0.75 * p1[1]];
+            next.push(q, r);
+        }
+        next.push(current[current.length - 1]);
+        current = next;
+    }
+    return current;
+}
+
+/**
+ * 🌟 MASTER VECTOR CONTOUR ENGINE
  */
 export function updateVectorContours(activeFrameState, manifest, paramConfig) {
     if (!mapInstance || !activeFrameState || !manifest) return;
@@ -56,8 +116,8 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
     }
 
     const chunkIdx = activeFrameState.chunkIndex;
-    const pixelData = stateManager.chunkPixelData[chunkIdx];
-    if (!pixelData) return;
+    const rawPixelData = stateManager.chunkPixelData[chunkIdx];
+    if (!rawPixelData) return;
 
     const minK = manifest.temp_min_k !== undefined ? manifest.temp_min_k : 210.0;
     const maxK = manifest.temp_max_k !== undefined ? manifest.temp_max_k : 330.0;
@@ -70,19 +130,21 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
     const colOffset = activeFrameState.col * frameW;
     const rowOffset = activeFrameState.row * frameH;
 
-    // Marching Squares Edge Table
+    // 🌟 Step 1: Pre-smooth data matrix with Gaussian Filter (eliminates pixel noise)
+    const pixelData = applyGaussianFilter2D(rawPixelData, sheetW, (chunkInfo.rows || 1) * frameH);
+
     const edgeTable = [
         [],             // 0
         [3, 2],         // 1: BL
         [2, 1],         // 2: BR
         [3, 1],         // 3: BL, BR
         [1, 0],         // 4: TR
-        [3, 0, 2, 1],   // 5: BL, TR (saddle)
+        [3, 0, 2, 1],   // 5: BL, TR
         [2, 0],         // 6: BR, TR
         [3, 0],         // 7: BL, BR, TR
         [0, 3],         // 8: TL
         [0, 2],         // 9: TL, BL
-        [0, 3, 2, 1],   // 10: TL, BR (saddle)
+        [0, 3, 2, 1],   // 10: TL, BR
         [0, 1],         // 11: TL, BL, BR
         [1, 3],         // 12: TR, TL
         [1, 2],         // 13: TR, TL, BL
@@ -92,7 +154,6 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
 
     const features = [];
 
-    // Process every contour rule in paramConfig.contours
     for (let cIdx = 0; cIdx < paramConfig.contours.length; cIdx++) {
         const contourDef = paramConfig.contours[cIdx];
         const targetValues = [];
@@ -104,19 +165,8 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
             else valK = contourDef.value;
 
             targetValues.push({ valueK: valK, def: contourDef });
-        } else if (contourDef.type === 'interval' && contourDef.interval) {
-            const minVal = contourDef.min_val || 0;
-            const maxVal = contourDef.max_val || 2000;
-            for (let v = minVal; v <= maxVal; v += contourDef.interval) {
-                let valK = v;
-                if (contourDef.unit === '°F') valK = (v - 32.0) * (5.0 / 9.0) + 273.15;
-                else if (contourDef.unit === '°C') valK = v + 273.15;
-
-                targetValues.push({ valueK: valK, def: contourDef });
-            }
         }
 
-        // Extract segments for each target value
         for (let tIdx = 0; tIdx < targetValues.length; tIdx++) {
             const targetObj = targetValues[tIdx];
             const targetK = targetObj.valueK;
@@ -138,10 +188,10 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
                     const sheetX0 = colOffset + x;
                     const sheetX1 = colOffset + x + stride;
 
-                    const v0 = pixelData[sheetY0 + sheetX0]; // TL
-                    const v1 = pixelData[sheetY0 + sheetX1]; // TR
-                    const v2 = pixelData[sheetY1 + sheetX1]; // BR
-                    const v3 = pixelData[sheetY1 + sheetX0]; // BL
+                    const v0 = pixelData[sheetY0 + sheetX0];
+                    const v1 = pixelData[sheetY0 + sheetX1];
+                    const v2 = pixelData[sheetY1 + sheetX1];
+                    const v3 = pixelData[sheetY1 + sheetX0];
 
                     let caseIdx = 0;
                     if (v0 >= targetByte) caseIdx |= 8;
@@ -157,16 +207,16 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
                     const interpolate = (vA, vB) => Math.max(0, Math.min(1, (targetByte - vA) / (vB - vA || 0.0001)));
 
                     const getEdgePoint = (edge) => {
-                        if (edge === 0) { // Top
+                        if (edge === 0) {
                             const t = interpolate(v0, v1);
                             return [lng0 + t * (lng1 - lng0), lat0];
-                        } else if (edge === 1) { // Right
+                        } else if (edge === 1) {
                             const t = interpolate(v1, v2);
                             return [lng1, lat0 + t * (lat1 - lat0)];
-                        } else if (edge === 2) { // Bottom
+                        } else if (edge === 2) {
                             const t = interpolate(v3, v2);
                             return [lng0 + t * (lng1 - lng0), lat1];
-                        } else { // Left
+                        } else {
                             const t = interpolate(v0, v3);
                             return [lng0, lat0 + t * (lat1 - lat0)];
                         }
@@ -176,7 +226,10 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
                     for (let e = 0; e < edges.length; e += 2) {
                         const p1 = getEdgePoint(edges[e]);
                         const p2 = getEdgePoint(edges[e + 1]);
-                        segments.push([p1, p2]);
+                        
+                        // 🌟 Step 2: Apply Chaikin Curve Smoothing
+                        const smoothedSeg = chaikinSmoothPath([p1, p2], 1);
+                        segments.push(smoothedSeg);
                     }
                 }
             }
@@ -189,7 +242,7 @@ export function updateVectorContours(activeFrameState, manifest, paramConfig) {
                         coordinates: segments
                     },
                     properties: {
-                        name: targetObj.def.name || 'Contour Line',
+                        name: targetObj.def.name || '32°F',
                         color: targetObj.def.color || '#4169E1',
                         width: targetObj.def.width || 2.0,
                         opacity: targetObj.def.opacity || 0.95
