@@ -1,4 +1,5 @@
 // js/core/dataLoader.js
+import { clearVectorContours } from '../layers/vectorContours.js';
 import { stateManager } from './stateManager.js';
 import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
 
@@ -94,6 +95,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
 
     // 🌟 Disposes Three.js 3D Globe GPU VRAM textures
     clearThreeGlobeTextures();
+    clearVectorContours();
 
     // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
