@@ -16,7 +16,7 @@ import {
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
 import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
-import { initVectorContours, updateVectorContours } from './layers/vectorContours.js'; // 🌟 Static CDN Contour Loader
+import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -85,7 +85,7 @@ async function renderFrame(globalIdx) {
     // 🌟 Update 2D City Temperature Callouts
     updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
 
-    // 🌟 Fetch Static Vector Contours from CDN (~5ms)
+    // 🌟 Fetch Static Vector Contours from CDN (~5ms / 0ms if RAM cached)
     updateVectorContours(frameInfo.step);
 }
 
@@ -175,7 +175,9 @@ map.on('load', async () => {
             await renderFrame(0);
             hideToast();
 
+            // 🌟 Background preload image chunks & parameter-specific vector contours
             preloadRemainingChunks(stateManager.loadGeneration);
+            preloadAllContours(stateManager.loadGeneration);
         } catch (err) {
             showToast('❌ ' + err.message);
         }
