@@ -11,7 +11,7 @@ const vsSource = `
     }
 `;
 
-const fsSource = `
+const fsSource = `#extension GL_OES_standard_derivatives : enable
     precision mediump float;
     varying vec2 v_texcoord;
     uniform sampler2D u_dataTexture;
@@ -24,7 +24,7 @@ const fsSource = `
     uniform float u_contourEnabled;
     uniform float u_contourTarget;  // Normalized target value [0.0, 1.0]
     uniform vec4 u_contourColor;   // RGBA Royal Blue
-    uniform float u_contourWidth;   // Smooth threshold width
+    uniform float u_contourWidth;   // Screen-space pixel width (1.5px)
 
     void main() {
         // Mercator UV coordinate transform for Equirectangular input images
@@ -39,12 +39,15 @@ const fsSource = `
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // 🌟 Smooth Contour Line Thresholding (No extensions required)
+        // 🌟 Razor-thin screen-space derivative contour line (1.5px at any zoom)
         if (u_contourEnabled > 0.5) {
-            float diff = abs(rawVal - u_contourTarget);
-            if (diff < u_contourWidth) {
-                float edge = smoothstep(u_contourWidth, 0.0, diff);
-                color.rgb = mix(color.rgb, u_contourColor.rgb, edge * u_contourColor.a);
+            float grad = fwidth(rawVal);
+            if (grad > 0.000001) {
+                float distPx = abs(rawVal - u_contourTarget) / grad;
+                if (distPx < u_contourWidth) {
+                    float alpha = smoothstep(u_contourWidth, 0.0, distPx);
+                    color.rgb = mix(color.rgb, u_contourColor.rgb, alpha * u_contourColor.a);
+                }
             }
         }
 
@@ -91,11 +94,11 @@ export function createScalarShaderLayer(mapInstance) {
         uvOffset: [0, 0],
         uvScale: [1, 1],
 
-        // Contour settings (Defaults to 32°F Royal Blue)
+        // Contour settings (Defaults to 32°F Royal Blue, 1.5px width)
         contourEnabled: true,
         contourTarget: 0.52625, // 32°F in standard 210K-330K range
         contourColor: hexToRgba('#4169E1'), // Royal Blue
-        contourWidth: 0.0035, // Sharp ~1.5px threshold line
+        contourWidth: 1.5, // 1.5 SCREEN PIXELS
 
         clearTextures: function() {
             if (!this.gl) return;
@@ -135,7 +138,7 @@ export function createScalarShaderLayer(mapInstance) {
             // Normalize target into [0.0, 1.0] range
             this.contourTarget = Math.max(0.0, Math.min(1.0, (targetK - minK) / (maxK - minK)));
             this.contourColor = hexToRgba(contour.color || '#4169E1');
-            this.contourWidth = 0.0035;
+            this.contourWidth = contour.width || 1.5;
             this.contourEnabled = true;
 
             mapInstance.triggerRepaint();
@@ -159,6 +162,9 @@ export function createScalarShaderLayer(mapInstance) {
         
         onAdd: function (map, gl) {
             this.gl = gl;
+
+            // Enable WebGL derivatives extension
+            gl.getExtension('OES_standard_derivatives');
 
             const vs = gl.createShader(gl.VERTEX_SHADER);
             gl.shaderSource(vs, vsSource);
