@@ -2,7 +2,6 @@
 
 /**
  * 🌡️ Exact 2m Temperature Palette extracted from provided_colors[::-1]
- * Index 130 & 131 set to Royal Blue (#4169E1) for exact 32°F freezing line!
  */
 export const TEMP_PALETTE = [
     "#E4E3E7", "#B3B1B7", "#ADACB5", "#A8A6B2", "#9E9DAC", "#9D9CAF", "#9897AE", "#9693AF",
@@ -22,8 +21,7 @@ export const TEMP_PALETTE = [
     "#7DAAC1", "#699DAC", "#60939B", "#629392", "#608A85", "#648882", "#668683", "#678686",
     "#678686", "#678584", "#678685", "#688586", "#6D8789", "#6F868A",
     
-    // 🌟 Index 130 & 131: SOLID ROYAL BLUE 32°F FREEZING LINE ISOTHERM!
-    "#4169E1", "#4169E1", 
+    "#678584", "#678685", 
     
     "#9EA1A8", "#A2A1A7", "#AFAFB4", "#AFAEB2", "#B3B1B4", "#551F80", "#552283", "#542182",
     "#572280", "#57237B", "#511C72", "#5B2374", "#622671", "#642668", "#662560", "#67255A",
