@@ -2,12 +2,14 @@
 import { stateManager } from '../core/stateManager.js';
 
 let mapInstance = null;
+let activeMasterContours = null;
+let activeMasterKey = null;
+let fetchPromise = null;
+
 const SOURCE_ID = 'contour-master-source';
 const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
-
-// 🌟 In-Memory RAM Cache for 0.00ms Instant Scrubbing
-const contourCache = new Map();
+const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
 export function initVectorContours(map) {
     mapInstance = map;
@@ -15,7 +17,7 @@ export function initVectorContours(map) {
     if (!map.getSource(SOURCE_ID)) {
         map.addSource(SOURCE_ID, {
             type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] }
+            data: EMPTY_GEOJSON
         });
 
         // 1. Smooth Vector Line Layer
@@ -57,103 +59,92 @@ export function initVectorContours(map) {
 }
 
 /**
- * 🌟 AIRTIGHT UNLOADER: Wipes RAM cache & clears vector layer on parameter/model switch
+ * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & clears vector layer on parameter/model switch
  */
 export function clearVectorContours() {
-    contourCache.clear(); // Empties RAM cache
+    activeMasterContours = null;
+    activeMasterKey = null;
+    fetchPromise = null;
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
     if (source) {
-        source.setData({ type: 'FeatureCollection', features: [] });
+        source.setData(EMPTY_GEOJSON);
     }
 }
 
 /**
- * 🌟 Instant 0.00ms Static Vector Contour Loader (RAM Cached)
- * @param {number|string} step Forecast step hour
- * @param {boolean} isPreload If true, silently saves to RAM without changing the map screen
+ * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
  */
-export async function updateVectorContours(step, isPreload = false) {
-    if (!mapInstance) return;
-    const source = mapInstance.getSource(SOURCE_ID);
-    if (!source && !isPreload) return;
-
-    let stepNum = 0;
-    if (typeof step === 'number') stepNum = step;
-    else if (typeof step === 'string') stepNum = parseInt(step.replace(/\D/g, ''), 10) || 0;
-
-    const formattedStep = String(stepNum).padStart(3, '0');
+async function loadMasterContourFile() {
     const model = stateManager.manifest?.model || 'ecmwf';
     const param = stateManager.manifest?.parameter || '2t';
     const targetDate = stateManager.manifest?.date;
     const runCycle = stateManager.manifest?.run ? stateManager.manifest.run.toLowerCase() : null;
 
-    const cacheKey = `${model}_${param}_${targetDate}_${runCycle}_f${formattedStep}`;
+    const currentKey = `${model}_${param}_${targetDate}_${runCycle}`;
 
-    // 🌟 1. INSTANT 0.00ms RAM CACHE READ
-    if (contourCache.has(cacheKey)) {
-        if (!isPreload && source) {
-            source.setData(contourCache.get(cacheKey));
-        }
-        return;
+    if (activeMasterKey === currentKey && activeMasterContours) {
+        return activeMasterContours;
     }
 
-    // 🌟 2. Network Fetch (Runs once per step, then saves to RAM)
-    let contourUrl = `${stateManager.BASE_URL}${model}_${param}_f${formattedStep}_contours.json`;
+    if (fetchPromise && activeMasterKey === currentKey) {
+        return await fetchPromise;
+    }
+
+    activeMasterKey = currentKey;
+
+    const urlsToTry = [];
     if (targetDate && runCycle) {
-        contourUrl = `${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_f${formattedStep}_contours.json`;
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?t=${Date.now()}`);
     }
+    urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?t=${Date.now()}`);
+    urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?t=${Date.now()}`);
 
-    try {
-        const resp = await fetch(contourUrl);
-        if (resp.ok) {
-            const geojson = await resp.json();
-            contourCache.set(cacheKey, geojson); // Save to RAM
-            
-            // 🌟 ONLY update map screen if NOT preloading and step matches active frame
-            if (!isPreload && source) {
-                const activeStep = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
-                if (activeStep === step || activeStep === stepNum) {
-                    source.setData(geojson);
-                }
-            }
-        } else {
-            const fallbackUrl = `${stateManager.BASE_URL}${model}_${param}_f${formattedStep}_contours.json`;
-            const fbResp = await fetch(fallbackUrl);
-            if (fbResp.ok) {
-                const fbGeojson = await fbResp.json();
-                contourCache.set(cacheKey, fbGeojson);
-                
-                if (!isPreload && source) {
-                    const activeStep = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
-                    if (activeStep === step || activeStep === stepNum) {
-                        source.setData(fbGeojson);
+    fetchPromise = (async () => {
+        for (const contourUrl of urlsToTry) {
+            try {
+                const resp = await fetch(contourUrl).catch(() => null);
+                if (resp && resp.ok) {
+                    const data = await resp.json().catch(() => null);
+                    if (data && data.steps) {
+                        activeMasterContours = data;
+                        console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
+                        return activeMasterContours;
                     }
                 }
-            }
+            } catch (err) {}
         }
-    } catch (err) {
-        // Ignore fetch errors during preloading or rapid scrubbing
+        activeMasterContours = null;
+        return null;
+    })();
+
+    return await fetchPromise;
+}
+
+/**
+ * 🌟 Instant 0.00ms Vector Contour Renderer from Master RAM Object
+ */
+export async function updateVectorContours(step) {
+    if (!mapInstance) return;
+    const source = mapInstance.getSource(SOURCE_ID);
+    if (!source) return;
+
+    let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
+    const stepKey = String(stepNum);
+
+    const masterData = await loadMasterContourFile();
+
+    if (masterData && masterData.steps && masterData.steps[stepKey]) {
+        source.setData(masterData.steps[stepKey]);
+    } else {
+        source.setData(EMPTY_GEOJSON);
     }
 }
 
 /**
- * 🌟 SILENT BACKGROUND CONTOUR PRELOADER
- * Pre-fetches upcoming step JSON files into RAM silently in the background
- * WITHOUT animating or moving the map layer on screen!
+ * 🌟 BACKGROUND CONTOUR PRELOADER
+ * Pre-fetches the 1 Master Contour JSON file into RAM on page load
  */
-export async function preloadAllContours(currentGen) {
-    if (!stateManager.globalSteps || stateManager.globalSteps.length <= 1) return;
-
-    for (let i = 1; i < stateManager.globalSteps.length; i++) {
-        // Abort background preloading if user switches parameters or model runs
-        if (currentGen !== undefined && currentGen !== stateManager.loadGeneration) {
-            break;
-        }
-
-        const stepInfo = stateManager.globalSteps[i];
-        if (stepInfo) {
-            await updateVectorContours(stepInfo.step, true); // 🌟 isPreload = true (SILENT SAVE TO RAM!)
-        }
-    }
+export async function preloadAllContours() {
+    await loadMasterContourFile();
 }
