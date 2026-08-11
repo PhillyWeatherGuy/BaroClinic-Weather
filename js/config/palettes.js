@@ -4,8 +4,10 @@
  * 🌡️ Exact 2m Temperature Palette extracted from provided_colors[::-1]
  */
 export const TEMP_PALETTE = // WeatherBELL temp scale, -100 to 130, 1 color per degree (231 total)
-// 75-89° revised: replaced the dark maroon dip with a gentle fade from
-// the existing light orange (74°) into the original brown at 90°
+// 70-74°: original light orange (unchanged)
+// 75-84°: smooth ramp from that orange up into dark red
+// 85°: peak dark red (the original darkest swatch, #53221D)
+// 86-89°: smooth fade from dark red back to the original 90° brown
 [
   "#3F1E83", "#411E84", "#4B1286", "#570D86", "#570D86", "#590D86", "#611086", "#721486", "#721484", "#721484",
   "#7B1483", "#891A81", "#891A80", "#8A1981", "#891A80", "#891A80", "#9F1E80", "#BD277D", "#BD287C", "#BD287C",
@@ -24,8 +26,8 @@ export const TEMP_PALETTE = // WeatherBELL temp scale, -100 to 130, 1 color per 
   "#86BADC", "#77A8D6", "#719CCD", "#6C92C2", "#6584B6", "#5D79AA", "#57699E", "#535E95", "#4E538B", "#54538D",
   "#6767A3", "#7575B3", "#8483BB", "#9695B5", "#A6A5AC", "#B3B3A8", "#C3C3A4", "#CFCDA3", "#DFDF9D", "#EFEF95",
   "#FEFA8C", "#FDF27F", "#FAE975", "#F8DD67", "#F6D15C", "#F2C050", "#F1B847", "#EEAB40", "#EDA13C", "#F09837",
-  "#EE9235", "#EC8A34", "#EB7F30", "#E9782E", "#E86F2D", "#E86F2D", "#E86F2D", "#E76F2D", "#E66E2D", "#E46E2D",
-  "#E06D2D", "#DC6B2D", "#D6692D", "#CE672D", "#C5642D", "#B9602E", "#AB5C2E", "#9A562E", "#87502E", "#71492F",
+  "#EE9235", "#EC8A34", "#EB7F30", "#E9782E", "#E86F2D", "#E56D2D", "#DB682C", "#CD612A", "#BB5828", "#A84E26",
+  "#934324", "#803922", "#6E3020", "#60291E", "#56241D", "#53221D", "#53251F", "#542D23", "#563629", "#573E2D",
   "#57412F", "#573A3B", "#624648", "#745954", "#786362", "#826A6A", "#8C7474", "#93817F", "#A68A8B", "#B3898A",
   "#B28A8A", "#B18989", "#A3797A", "#A3797A", "#A2777A", "#99606D", "#905F63", "#8E6062", "#8E6062", "#8E5E62",
   "#7A4652", "#7A4652", "#7A3C52", "#712748", "#6E2945", "#6B2D44", "#58383D", "#56393B", "#563B3E", "#504647",
