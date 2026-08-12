@@ -72,17 +72,70 @@ export function updateSliderTrackAndBounds() {
 }
 
 /**
- * 🌟 MODEL CATEGORY SUB-BAR & DRAG-SCROLL CONTROLLER
+ * 🌟 MODEL CATEGORY SUB-BAR & DYNAMIC MODEL SELECTOR
  */
-export function initModelCategoryBar() {
+export async function initModelCategoryBar() {
     const modelBtn = document.getElementById('btn-model-menu');
     const categoryBar = document.getElementById('model-category-bar');
     const scrollContainer = document.querySelector('.category-scroll-container');
+    const modelListContainer = document.getElementById('model-list-container');
     const catPills = document.querySelectorAll('.model-cat-pill');
 
     if (!modelBtn || !categoryBar) return;
 
-    // 1. Toggle Sub-Bar on Model Button Click
+    let modelsData = null;
+
+    // Fetch models.json config
+    try {
+        const resp = await fetch('./config/models.json');
+        if (resp.ok) {
+            modelsData = await resp.json();
+        }
+    } catch (err) {
+        console.warn("Could not load config/models.json:", err);
+    }
+
+    // Function to render models matching active category
+    function renderCategoryModels(categoryName) {
+        if (!modelListContainer) return;
+        modelListContainer.innerHTML = '';
+
+        if (!modelsData || !modelsData.models) return;
+
+        const matchingModels = Object.values(modelsData.models).filter(
+            m => m.category && m.category.toLowerCase() === categoryName.toLowerCase()
+        );
+
+        if (matchingModels.length === 0) {
+            modelListContainer.innerHTML = `<span class="no-models-msg">No ${categoryName} models available</span>`;
+            return;
+        }
+
+        matchingModels.forEach((model, idx) => {
+            const btn = document.createElement('button');
+            btn.className = `model-select-btn ${idx === 0 ? 'active' : ''}`;
+            btn.setAttribute('data-model-id', model.id);
+            btn.textContent = model.name;
+
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.model-select-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // Update main button label
+                const labelSpan = modelBtn.querySelector('span');
+                if (labelSpan) labelSpan.textContent = model.name;
+
+                console.log(`[UI] Active model selected: ${model.id}`);
+            });
+
+            modelListContainer.appendChild(btn);
+        });
+    }
+
+    // 1. Initial render for default active category ("Global")
+    renderCategoryModels('Global');
+
+    // 2. Toggle Sub-Bar on Model Button Click
     modelBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const isOpen = categoryBar.style.display === 'block';
@@ -96,18 +149,18 @@ export function initModelCategoryBar() {
         }
     });
 
-    // 2. Category Pill Selection Listener
+    // 3. Category Pill Click Listener
     catPills.forEach(pill => {
         pill.addEventListener('click', (e) => {
             catPills.forEach(p => p.classList.remove('active'));
             e.currentTarget.classList.add('active');
             
             const category = e.currentTarget.getAttribute('data-category');
-            console.log(`[UI] Model category selected: ${category}`);
+            renderCategoryModels(category);
         });
     });
 
-    // 3. 🌟 Mouse Drag-to-Scroll Logic for Desktop Users
+    // 4. Mouse Drag-to-Scroll Logic for Desktop Users
     if (scrollContainer) {
         let isDown = false;
         let startX;
@@ -479,9 +532,4 @@ export function showToast(message) {
     }
 }
 
-export function hideToast() {
-    const toast = document.getElementById('status-toast');
-    if (toast) {
-        toast.style.display = 'none';
-    }
-}
+export function hideToas
