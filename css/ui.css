@@ -239,6 +239,14 @@
     gap: 15px;
 }
 
+/* 🌟 Side-by-Side Horizontal Alignment for Top Buttons */
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
 .logo {
     font-family: 'Rajdhani', sans-serif;
     font-weight: 700;
@@ -671,7 +679,9 @@
     cursor: grabbing;
 }
 
-.model-cat-pill {
+/* 🌟 Category Pill Styling for Models and Parameters */
+.model-cat-pill,
+.param-cat-pill {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: #94a3b8;
@@ -686,13 +696,15 @@
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.model-cat-pill:hover {
+.model-cat-pill:hover,
+.param-cat-pill:hover {
     background: rgba(255, 255, 255, 0.12);
     color: #ffffff;
     border-color: rgba(255, 255, 255, 0.25);
 }
 
-.model-cat-pill.active {
+.model-cat-pill.active,
+.param-cat-pill.active {
     background: rgba(56, 189, 248, 0.2) !important;
     border-color: rgba(56, 189, 248, 0.6) !important;
     color: #38bdf8 !important;
