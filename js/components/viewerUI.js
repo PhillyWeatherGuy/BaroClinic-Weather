@@ -71,6 +71,75 @@ export function updateSliderTrackAndBounds() {
         rgba(239, 68, 68, 0.6) 100%)`;
 }
 
+/**
+ * 🌟 MODEL CATEGORY SUB-BAR & DRAG-SCROLL CONTROLLER
+ */
+export function initModelCategoryBar() {
+    const modelBtn = document.getElementById('btn-model-menu');
+    const categoryBar = document.getElementById('model-category-bar');
+    const scrollContainer = document.querySelector('.category-scroll-container');
+    const catPills = document.querySelectorAll('.model-cat-pill');
+
+    if (!modelBtn || !categoryBar) return;
+
+    // 1. Toggle Sub-Bar on Model Button Click
+    modelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = categoryBar.style.display === 'block';
+
+        if (isOpen) {
+            categoryBar.style.display = 'none';
+            modelBtn.classList.remove('active', 'open');
+        } else {
+            categoryBar.style.display = 'block';
+            modelBtn.classList.add('active', 'open');
+        }
+    });
+
+    // 2. Category Pill Selection Listener
+    catPills.forEach(pill => {
+        pill.addEventListener('click', (e) => {
+            catPills.forEach(p => p.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            
+            const category = e.currentTarget.getAttribute('data-category');
+            console.log(`[UI] Model category selected: ${category}`);
+        });
+    });
+
+    // 3. 🌟 Mouse Drag-to-Scroll Logic for Desktop Users
+    if (scrollContainer) {
+        let isDown = false;
+        let startX;
+        let scrollLeft;
+
+        scrollContainer.addEventListener('mousedown', (e) => {
+            isDown = true;
+            startX = e.pageX - scrollContainer.offsetLeft;
+            scrollLeft = scrollContainer.scrollLeft;
+        });
+
+        scrollContainer.addEventListener('mouseleave', () => { isDown = false; });
+        scrollContainer.addEventListener('mouseup', () => { isDown = false; });
+
+        scrollContainer.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            e.preventDefault();
+            const x = e.pageX - scrollContainer.offsetLeft;
+            const walk = (x - startX) * 1.8;
+            scrollContainer.scrollLeft = scrollLeft - walk;
+        });
+    }
+
+    // Close menu when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!categoryBar.contains(e.target) && !modelBtn.contains(e.target)) {
+            categoryBar.style.display = 'none';
+            modelBtn.classList.remove('active', 'open');
+        }
+    });
+}
+
 export function initViewerUI(stepCallback) {
     onStepChangeCallback = stepCallback;
 
@@ -81,6 +150,7 @@ export function initViewerUI(stepCallback) {
     const navButtons = document.querySelectorAll('#top-nav .nav-tabs button');
 
     initModelRunDropdown();
+    initModelCategoryBar();
 
     if (slider) {
         slider.addEventListener('input', (e) => {
