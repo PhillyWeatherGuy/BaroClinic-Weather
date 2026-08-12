@@ -1,6 +1,6 @@
 // js/app.js
 import { stateManager } from './core/stateManager.js';
-import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
+import { fetchManifest, loadChunkBitmap, preloadRemainingChunks } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { initHubTransition } from './components/homeScreen.js'; 
 import { 
@@ -89,35 +89,6 @@ async function renderFrame(globalIdx) {
     updateVectorContours(frameInfo.step);
 }
 
-/**
- * 🌟 SEQUENTIAL PRELOADER: Updates slider red/blue progress as each chunk finishes downloading
- */
-export async function preloadRemainingChunks(currentGen) {
-    if (!stateManager.manifest || !stateManager.manifest.chunks) return;
-    const totalChunks = stateManager.manifest.chunks.length;
-
-    for (let i = 1; i < totalChunks; i++) {
-        if (currentGen !== stateManager.loadGeneration) break;
-
-        if (!stateManager.loadedChunkBitmaps[i]) {
-            try {
-                const bitmap = await loadChunkBitmap(i, currentGen);
-                if (currentGen === stateManager.loadGeneration) {
-                    if (customShaderLayer) {
-                        customShaderLayer.preloadChunkTexture(i, bitmap);
-                    }
-                }
-                updateSliderTrackAndBounds();
-            } catch (err) {
-                if (err.message !== "Load cancelled") {
-                    console.warn(`Background preload chunk ${i} paused:`, err);
-                }
-                break;
-            }
-        }
-    }
-}
-
 initViewerUI((stepIndex) => {
     if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
     renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
@@ -176,7 +147,7 @@ map.on('load', async () => {
             hideToast();
 
             // 🌟 Background preload image chunks & parameter-specific vector contours
-            preloadRemainingChunks(stateManager.loadGeneration);
+            preloadRemainingChunks(stateManager.loadGeneration, customShaderLayer, updateSliderTrackAndBounds);
             preloadAllContours(stateManager.loadGeneration);
         } catch (err) {
             showToast('❌ ' + err.message);
@@ -192,37 +163,4 @@ map.on('click', (e) => {
     const pixelData = stateManager.chunkPixelData[chunkIdx];
     if (!pixelData) return;
 
-    let lng = ((e.lngLat.lng % 360) + 360) % 360;
-    if (lng > 180) lng -= 360;
-
-    const normX = (lng + 180.0) / 360.0;
-    // Equirectangular latitude conversion matching source chunk projection (+90°N to -90°S)
-    const normY = (90.0 - e.lngLat.lat) / 180.0;
-
-    if (normY < 0 || normY > 1) return;
-
-    const frameW = stateManager.manifest.frame_width;
-    const frameH = stateManager.manifest.frame_height;
-    const chunkInfo = stateManager.manifest.chunks[chunkIdx];
-    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
-
-    const px = Math.floor(normX * frameW);
-    const py = Math.floor(normY * frameH);
-
-    const sheetX = stateManager.activeFrameState.col * frameW + px;
-    const sheetY = stateManager.activeFrameState.row * frameH + py;
-
-    const pixelIdx = sheetY * sheetW + sheetX;
-    const rawGrayValue = pixelData[pixelIdx];
-
-    if (rawGrayValue === undefined) return;
-
-    const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
-    const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
-    const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
-    const tempC = tempK - 273.15;
-
-    popup.setLngLat(e.lngLat)
-         .setHTML(`<div class="temp-f">${((tempC * 9/5) + 32).toFixed(1)}°F</div><div class="temp-c">${tempC.toFixed(1)}°C</div>`)
-         .addTo(map);
-});
+    let lng = ((e.lngLat.
