@@ -16,18 +16,6 @@
       "category": "Surface",
       "shader": "scalar",
       "palette": "temp.json",
-      "contours": [
-        {
-          "id": "freezing_32f",
-          "name": "32°F Freezing Line",
-          "type": "single",
-          "value": 32.0,
-          "unit": "°F",
-          "color": "#4169E1",
-          "width": 2.0,
-          "opacity": 0.95
-        }
-      ]
     }
   }
 }
