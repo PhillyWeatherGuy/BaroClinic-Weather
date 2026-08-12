@@ -77,9 +77,9 @@ export function updateSliderTrackAndBounds() {
 export function initModelCategoryBar() {
     const modelBtn = document.getElementById('btn-model-menu');
     const categoryBar = document.getElementById('model-category-bar');
-    const scrollContainer = categoryBar ? categoryBar.querySelector('.category-scroll-container') : null;
+    const scrollContainer = document.querySelector('.category-scroll-container');
     const modelListContainer = document.getElementById('model-list-container');
-    const catPills = categoryBar ? categoryBar.querySelectorAll('.model-cat-pill') : [];
+    const catPills = document.querySelectorAll('.model-cat-pill');
 
     if (!modelBtn || !categoryBar) return;
 
@@ -119,7 +119,7 @@ export function initModelCategoryBar() {
             btn.textContent = model.name;
 
             btn.addEventListener('click', () => {
-                document.querySelectorAll('#model-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
 
                 const labelSpan = modelBtn.querySelector('span');
@@ -135,11 +135,6 @@ export function initModelCategoryBar() {
     // 1. Toggle Sub-Bar on Model Button Click
     modelBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const paramBar = document.getElementById('param-category-bar');
-        const paramBtn = document.getElementById('btn-param-menu');
-        if (paramBar) paramBar.style.display = 'none';
-        if (paramBtn) paramBtn.classList.remove('active', 'open');
-
         const isOpen = categoryBar.style.display === 'block';
 
         if (isOpen) {
@@ -195,139 +190,6 @@ export function initModelCategoryBar() {
     });
 }
 
-/**
- * 🌟 PARAMETER CATEGORY SUB-BAR & DYNAMIC PARAMETER SELECTOR
- */
-export function initParameterCategoryBar() {
-    const paramBtn = document.getElementById('btn-param-menu');
-    const paramBar = document.getElementById('param-category-bar');
-    const scrollContainer = paramBar ? paramBar.querySelector('.category-scroll-container') : null;
-    const paramListContainer = document.getElementById('param-list-container');
-    const catPills = paramBar ? paramBar.querySelectorAll('.param-cat-pill') : [];
-
-    if (!paramBtn || !paramBar) return;
-
-    let modelsData = null;
-
-    // Fetch config/models.json
-    fetch('./config/models.json')
-        .then(resp => resp.ok ? resp.json() : null)
-        .then(data => {
-            if (data) {
-                modelsData = data;
-                renderCategoryParameters('Surface and Precipitation');
-            }
-        })
-        .catch(err => console.warn("Could not load config/models.json:", err));
-
-    // Function to render parameters matching active category
-    function renderCategoryParameters(categoryName) {
-        if (!paramListContainer) return;
-        paramListContainer.innerHTML = '';
-
-        if (!modelsData || !modelsData.parameters) return;
-
-        const targetCatLower = categoryName.toLowerCase();
-
-        const matchingParams = Object.values(modelsData.parameters).filter(p => {
-            if (!p.category) return false;
-            const pCatLower = p.category.toLowerCase();
-            if (pCatLower === targetCatLower) return true;
-            // Matches "Surface" or "Precipitation" for the "Surface and Precipitation" pill
-            if (targetCatLower.includes('surface') && targetCatLower.includes('precipitation')) {
-                return pCatLower.includes('surface') || pCatLower.includes('precipitation');
-            }
-            return false;
-        });
-
-        if (matchingParams.length === 0) {
-            paramListContainer.innerHTML = `<span class="no-models-msg">No ${categoryName} parameters available</span>`;
-            return;
-        }
-
-        matchingParams.forEach((param, idx) => {
-            const btn = document.createElement('button');
-            btn.className = `model-select-btn ${idx === 0 ? 'active' : ''}`;
-            btn.setAttribute('data-param-id', param.id);
-            btn.textContent = param.name;
-
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('#param-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-
-                const labelSpan = paramBtn.querySelector('span');
-                if (labelSpan) labelSpan.textContent = param.name;
-
-                console.log(`[UI] Active parameter selected: ${param.id}`);
-            });
-
-            paramListContainer.appendChild(btn);
-        });
-    }
-
-    // 1. Toggle Sub-Bar on Parameter Button Click
-    paramBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const modelBar = document.getElementById('model-category-bar');
-        const modelBtn = document.getElementById('btn-model-menu');
-        if (modelBar) modelBar.style.display = 'none';
-        if (modelBtn) modelBtn.classList.remove('active', 'open');
-
-        const isOpen = paramBar.style.display === 'block';
-
-        if (isOpen) {
-            paramBar.style.display = 'none';
-            paramBtn.classList.remove('active', 'open');
-        } else {
-            paramBar.style.display = 'block';
-            paramBtn.classList.add('active', 'open');
-        }
-    });
-
-    // 2. Category Pill Selection Listener
-    catPills.forEach(pill => {
-        pill.addEventListener('click', (e) => {
-            catPills.forEach(p => p.classList.remove('active'));
-            e.currentTarget.classList.add('active');
-            
-            const category = e.currentTarget.getAttribute('data-category');
-            renderCategoryParameters(category);
-        });
-    });
-
-    // 3. Mouse Drag-to-Scroll Logic
-    if (scrollContainer) {
-        let isDown = false;
-        let startX;
-        let scrollLeft;
-
-        scrollContainer.addEventListener('mousedown', (e) => {
-            isDown = true;
-            startX = e.pageX - scrollContainer.offsetLeft;
-            scrollLeft = scrollContainer.scrollLeft;
-        });
-
-        scrollContainer.addEventListener('mouseleave', () => { isDown = false; });
-        scrollContainer.addEventListener('mouseup', () => { isDown = false; });
-
-        scrollContainer.addEventListener('mousemove', (e) => {
-            if (!isDown) return;
-            e.preventDefault();
-            const x = e.pageX - scrollContainer.offsetLeft;
-            const walk = (x - startX) * 1.8;
-            scrollContainer.scrollLeft = scrollLeft - walk;
-        });
-    }
-
-    // Close menu when clicking outside
-    document.addEventListener('click', (e) => {
-        if (!paramBar.contains(e.target) && !paramBtn.contains(e.target)) {
-            paramBar.style.display = 'none';
-            paramBtn.classList.remove('active', 'open');
-        }
-    });
-}
-
 export function initViewerUI(stepCallback) {
     onStepChangeCallback = stepCallback;
 
@@ -339,7 +201,6 @@ export function initViewerUI(stepCallback) {
 
     initModelRunDropdown();
     initModelCategoryBar();
-    initParameterCategoryBar();
 
     if (slider) {
         slider.addEventListener('input', (e) => {
@@ -628,4 +489,49 @@ function updateForecastClock(stepData) {
     if (typeof rawStep === 'number') {
         stepHours = rawStep;
     } else if (typeof rawStep === 'string') {
-        stepHours = pars
+        stepHours = parseInt(rawStep.replace(/\D/g, ''), 10) || 0;
+    }
+
+    let baseTimeString = stateManager.initTime || stateManager.runTime;
+    let validDate = null;
+
+    if (baseTimeString) {
+        if (!baseTimeString.endsWith('Z') && !baseTimeString.includes('+') && !baseTimeString.includes('-')) {
+            baseTimeString = baseTimeString.replace(' ', 'T') + 'Z';
+        }
+        
+        const baseTime = new Date(baseTimeString);
+        validDate = new Date(baseTime.getTime() + (stepHours * 3600 * 1000));
+    }
+
+    if (!validDate || isNaN(validDate.getTime())) {
+        appClock.textContent = "--:--";
+        return;
+    }
+
+    const timeString = validDate.toLocaleTimeString([], { 
+        weekday: 'short',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric', 
+        minute: '2-digit', 
+        timeZoneName: 'short' 
+    });
+
+    appClock.textContent = timeString;
+}
+
+export function showToast(message) {
+    const toast = document.getElementById('status-toast');
+    if (toast) {
+        toast.textContent = message;
+        toast.style.display = 'block';
+    }
+}
+
+export function hideToast() {
+    const toast = document.getElementById('status-toast');
+    if (toast) {
+        toast.style.display = 'none';
+    }
+}
