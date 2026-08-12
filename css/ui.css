@@ -634,18 +634,21 @@
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
 }
 
+/* ==========================================
+   HORIZONTAL MODEL CATEGORY SUB-BAR
+   ========================================== */
 .sub-nav-bar {
     position: absolute;
-    top: 50px;
+    top: 50px; /* Seamlessly connects to top-nav (height: 50px) */
     left: 0;
     right: 0;
-    z-index: 28;
-    background: rgba(11, 15, 25, 0.92);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    z-index: 35; /* 🌟 Higher than top-time-container (25) so it layers ON TOP of the time block */
+    background: rgba(11, 15, 25, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     padding: 8px 12px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
     transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
