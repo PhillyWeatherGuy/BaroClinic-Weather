@@ -13,7 +13,7 @@
       "id": "2t",
       "name": "2m Temperature",
       "unit": "°F",
-      "category": "Surface",
+      "category": "Thermodynamics",
       "shader": "scalar",
       "palette": "temp"
     },
@@ -21,7 +21,7 @@
       "id": "tp",
       "name": "Total Accum. Precip",
       "unit": "in",
-      "category": "Precipitation",
+      "category": "Surface and Precipitation",
       "shader": "scalar",
       "palette": "precip"
     }
