@@ -1,6 +1,7 @@
 // js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
-import { fetchManifest, loadChunkBitmap, purgeAllAppMemory, preloadRemainingChunks } from '../core/dataLoader.js';
+import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
+import { preloadRemainingChunks } from '../app.js';
 import { showThreeGlobe, hideThreeGlobe } from '../layers/threeGlobe.js';
 
 let onStepChangeCallback = null;
@@ -71,65 +72,15 @@ export function updateSliderTrackAndBounds() {
 }
 
 /**
- * 🌟 MODEL CATEGORY SUB-BAR & DYNAMIC MODEL SELECTOR
+ * 🌟 MODEL CATEGORY SUB-BAR & DRAG-SCROLL CONTROLLER
  */
 export function initModelCategoryBar() {
     const modelBtn = document.getElementById('btn-model-menu');
     const categoryBar = document.getElementById('model-category-bar');
     const scrollContainer = document.querySelector('.category-scroll-container');
-    const modelListContainer = document.getElementById('model-list-container');
     const catPills = document.querySelectorAll('.model-cat-pill');
 
     if (!modelBtn || !categoryBar) return;
-
-    let modelsData = null;
-
-    // Fetch config/models.json
-    fetch('./config/models.json')
-        .then(resp => resp.ok ? resp.json() : null)
-        .then(data => {
-            if (data) {
-                modelsData = data;
-                renderCategoryModels('Global');
-            }
-        })
-        .catch(err => console.warn("Could not load config/models.json:", err));
-
-    // Function to render models matching active category
-    function renderCategoryModels(categoryName) {
-        if (!modelListContainer) return;
-        modelListContainer.innerHTML = '';
-
-        if (!modelsData || !modelsData.models) return;
-
-        const matchingModels = Object.values(modelsData.models).filter(
-            m => m.category && m.category.toLowerCase() === categoryName.toLowerCase()
-        );
-
-        if (matchingModels.length === 0) {
-            modelListContainer.innerHTML = `<span class="no-models-msg">No ${categoryName} models available</span>`;
-            return;
-        }
-
-        matchingModels.forEach((model, idx) => {
-            const btn = document.createElement('button');
-            btn.className = `model-select-btn ${idx === 0 ? 'active' : ''}`;
-            btn.setAttribute('data-model-id', model.id);
-            btn.textContent = model.name;
-
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.model-select-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-
-                const labelSpan = modelBtn.querySelector('span');
-                if (labelSpan) labelSpan.textContent = model.name;
-
-                console.log(`[UI] Active model selected: ${model.id}`);
-            });
-
-            modelListContainer.appendChild(btn);
-        });
-    }
 
     // 1. Toggle Sub-Bar on Model Button Click
     modelBtn.addEventListener('click', (e) => {
@@ -152,7 +103,7 @@ export function initModelCategoryBar() {
             e.currentTarget.classList.add('active');
             
             const category = e.currentTarget.getAttribute('data-category');
-            renderCategoryModels(category);
+            console.log(`[UI] Model category selected: ${category}`);
         });
     });
 
@@ -345,7 +296,7 @@ function initModelRunDropdown() {
 
                 hideToast();
 
-                preloadRemainingChunks(thisGen, shaderLayerRef, updateSliderTrackAndBounds);
+                preloadRemainingChunks(thisGen);
 
             } catch (err) {
                 if (err.message !== "Load cancelled") {
