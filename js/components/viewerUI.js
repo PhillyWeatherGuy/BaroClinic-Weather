@@ -74,7 +74,7 @@ export function updateSliderTrackAndBounds() {
 /**
  * 🌟 MODEL CATEGORY SUB-BAR & DYNAMIC MODEL SELECTOR
  */
-export async function initModelCategoryBar() {
+export function initModelCategoryBar() {
     const modelBtn = document.getElementById('btn-model-menu');
     const categoryBar = document.getElementById('model-category-bar');
     const scrollContainer = document.querySelector('.category-scroll-container');
@@ -85,15 +85,16 @@ export async function initModelCategoryBar() {
 
     let modelsData = null;
 
-    // Fetch models.json config
-    try {
-        const resp = await fetch('./config/models.json');
-        if (resp.ok) {
-            modelsData = await resp.json();
-        }
-    } catch (err) {
-        console.warn("Could not load config/models.json:", err);
-    }
+    // Fetch config/models.json
+    fetch('./config/models.json')
+        .then(resp => resp.ok ? resp.json() : null)
+        .then(data => {
+            if (data) {
+                modelsData = data;
+                renderCategoryModels('Global');
+            }
+        })
+        .catch(err => console.warn("Could not load config/models.json:", err));
 
     // Function to render models matching active category
     function renderCategoryModels(categoryName) {
@@ -117,11 +118,10 @@ export async function initModelCategoryBar() {
             btn.setAttribute('data-model-id', model.id);
             btn.textContent = model.name;
 
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', () => {
                 document.querySelectorAll('.model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
 
-                // Update main button label
                 const labelSpan = modelBtn.querySelector('span');
                 if (labelSpan) labelSpan.textContent = model.name;
 
@@ -132,10 +132,7 @@ export async function initModelCategoryBar() {
         });
     }
 
-    // 1. Initial render for default active category ("Global")
-    renderCategoryModels('Global');
-
-    // 2. Toggle Sub-Bar on Model Button Click
+    // 1. Toggle Sub-Bar on Model Button Click
     modelBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const isOpen = categoryBar.style.display === 'block';
@@ -149,7 +146,7 @@ export async function initModelCategoryBar() {
         }
     });
 
-    // 3. Category Pill Click Listener
+    // 2. Category Pill Selection Listener
     catPills.forEach(pill => {
         pill.addEventListener('click', (e) => {
             catPills.forEach(p => p.classList.remove('active'));
@@ -160,7 +157,7 @@ export async function initModelCategoryBar() {
         });
     });
 
-    // 4. Mouse Drag-to-Scroll Logic for Desktop Users
+    // 3. 🌟 Mouse Drag-to-Scroll Logic for Desktop Users
     if (scrollContainer) {
         let isDown = false;
         let startX;
@@ -449,87 +446,4 @@ export function syncTimelineWithManifest() {
 export function setStepIndex(index) {
     if (!stateManager.globalSteps || index < 0 || index >= stateManager.globalSteps.length) return;
 
-    stateManager.currentStepIndex = index;
-
-    const slider = document.getElementById('timeline-slider');
-    if (slider) slider.value = index.toString();
-
-    updateTimeLabel(index);
-    updateSliderTrackAndBounds();
-
-    if (typeof onStepChangeCallback === 'function') {
-        onStepChangeCallback(index, stateManager.globalSteps[index]);
-    }
-}
-
-function updateTimeLabel(index) {
-    const label = document.getElementById('time-label');
-    const stepData = stateManager.globalSteps ? stateManager.globalSteps[index] : null;
-
-    if (!stepData) return;
-
-    const rawStep = stepData.step;
-    let formattedStep = rawStep;
-
-    if (typeof rawStep === 'number') {
-        formattedStep = `F${String(rawStep).padStart(3, '0')}`;
-    } else if (typeof rawStep === 'string' && !rawStep.startsWith('F')) {
-        formattedStep = `F${rawStep.padStart(3, '0')}`;
-    }
-
-    if (label) label.textContent = `${formattedStep}`;
-    updateForecastClock(stepData);
-}
-
-function updateForecastClock(stepData) {
-    const appClock = document.getElementById('app-clock');
-
-    if (!appClock) return;
-
-    let stepHours = 0;
-    const rawStep = stepData?.step ?? stepData?.forecast_hour ?? 0;
-    
-    if (typeof rawStep === 'number') {
-        stepHours = rawStep;
-    } else if (typeof rawStep === 'string') {
-        stepHours = parseInt(rawStep.replace(/\D/g, ''), 10) || 0;
-    }
-
-    let baseTimeString = stateManager.initTime || stateManager.runTime;
-    let validDate = null;
-
-    if (baseTimeString) {
-        if (!baseTimeString.endsWith('Z') && !baseTimeString.includes('+') && !baseTimeString.includes('-')) {
-            baseTimeString = baseTimeString.replace(' ', 'T') + 'Z';
-        }
-        
-        const baseTime = new Date(baseTimeString);
-        validDate = new Date(baseTime.getTime() + (stepHours * 3600 * 1000));
-    }
-
-    if (!validDate || isNaN(validDate.getTime())) {
-        appClock.textContent = "--:--";
-        return;
-    }
-
-    const timeString = validDate.toLocaleTimeString([], { 
-        weekday: 'short',
-        month: 'numeric',
-        day: 'numeric',
-        hour: 'numeric', 
-        minute: '2-digit', 
-        timeZoneName: 'short' 
-    });
-
-    appClock.textContent = timeString;
-}
-
-export function showToast(message) {
-    const toast = document.getElementById('status-toast');
-    if (toast) {
-        toast.textContent = message;
-        toast.style.display = 'block';
-    }
-}
-
-export function hideToas
+    stateManage
