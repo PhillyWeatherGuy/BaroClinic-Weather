@@ -572,7 +572,6 @@
     background: rgba(255, 255, 255, 0.2);
     border-radius: 3px;
 }
-/* Add this at the bottom of css/ui.css: */
 
 /* ==========================================
    GLOBE BUTTON & GLOW STYLING
@@ -604,11 +603,40 @@
 }
 
 /* ==========================================
-   HORIZONTAL MODEL CATEGORY SUB-BAR
+   TOP NAV DROPDOWN BUTTON & CATEGORY SUB-BAR
    ========================================== */
+.nav-dropdown-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    padding: 6px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.nav-dropdown-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+}
+
+.nav-dropdown-btn.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: rgba(56, 189, 248, 0.6) !important;
+    color: #38bdf8 !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+}
+
 .sub-nav-bar {
     position: absolute;
-    top: 54px; /* Directly below top-nav height */
+    top: 50px;
     left: 0;
     right: 0;
     z-index: 28;
@@ -621,7 +649,6 @@
     transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* 🌟 Draggable & Touch Scrollable Container */
 .category-scroll-container {
     display: flex;
     align-items: center;
@@ -630,21 +657,20 @@
     white-space: nowrap;
     padding: 2px 4px;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: none; /* Hide scrollbar Firefox */
+    scrollbar-width: none;
     user-select: none;
     -webkit-user-select: none;
     cursor: grab;
 }
 
 .category-scroll-container::-webkit-scrollbar {
-    display: none; /* Hide scrollbar Chrome/Safari/Edge */
+    display: none;
 }
 
 .category-scroll-container:active {
     cursor: grabbing;
 }
 
-/* Category Pill Styling */
 .model-cat-pill {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -656,7 +682,7 @@
     padding: 6px 16px;
     border-radius: 20px;
     cursor: pointer;
-    flex-shrink: 0; /* Prevents squishing on mobile */
+    flex-shrink: 0;
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -666,7 +692,6 @@
     border-color: rgba(255, 255, 255, 0.25);
 }
 
-/* 🌟 Glowing Active State for Category Pills */
 .model-cat-pill.active {
     background: rgba(56, 189, 248, 0.2) !important;
     border-color: rgba(56, 189, 248, 0.6) !important;
@@ -674,10 +699,10 @@
     box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
 }
 
-/* Rotate Chevron when menu is open */
 .nav-dropdown-btn.open .chevron-icon {
     transform: rotate(180deg);
 }
+
 .chevron-icon {
     transition: transform 0.2s ease;
 }
