@@ -709,3 +709,56 @@
 .chevron-icon {
     transition: transform 0.2s ease;
 }
+/* ==========================================
+   MODEL SELECTION BUTTONS (INSIDE CATEGORY BAR)
+   ========================================== */
+.model-list-scroll-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+}
+
+.model-list-scroll-container::-webkit-scrollbar {
+    display: none;
+}
+
+.model-select-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    padding: 5px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+.model-select-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+.model-select-btn.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: rgba(56, 189, 248, 0.6) !important;
+    color: #38bdf8 !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+}
+
+.no-models-msg {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 12px;
+    color: #64748b;
+    padding: 2px 6px;
+    font-style: italic;
+}
