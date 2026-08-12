@@ -48,7 +48,7 @@
         </div>
     </div>
 
-    <!-- Top Nav -->
+    <!-- Top Nav Bar -->
     <nav id="top-nav">
         <div class="nav-left">
             <div class="logo">BaroClinic</div>
@@ -56,10 +56,30 @@
                 <div id="app-clock" class="clock-display">--:--</div>
             </div>
         </div>
-        <div class="nav-tabs">
-            <button data-target="modelViewer" class="active">Models</button>
-            <button data-target="radar">Radar</button>
-            <button data-target="tropics">Tropics</button>
+        
+        <!-- Sleek Model & Parameter Controls Area -->
+        <div class="nav-controls">
+            <!-- Model Selection Dropdown Button -->
+            <div class="model-selector-container">
+                <button id="model-select-toggle" class="nav-dropdown-btn active">
+                    <span id="current-model-label">ECMWF 9km</span>
+                    <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <div id="model-select-menu" class="nav-dropdown-menu" style="display: none;">
+                    <!-- Dynamically populated via JS -->
+                </div>
+            </div>
+
+            <!-- Parameter Selection Dropdown Button -->
+            <div class="param-selector-container">
+                <button id="param-select-toggle" class="nav-dropdown-btn">
+                    <span id="current-param-label">2m Temperature</span>
+                    <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <div id="param-select-menu" class="nav-dropdown-menu" style="display: none;">
+                    <!-- Dynamically populated via JS -->
+                </div>
+            </div>
         </div>
     </nav>
 
