@@ -602,3 +602,82 @@
     color: #38bdf8 !important;
     box-shadow: 0 0 12px rgba(56, 189, 248, 0.4), inset 0 0 8px rgba(56, 189, 248, 0.2) !important;
 }
+
+/* ==========================================
+   HORIZONTAL MODEL CATEGORY SUB-BAR
+   ========================================== */
+.sub-nav-bar {
+    position: absolute;
+    top: 54px; /* Directly below top-nav height */
+    left: 0;
+    right: 0;
+    z-index: 28;
+    background: rgba(11, 15, 25, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 8px 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 🌟 Draggable & Touch Scrollable Container */
+.category-scroll-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 2px 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Hide scrollbar Firefox */
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+}
+
+.category-scroll-container::-webkit-scrollbar {
+    display: none; /* Hide scrollbar Chrome/Safari/Edge */
+}
+
+.category-scroll-container:active {
+    cursor: grabbing;
+}
+
+/* Category Pill Styling */
+.model-cat-pill {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #94a3b8;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    padding: 6px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    flex-shrink: 0; /* Prevents squishing on mobile */
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.model-cat-pill:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* 🌟 Glowing Active State for Category Pills */
+.model-cat-pill.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: rgba(56, 189, 248, 0.6) !important;
+    color: #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+}
+
+/* Rotate Chevron when menu is open */
+.nav-dropdown-btn.open .chevron-icon {
+    transform: rotate(180deg);
+}
+.chevron-icon {
+    transition: transform 0.2s ease;
+}
