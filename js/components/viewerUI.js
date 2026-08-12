@@ -1,7 +1,6 @@
 // js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
-import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
-import { preloadRemainingChunks } from '../app.js';
+import { fetchManifest, loadChunkBitmap, purgeAllAppMemory, preloadRemainingChunks } from '../core/dataLoader.js';
 import { showThreeGlobe, hideThreeGlobe } from '../layers/threeGlobe.js';
 
 let onStepChangeCallback = null;
@@ -346,7 +345,7 @@ function initModelRunDropdown() {
 
                 hideToast();
 
-                preloadRemainingChunks(thisGen);
+                preloadRemainingChunks(thisGen, shaderLayerRef, updateSliderTrackAndBounds);
 
             } catch (err) {
                 if (err.message !== "Load cancelled") {
@@ -446,4 +445,92 @@ export function syncTimelineWithManifest() {
 export function setStepIndex(index) {
     if (!stateManager.globalSteps || index < 0 || index >= stateManager.globalSteps.length) return;
 
-    stateManage
+    stateManager.currentStepIndex = index;
+
+    const slider = document.getElementById('timeline-slider');
+    if (slider) slider.value = index.toString();
+
+    updateTimeLabel(index);
+    updateSliderTrackAndBounds();
+
+    if (typeof onStepChangeCallback === 'function') {
+        onStepChangeCallback(index, stateManager.globalSteps[index]);
+    }
+}
+
+function updateTimeLabel(index) {
+    const label = document.getElementById('time-label');
+    const stepData = stateManager.globalSteps ? stateManager.globalSteps[index] : null;
+
+    if (!stepData) return;
+
+    const rawStep = stepData.step;
+    let formattedStep = rawStep;
+
+    if (typeof rawStep === 'number') {
+        formattedStep = `F${String(rawStep).padStart(3, '0')}`;
+    } else if (typeof rawStep === 'string' && !rawStep.startsWith('F')) {
+        formattedStep = `F${rawStep.padStart(3, '0')}`;
+    }
+
+    if (label) label.textContent = `${formattedStep}`;
+    updateForecastClock(stepData);
+}
+
+function updateForecastClock(stepData) {
+    const appClock = document.getElementById('app-clock');
+
+    if (!appClock) return;
+
+    let stepHours = 0;
+    const rawStep = stepData?.step ?? stepData?.forecast_hour ?? 0;
+    
+    if (typeof rawStep === 'number') {
+        stepHours = rawStep;
+    } else if (typeof rawStep === 'string') {
+        stepHours = parseInt(rawStep.replace(/\D/g, ''), 10) || 0;
+    }
+
+    let baseTimeString = stateManager.initTime || stateManager.runTime;
+    let validDate = null;
+
+    if (baseTimeString) {
+        if (!baseTimeString.endsWith('Z') && !baseTimeString.includes('+') && !baseTimeString.includes('-')) {
+            baseTimeString = baseTimeString.replace(' ', 'T') + 'Z';
+        }
+        
+        const baseTime = new Date(baseTimeString);
+        validDate = new Date(baseTime.getTime() + (stepHours * 3600 * 1000));
+    }
+
+    if (!validDate || isNaN(validDate.getTime())) {
+        appClock.textContent = "--:--";
+        return;
+    }
+
+    const timeString = validDate.toLocaleTimeString([], { 
+        weekday: 'short',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric', 
+        minute: '2-digit', 
+        timeZoneName: 'short' 
+    });
+
+    appClock.textContent = timeString;
+}
+
+export function showToast(message) {
+    const toast = document.getElementById('status-toast');
+    if (toast) {
+        toast.textContent = message;
+        toast.style.display = 'block';
+    }
+}
+
+export function hideToast() {
+    const toast = document.getElementById('status-toast');
+    if (toast) {
+        toast.style.display = 'none';
+    }
+}
