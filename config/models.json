@@ -2,8 +2,8 @@
   "models": {
     "ecmwf": {
       "id": "ecmwf",
-      "name": "ECMWF (European Model)",
-      "category": "Operational",
+      "name": "ECMWF",
+      "category": "Global",
       "resolution": "9km",
       "supported_params": ["2t", "tp"]
     }
