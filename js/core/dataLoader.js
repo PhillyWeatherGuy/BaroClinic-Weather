@@ -89,37 +89,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 }
 
 /**
- * 🌟 SEQUENTIAL PRELOADER: Updates slider red/blue progress as each chunk finishes downloading
- */
-export async function preloadRemainingChunks(currentGen, customShaderLayer = null, updateCallback = null) {
-    if (!stateManager.manifest || !stateManager.manifest.chunks) return;
-    const totalChunks = stateManager.manifest.chunks.length;
-
-    for (let i = 1; i < totalChunks; i++) {
-        if (currentGen !== stateManager.loadGeneration) break;
-
-        if (!stateManager.loadedChunkBitmaps[i]) {
-            try {
-                const bitmap = await loadChunkBitmap(i, currentGen);
-                if (currentGen === stateManager.loadGeneration) {
-                    if (customShaderLayer) {
-                        customShaderLayer.preloadChunkTexture(i, bitmap);
-                    }
-                }
-                if (typeof updateCallback === 'function') {
-                    updateCallback();
-                }
-            } catch (err) {
-                if (err.message !== "Load cancelled") {
-                    console.warn(`Background preload chunk ${i} paused:`, err);
-                }
-                break;
-            }
-        }
-    }
-}
-
-/**
  * 🌟 UNIFIED APP MEMORY PURGER: Wipes 2D & 3D GPU VRAM + CPU RAM + Vector Contours
  */
 export function purgeAllAppMemory(shaderLayerRef = null) {
