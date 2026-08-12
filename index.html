@@ -48,7 +48,7 @@
         </div>
     </div>
 
-    <!-- Top Navigation Bar -->
+    <!-- Top Nav -->
     <nav id="top-nav">
         <div class="nav-left">
             <div class="logo">BaroClinic</div>
@@ -56,26 +56,12 @@
                 <div id="app-clock" class="clock-display">--:--</div>
             </div>
         </div>
-        
-        <div class="nav-right">
-            <!-- 🌟 Model Trigger Button -->
-            <button id="btn-model-menu" class="nav-dropdown-btn">
-                <span>Model</span>
-                <svg class="chevron-icon" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
+        <div class="nav-tabs">
+            <button data-target="modelViewer" class="active">Models</button>
+            <button data-target="radar">Radar</button>
+            <button data-target="tropics">Tropics</button>
         </div>
     </nav>
-
-    <!-- 🌟 Horizontal Model Category Sub-Bar (Positioned directly beneath top nav) -->
-    <div id="model-category-bar" class="sub-nav-bar" style="display: none;">
-        <div class="category-scroll-container">
-            <button class="model-cat-pill active" data-category="global">Global</button>
-            <button class="model-cat-pill" data-category="ensemble">Ensemble</button>
-            <button class="model-cat-pill" data-category="hurricane">Hurricane</button>
-            <button class="model-cat-pill" data-category="mesoscale">Mesoscale</button>
-            <button class="model-cat-pill" data-category="climate">Climate</button>
-        </div>
-    </div>
 
     <!-- Compact Bottom Timeline Capsule -->
     <div id="timeline-container">
