@@ -23,14 +23,11 @@ let renderDebounceId = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
-// 🌟 Responsive Zoom: Fits CONUS on Mobile (3.2) and Desktop (4.2)
-const initialZoom = window.innerWidth < 768 ? 3.2 : 4.2;
-
 const map = new maplibregl.Map({
     container: 'map',
-    style: 'https://cdn.jsdelivr.net/gh/phillyweatherguy/BaroClinic-Weather---Backend@main/custom-style-transparent.json',
-    center: [-98.5795, 39.8283], // 🌟 Centered on Continental United States (Lebanon, KS)
-    zoom: initialZoom
+    style: 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG',
+    center: [-74.4, 39.3], 
+    zoom: 7
 });
 
 function initLayer() {
