@@ -243,3 +243,13 @@ export function updateCityPrecipitation(map, activeFrameState, manifest) {
         }
     }
 }
+/**
+ * 🌟 Hides all precipitation city markers when switching back to Temperature
+ */
+export function hideCityPrecipitationMarkers() {
+    for (const name in cityMarkers) {
+        if (cityMarkers[name] && cityMarkers[name].getElement()) {
+            cityMarkers[name].getElement().style.display = 'none';
+        }
+    }
+}
