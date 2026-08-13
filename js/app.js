@@ -65,7 +65,8 @@ export function updateBasemapStyle(styleUrl) {
     map.setStyle(styleUrl);
 }
 
-function initLayer() {
+// 🌟 ADDED 'export' KEYWORD HERE
+export function initLayer() {
     const paramShader = stateManager.manifest?.shader || (stateManager.activeParam === 'tp' ? 'accumulation' : 'scalar');
 
     // 🌟 DYNAMIC SHADER SELECTION: Instantiates accumulation or scalar shader based on models.json/manifest
