@@ -56,6 +56,13 @@ export const TEMP_PALETTE = [
 "#69867C", "#728982", "#7A8A86", "#909896"
 ];
 
+// 🌧️ Matplotlib Light Mode Precip Levels (Inches)
+const LIGHT_PRECIP_LEVELS = [
+    0.0, 0.01, 0.02, 0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+    1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5,
+    9.0, 9.5, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 50.0
+];
+
 // 🌧️ Matplotlib Light Mode Precip Hex Colors
 const LIGHT_PRECIP_HEX = [
     "#f1f5f9", "#BFBFBF", "#A4A4A4", "#818181", "#C8FFBE", "#B4FAAA", "#78F573", "#37D23C",
