@@ -67,6 +67,14 @@ function initLayer() {
     customShaderLayer = createScalarShaderLayer(map);
     setShaderLayerReference(customShaderLayer);
     
+    // 🌟 RE-UPLOAD BITMAPS IN RAM TO THE NEW GPU LAYER
+    for (const chunkIdx in stateManager.loadedChunkBitmaps) {
+        const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
+        if (bitmap && customShaderLayer) {
+            customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
+        }
+    }
+
     let firstOverlayId = null;
     const layers = map.getStyle().layers || [];
     for (const layer of layers) {
