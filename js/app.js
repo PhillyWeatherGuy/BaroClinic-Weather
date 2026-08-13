@@ -14,8 +14,7 @@ import {
     hideToast 
 } from './components/viewerUI.js';
 
-import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
-import { initCityTotalPrecipOverlay, updateCityPrecipitation, hideCityPrecipitationMarkers } from './layers/cityTotalPrecipOverlay.js'; // 🌟 City Precip Overlay
+import { initCityOverlay, updateCityCallouts } from './layers/cityOverlay.js'; // 🌟 Master Dynamic City Overlay
 import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
 
@@ -52,10 +51,7 @@ export function updateBasemapStyle(styleUrl) {
                 initVectorContours(map);
             } catch (e) {}
             try {
-                initCityTempOverlay(map);
-            } catch (e) {}
-            try {
-                initCityTotalPrecipOverlay(map);
+                initCityOverlay(map);
             } catch (e) {}
 
             if (stateManager.currentStepIndex !== undefined) {
@@ -136,17 +132,10 @@ async function renderFrame(globalIdx) {
     // 🌟 Update 3D Three.js Globe Frame Texture
     updateThreeGlobeFrame(stateManager.activeFrameState);
 
-    // 🌟 Update 2D City Callouts (Temperature vs Precipitation)
-    if (stateManager.activeParam === 'tp') {
-        try {
-            updateCityPrecipitation(map, stateManager.activeFrameState, stateManager.manifest);
-        } catch (e) {}
-    } else {
-        try {
-            hideCityPrecipitationMarkers();
-            updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
-        } catch (e) {}
-    }
+    // 🌟 Update 2D City Callouts (Master Overlay handles units dynamically)
+    try {
+        updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
+    } catch (e) {}
 
     // 🌟 Fetch Static Vector Contours from CDN (~5ms / 0ms if RAM cached)
     updateVectorContours(frameInfo.step);
@@ -215,13 +204,9 @@ map.on('load', async () => {
         console.error("Vector contours init error:", err);
     }
 
-    // 3. Initialize Top Overlay Callouts
+    // 3. Initialize Master City Overlay
     try {
-        initCityTempOverlay(map);
-    } catch (err) {}
-
-    try {
-        initCityTotalPrecipOverlay(map);
+        initCityOverlay(map);
     } catch (err) {}
 
     try {
