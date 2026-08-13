@@ -1,6 +1,6 @@
 // js/app.js
 import { stateManager } from './core/stateManager.js';
-import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
+import { fetchManifest, loadChunkBitmap, preloadRemainingChunks } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createAccumulationShaderLayer } from './shaders/accumulationShader.js'; // 🌟 Added Accumulation Shader
 import { initHubTransition } from './components/homeScreen.js'; 
@@ -65,12 +65,18 @@ export function updateBasemapStyle(styleUrl) {
     map.setStyle(styleUrl);
 }
 
-// 🌟 ADDED 'export' KEYWORD HERE
 export function initLayer() {
     const paramShader = stateManager.manifest?.shader || (stateManager.activeParam === 'tp' ? 'accumulation' : 'scalar');
 
     // 🌟 DYNAMIC SHADER SELECTION: Instantiates accumulation or scalar shader based on models.json/manifest
     if (!customShaderLayer || customShaderLayer.shaderType !== paramShader) {
+        // 🌟 FIX: Remove old shader layer from MapLibre map first!
+        if (map.getLayer('weather-gpu-shader')) {
+            try {
+                map.removeLayer('weather-gpu-shader');
+            } catch (e) {}
+        }
+
         if (paramShader === 'accumulation') {
             customShaderLayer = createAccumulationShaderLayer(map);
         } else {
@@ -149,35 +155,6 @@ async function renderFrame(globalIdx) {
 
     // 🌟 Fetch Static Vector Contours from CDN (~5ms / 0ms if RAM cached)
     updateVectorContours(frameInfo.step);
-}
-
-/**
- * 🌟 SEQUENTIAL PRELOADER: Updates slider red/blue progress as each chunk finishes downloading
- */
-export async function preloadRemainingChunks(currentGen) {
-    if (!stateManager.manifest || !stateManager.manifest.chunks) return;
-    const totalChunks = stateManager.manifest.chunks.length;
-
-    for (let i = 1; i < totalChunks; i++) {
-        if (currentGen !== stateManager.loadGeneration) break;
-
-        if (!stateManager.loadedChunkBitmaps[i]) {
-            try {
-                const bitmap = await loadChunkBitmap(i, currentGen);
-                if (currentGen === stateManager.loadGeneration) {
-                    if (customShaderLayer) {
-                        customShaderLayer.preloadChunkTexture(i, bitmap);
-                    }
-                }
-                updateSliderTrackAndBounds();
-            } catch (err) {
-                if (err.message !== "Load cancelled") {
-                    console.warn(`Background preload chunk ${i} paused:`, err);
-                }
-                break;
-            }
-        }
-    }
 }
 
 initViewerUI((stepIndex) => {
