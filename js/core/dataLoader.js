@@ -3,20 +3,46 @@ import { stateManager } from './stateManager.js';
 import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
 import { clearVectorContours } from '../layers/vectorContours.js'; // 🌟 Vector Contour Disposer
 
-export async function fetchManifest(run = null) {
-    let fileName = 'manifest.json';
-    
+export async function fetchManifest(run = null, model = null, param = null) {
+    const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
+    const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
+
+    const urlsToTry = [];
+
     if (run && run.year && run.month && run.day && run.cycle) {
-        const modelStr = run.model ? run.model.toLowerCase() : 'ecmwf';
         const dateStr = `${run.year}${run.month}${run.day}`;
         const cycleStr = run.cycle.toLowerCase();
-        fileName = `${modelStr}_${dateStr}_${cycleStr}_manifest.json`;
+        // 1. Parameter-specific run manifest (e.g., ecmwf_tp_20260812_06z_manifest.json)
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
+        // 2. Generic model run manifest (e.g., ecmwf_20260812_06z_manifest.json)
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${dateStr}_${cycleStr}_manifest.json`);
     }
 
-    const resp = await fetch(stateManager.BASE_URL + fileName);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} - Run manifest ${fileName} not found`);
-    stateManager.manifest = await resp.json();
+    // 3. Fallback default manifest
+    urlsToTry.push(`${stateManager.BASE_URL}manifest.json`);
+
+    let fetchedData = null;
+
+    for (const url of urlsToTry) {
+        try {
+            const resp = await fetch(url + `?t=${Date.now()}`);
+            if (resp.ok) {
+                fetchedData = await resp.json();
+                break;
+            }
+        } catch (err) {}
+    }
+
+    if (!fetchedData) {
+        throw new Error(`HTTP Manifest not found for ${activeModel} (${activeParam})`);
+    }
+
+    stateManager.manifest = fetchedData;
     
+    // Sync active state with manifest metadata if present
+    if (stateManager.manifest.model) stateManager.activeModel = stateManager.manifest.model;
+    if (stateManager.manifest.parameter) stateManager.activeParam = stateManager.manifest.parameter;
+
     stateManager.initTime = stateManager.manifest.init_time 
                          || stateManager.manifest.run_time 
                          || stateManager.manifest.base_time 
