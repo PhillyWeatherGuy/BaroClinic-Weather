@@ -15,8 +15,9 @@ import {
 } from './components/viewerUI.js';
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
-import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js';
-import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
+import { initCityTotalPrecipOverlay, updateCityPrecipitation, hideCityPrecipitationMarkers } from './layers/cityTotalPrecipOverlay.js'; // 🌟 City Precip Overlay
+import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
+import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -52,6 +53,9 @@ export function updateBasemapStyle(styleUrl) {
             } catch (e) {}
             try {
                 initCityTempOverlay(map);
+            } catch (e) {}
+            try {
+                initCityTotalPrecipOverlay(map);
             } catch (e) {}
 
             if (stateManager.currentStepIndex !== undefined) {
@@ -132,8 +136,17 @@ async function renderFrame(globalIdx) {
     // 🌟 Update 3D Three.js Globe Frame Texture
     updateThreeGlobeFrame(stateManager.activeFrameState);
 
-    // 🌟 Update 2D City Temperature Callouts
-    updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
+    // 🌟 Update 2D City Callouts (Temperature vs Precipitation)
+    if (stateManager.activeParam === 'tp') {
+        try {
+            updateCityPrecipitation(map, stateManager.activeFrameState, stateManager.manifest);
+        } catch (e) {}
+    } else {
+        try {
+            hideCityPrecipitationMarkers();
+            updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
+        } catch (e) {}
+    }
 
     // 🌟 Fetch Static Vector Contours from CDN (~5ms / 0ms if RAM cached)
     updateVectorContours(frameInfo.step);
@@ -208,6 +221,10 @@ map.on('load', async () => {
     } catch (err) {}
 
     try {
+        initCityTotalPrecipOverlay(map);
+    } catch (err) {}
+
+    try {
         syncModelRunDropdown();
     } catch (err) {}
 
@@ -268,12 +285,23 @@ map.on('click', (e) => {
 
     if (rawGrayValue === undefined) return;
 
-    const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
-    const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
-    const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
-    const tempC = tempK - 273.15;
+    if (stateManager.activeParam === 'tp') {
+        const minVal = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 0.0;
+        const maxVal = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 0.762;
+        let inches = minVal + (rawGrayValue / 255.0) * (maxVal - minVal);
+        if (maxVal < 5.0) inches = inches * 39.3701;
 
-    popup.setLngLat(e.lngLat)
-         .setHTML(`<div class="temp-f">${((tempC * 9/5) + 32).toFixed(1)}°F</div><div class="temp-c">${tempC.toFixed(1)}°C</div>`)
-         .addTo(map);
+        popup.setLngLat(e.lngLat)
+             .setHTML(`<div class="temp-f">${inches.toFixed(2)}"</div><div class="temp-c">Total Accum. Precip</div>`)
+             .addTo(map);
+    } else {
+        const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
+        const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
+        const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
+        const tempC = tempK - 273.15;
+
+        popup.setLngLat(e.lngLat)
+             .setHTML(`<div class="temp-f">${((tempC * 9/5) + 32).toFixed(1)}°F</div><div class="temp-c">${tempC.toFixed(1)}°C</div>`)
+             .addTo(map);
+    }
 });
