@@ -1,7 +1,7 @@
 // js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
-import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js'; // 🌟 Added initLayer
+import { preloadRemainingChunks, updateBasemapStyle } from '../app.js';
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 
 let onStepChangeCallback = null;
@@ -276,28 +276,23 @@ export function initParameterCategoryBar() {
                     updateBasemapStyle(param.map_style);
                 }
 
-                // 🌟 2. Unload previous memory
+                // 🌟 2. Swap GPU Palettes for 2D Shader & 3D Globe
+                if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
+                    shaderLayerRef.updatePalette(param.id);
+                }
+                try {
+                    updateThreeGlobePalette(param.id);
+                } catch (e) {}
+
+                // 🌟 3. Unload previous memory
                 purgeAllAppMemory(shaderLayerRef);
                 const thisGen = stateManager.loadGeneration;
 
                 try {
-                    // 🌟 3. Fetch Parameter Manifest
+                    // 🌟 4. Fetch Parameter Manifest
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
 
-                    // 🌟 4. Re-initialize Shader Layer (Dynamically activates accumulation vs scalar shader!)
-                    if (typeof initLayer === 'function') {
-                        initLayer();
-                    }
-
-                    // 🌟 5. Swap GPU Palettes for 2D Shader & 3D Globe
-                    if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
-                        shaderLayerRef.updatePalette(param.id);
-                    }
-                    try {
-                        updateThreeGlobePalette(param.id);
-                    } catch (e) {}
-
-                    // 🌟 6. Load Chunk 0 and Render Frame 0
+                    // 🌟 5. Load Chunk 0 and Render Frame 0
                     const bitmap0 = await loadChunkBitmap(0, thisGen);
                     if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
                         shaderLayerRef.preloadChunkTexture(0, bitmap0);
@@ -314,7 +309,7 @@ export function initParameterCategoryBar() {
 
                     hideToast();
 
-                    // 🌟 7. Background Preload
+                    // 🌟 6. Background Preload
                     preloadRemainingChunks(thisGen);
 
                 } catch (err) {
