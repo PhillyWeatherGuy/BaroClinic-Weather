@@ -75,21 +75,15 @@ const LIGHT_PRECIP_HEX = [
 
 /**
  * 🌟 WebGL Non-Linear Step Interpolator
- * Replicates Matplotlib's BoundaryNorm(precip_levels) with 100% transparent dry land (< 0.01")
+ * Replicates Matplotlib's BoundaryNorm(precip_levels) into a 256-color GPU texture
  */
 function createNonLinearPrecipPalette(levels, colors, maxInches = 30.0, numEntries = 256) {
     const palette = [];
     for (let i = 0; i < numEntries; i++) {
         const inches = (i / (numEntries - 1)) * maxInches;
         
-        // 🌟 0.00" dry land is 100% TRANSPARENT (matches Matplotlib masked_where < 0.01)
-        if (inches < 0.01) {
-            palette.push("rgba(0,0,0,0)");
-            continue;
-        }
-
-        let colorIdx = 1;
-        for (let k = 1; k < levels.length - 1; k++) {
+        let colorIdx = 0;
+        for (let k = 0; k < levels.length - 1; k++) {
             if (inches >= levels[k] && inches < levels[k + 1]) {
                 colorIdx = k;
                 break;
