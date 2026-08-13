@@ -37,11 +37,12 @@ const map = new maplibregl.Map({
 export function updateBasemapStyle(styleUrl) {
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
+    console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
-    map.setStyle(styleUrl);
 
-    // Re-attach custom WebGL weather layer, contours, & city labels when new style finishes loading
-    map.once('style.load', () => {
+    // 🌟 Attach 'styledata' event BEFORE calling setStyle
+    map.once('styledata', () => {
+        console.log("✅ New basemap style loaded. Re-attaching weather layers...");
         try {
             initLayer();
         } catch (e) {}
@@ -56,6 +57,8 @@ export function updateBasemapStyle(styleUrl) {
             renderFrame(stateManager.currentStepIndex);
         }
     });
+
+    map.setStyle(styleUrl);
 }
 
 function initLayer() {
