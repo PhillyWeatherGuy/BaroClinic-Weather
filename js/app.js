@@ -30,6 +30,34 @@ const map = new maplibregl.Map({
     zoom: 7
 });
 
+/**
+ * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
+ * Switches MapTiler basemap style URL and re-attaches layers when style loads
+ */
+export function updateBasemapStyle(styleUrl) {
+    if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
+
+    stateManager.currentMapStyle = styleUrl;
+    map.setStyle(styleUrl);
+
+    // Re-attach custom WebGL weather layer, contours, & city labels when new style finishes loading
+    map.once('style.load', () => {
+        try {
+            initLayer();
+        } catch (e) {}
+        try {
+            initVectorContours(map);
+        } catch (e) {}
+        try {
+            initCityTempOverlay(map);
+        } catch (e) {}
+
+        if (stateManager.currentStepIndex !== undefined) {
+            renderFrame(stateManager.currentStepIndex);
+        }
+    });
+}
+
 function initLayer() {
     customShaderLayer = createScalarShaderLayer(map);
     setShaderLayerReference(customShaderLayer);
@@ -124,6 +152,7 @@ initViewerUI((stepIndex) => {
 });
 
 map.on('load', async () => {
+    stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
     initHubTransition();
 
     // 🌟 Initialize Three.js 3D Globe Engine
