@@ -38,24 +38,29 @@ export function updateBasemapStyle(styleUrl) {
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
     stateManager.currentMapStyle = styleUrl;
-    map.setStyle(styleUrl);
 
-    // Re-attach custom WebGL weather layer, contours, & city labels when new style finishes loading
-    map.once('style.load', () => {
-        try {
-            initLayer();
-        } catch (e) {}
-        try {
-            initVectorContours(map);
-        } catch (e) {}
-        try {
-            initCityTempOverlay(map);
-        } catch (e) {}
+    // 🌟 Register listener BEFORE calling setStyle
+    const onStyleLoaded = () => {
+        if (map.isStyleLoaded()) {
+            map.off('styledata', onStyleLoaded);
+            try {
+                initLayer();
+            } catch (e) {}
+            try {
+                initVectorContours(map);
+            } catch (e) {}
+            try {
+                initCityTempOverlay(map);
+            } catch (e) {}
 
-        if (stateManager.currentStepIndex !== undefined) {
-            renderFrame(stateManager.currentStepIndex);
+            if (stateManager.currentStepIndex !== undefined) {
+                renderFrame(stateManager.currentStepIndex);
+            }
         }
-    });
+    };
+
+    map.on('styledata', onStyleLoaded);
+    map.setStyle(styleUrl);
 }
 
 function initLayer() {
