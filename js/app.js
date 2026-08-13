@@ -15,8 +15,8 @@ import {
 } from './components/viewerUI.js';
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
-import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
-import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
+import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js';
+import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -37,12 +37,13 @@ const map = new maplibregl.Map({
 export function updateBasemapStyle(styleUrl) {
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
+    console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
 
-    // 🌟 Register listener BEFORE calling setStyle
     const onStyleLoaded = () => {
         if (map.isStyleLoaded()) {
             map.off('styledata', onStyleLoaded);
+            console.log("✅ New basemap style loaded. Re-attaching weather layers...");
             try {
                 initLayer();
             } catch (e) {}
@@ -64,10 +65,12 @@ export function updateBasemapStyle(styleUrl) {
 }
 
 function initLayer() {
-    customShaderLayer = createScalarShaderLayer(map);
-    setShaderLayerReference(customShaderLayer);
+    if (!customShaderLayer) {
+        customShaderLayer = createScalarShaderLayer(map);
+        setShaderLayerReference(customShaderLayer);
+    }
     
-    // 🌟 RE-UPLOAD BITMAPS IN RAM TO THE NEW GPU LAYER
+    // 🌟 Re-upload any existing bitmaps in RAM straight to the GPU layer
     for (const chunkIdx in stateManager.loadedChunkBitmaps) {
         const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
         if (bitmap && customShaderLayer) {
@@ -83,7 +86,10 @@ function initLayer() {
             break;
         }
     }
-    map.addLayer(customShaderLayer, firstOverlayId);
+
+    if (!map.getLayer('weather-gpu-shader')) {
+        map.addLayer(customShaderLayer, firstOverlayId);
+    }
 }
 
 async function renderFrame(globalIdx) {
@@ -105,6 +111,9 @@ async function renderFrame(globalIdx) {
         } catch (err) {
             return;
         }
+    } else if (customShaderLayer && !customShaderLayer.chunkTextures[chunkIdx]) {
+        // 🌟 SAFETY FIX: If bitmap is in RAM but missing from GPU VRAM, upload it immediately
+        customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
     }
 
     stateManager.activeFrameState = {
