@@ -15,8 +15,9 @@ import {
 } from './components/viewerUI.js';
 
 import { initCityTempOverlay, updateCityTemperatures } from './layers/cityTempOverlay.js';
-import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js';
-import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
+import { initCityTotalPrecipOverlay, updateCityPrecipitation, hideCityPrecipitationMarkers } from './layers/cityTotalPrecipOverlay.js'; // 🌟 City Precip Overlay
+import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
+import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -37,13 +38,12 @@ const map = new maplibregl.Map({
 export function updateBasemapStyle(styleUrl) {
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
-    console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
 
+    // 🌟 Register listener BEFORE calling setStyle
     const onStyleLoaded = () => {
         if (map.isStyleLoaded()) {
             map.off('styledata', onStyleLoaded);
-            console.log("✅ New basemap style loaded. Re-attaching weather layers...");
             try {
                 initLayer();
             } catch (e) {}
@@ -52,6 +52,9 @@ export function updateBasemapStyle(styleUrl) {
             } catch (e) {}
             try {
                 initCityTempOverlay(map);
+            } catch (e) {}
+            try {
+                initCityTotalPrecipOverlay(map);
             } catch (e) {}
 
             if (stateManager.currentStepIndex !== undefined) {
@@ -132,8 +135,13 @@ async function renderFrame(globalIdx) {
     // 🌟 Update 3D Three.js Globe Frame Texture
     updateThreeGlobeFrame(stateManager.activeFrameState);
 
-    // 🌟 Update 2D City Temperature Callouts
-    updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
+    // 🌟 Update 2D City Callouts (Temperature vs Precipitation)
+    if (stateManager.activeParam === 'tp') {
+        updateCityPrecipitation(map, stateManager.activeFrameState, stateManager.manifest);
+    } else {
+        hideCityPrecipitationMarkers();
+        updateCityTemperatures(map, stateManager.activeFrameState, stateManager.manifest);
+    }
 
     // 🌟 Fetch Static Vector Contours from CDN (~5ms / 0ms if RAM cached)
     updateVectorContours(frameInfo.step);
@@ -208,6 +216,10 @@ map.on('load', async () => {
     } catch (err) {}
 
     try {
+        initCityTotalPrecipOverlay(map);
+    } catch (err) {}
+
+    try {
         syncModelRunDropdown();
     } catch (err) {}
 
@@ -247,7 +259,6 @@ map.on('click', (e) => {
     if (lng > 180) lng -= 360;
 
     const normX = (lng + 180.0) / 360.0;
-    // Equirectangular latitude conversion matching source chunk projection (+90°N to -90°S)
     const normY = (90.0 - e.lngLat.lat) / 180.0;
 
     if (normY < 0 || normY > 1) return;
@@ -268,12 +279,23 @@ map.on('click', (e) => {
 
     if (rawGrayValue === undefined) return;
 
-    const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
-    const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
-    const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
-    const tempC = tempK - 273.15;
+    if (stateManager.activeParam === 'tp') {
+        const minVal = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 0.0;
+        const maxVal = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 0.762;
+        let inches = minVal + (rawGrayValue / 255.0) * (maxVal - minVal);
+        if (maxVal < 5.0) inches = inches * 39.3701;
 
-    popup.setLngLat(e.lngLat)
-         .setHTML(`<div class="temp-f">${((tempC * 9/5) + 32).toFixed(1)}°F</div><div class="temp-c">${tempC.toFixed(1)}°C</div>`)
-         .addTo(map);
+        popup.setLngLat(e.lngLat)
+             .setHTML(`<div class="temp-f">${inches.toFixed(2)}"</div><div class="temp-c">Total Accum. Precip</div>`)
+             .addTo(map);
+    } else {
+        const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
+        const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
+        const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
+        const tempC = tempK - 273.15;
+
+        popup.setLngLat(e.lngLat)
+             .setHTML(`<div class="temp-f">${((tempC * 9/5) + 32).toFixed(1)}°F</div><div class="temp-c">${tempC.toFixed(1)}°C</div>`)
+             .addTo(map);
+    }
 });
