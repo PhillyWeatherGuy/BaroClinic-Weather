@@ -2,6 +2,7 @@
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
+import { createAccumulationShaderLayer } from './shaders/accumulationShader.js'; // 🌟 Added Accumulation Shader
 import { initHubTransition } from './components/homeScreen.js'; 
 import { 
     initViewerUI, 
@@ -65,8 +66,16 @@ export function updateBasemapStyle(styleUrl) {
 }
 
 function initLayer() {
-    if (!customShaderLayer) {
-        customShaderLayer = createScalarShaderLayer(map);
+    const paramShader = stateManager.manifest?.shader || (stateManager.activeParam === 'tp' ? 'accumulation' : 'scalar');
+
+    // 🌟 DYNAMIC SHADER SELECTION: Instantiates accumulation or scalar shader based on models.json/manifest
+    if (!customShaderLayer || customShaderLayer.shaderType !== paramShader) {
+        if (paramShader === 'accumulation') {
+            customShaderLayer = createAccumulationShaderLayer(map);
+        } else {
+            customShaderLayer = createScalarShaderLayer(map);
+        }
+        customShaderLayer.shaderType = paramShader;
         setShaderLayerReference(customShaderLayer);
     }
     
