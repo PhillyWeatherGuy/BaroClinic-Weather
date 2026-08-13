@@ -2,7 +2,7 @@
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks } from '../app.js';
-import { showThreeGlobe, hideThreeGlobe } from '../layers/threeGlobe.js';
+import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 
 let onStepChangeCallback = null;
 let isPlaying = false;
@@ -125,6 +125,7 @@ export function initModelCategoryBar() {
                 const labelSpan = modelBtn.querySelector('span');
                 if (labelSpan) labelSpan.textContent = model.name;
 
+                stateManager.activeModel = model.id;
                 console.log(`[UI] Active model selected: ${model.id}`);
             });
 
@@ -249,18 +250,69 @@ export function initParameterCategoryBar() {
 
         matchingParams.forEach((param, idx) => {
             const btn = document.createElement('button');
-            btn.className = `model-select-btn ${idx === 0 ? 'active' : ''}`;
+            btn.className = `model-select-btn ${idx === 0 && stateManager.activeParam === param.id ? 'active' : ''}`;
+            if (stateManager.activeParam === param.id) btn.classList.add('active');
             btn.setAttribute('data-param-id', param.id);
             btn.textContent = param.name;
 
-            btn.addEventListener('click', () => {
+            // 🌟 PARAMETER SWITCH EVENT LISTENER
+            btn.addEventListener('click', async () => {
                 document.querySelectorAll('#param-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
 
                 const labelSpan = paramBtn.querySelector('span');
                 if (labelSpan) labelSpan.textContent = param.name;
 
-                console.log(`[UI] Active parameter selected: ${param.id}`);
+                if (stateManager.activeParam === param.id) return;
+
+                if (isPlaying) pausePlayback();
+
+                showToast(`Loading ${param.name}...`);
+                
+                stateManager.activeParam = param.id;
+
+                // 1. Swap GPU Palettes for 2D Shader & 3D Globe
+                if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
+                    shaderLayerRef.updatePalette(param.id);
+                }
+                try {
+                    updateThreeGlobePalette(param.id);
+                } catch (e) {}
+
+                // 2. Unload previous memory
+                purgeAllAppMemory(shaderLayerRef);
+                const thisGen = stateManager.loadGeneration;
+
+                try {
+                    // 3. Fetch Parameter Manifest
+                    await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
+
+                    // 4. Load Chunk 0 and Render Frame 0
+                    const bitmap0 = await loadChunkBitmap(0, thisGen);
+                    if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
+                        shaderLayerRef.preloadChunkTexture(0, bitmap0);
+                    }
+
+                    if (thisGen !== stateManager.loadGeneration) return;
+
+                    syncTimelineWithManifest();
+                    setStepIndex(0);
+
+                    if (typeof onStepChangeCallback === 'function') {
+                        onStepChangeCallback(0, stateManager.globalSteps[0]);
+                    }
+
+                    hideToast();
+
+                    // 5. Background Preload
+                    preloadRemainingChunks(thisGen);
+
+                } catch (err) {
+                    if (err.message !== "Load cancelled") {
+                        console.error(err);
+                        showToast(`❌ Failed to load parameter ${param.name}`);
+                    }
+                }
             });
 
             paramListContainer.appendChild(btn);
