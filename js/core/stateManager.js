@@ -8,5 +8,7 @@ export const stateManager = {
     activeFrameState: null,
     currentStepIndex: 0,
     activeModelRun: null,
-    loadGeneration: 0 // 🌟 Cancellation token to abort stale background promises
+    activeModel: 'ecmwf', // 🌟 Active Model ID
+    activeParam: '2t',    // 🌟 Active Parameter ID (e.g. '2t', 'tp')
+    loadGeneration: 0     // 🌟 Cancellation token to abort stale background promises
 };
