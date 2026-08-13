@@ -46,21 +46,26 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-function hideBasemapCityLabels(map) {
+/**
+ * 🌟 Thoroughly hides native MapTiler basemap city/place symbol layers
+ */
+export function hideBasemapCityLabels(map) {
+    if (!map) return;
     const style = map.getStyle();
     if (!style || !style.layers) return;
 
     style.layers.forEach(layer => {
         const id = layer.id.toLowerCase();
+        const sourceLayer = (layer['source-layer'] || '').toLowerCase();
         if (layer.type === 'symbol' && (
             id.includes('place') || 
             id.includes('settlement') || 
             id.includes('city') || 
             id.includes('town') || 
             id.includes('village') ||
-            id.includes('state') ||
-            id.includes('country') ||
-            id.includes('region')
+            id.includes('label') ||
+            sourceLayer.includes('place') ||
+            sourceLayer.includes('label')
         )) {
             try {
                 map.setLayoutProperty(layer.id, 'visibility', 'none');
@@ -120,6 +125,8 @@ export async function initCityOverlay(map) {
 
 function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
+
+    hideBasemapCityLabels(mapInstance);
 
     const bounds = mapInstance.getBounds();
     const zoom = mapInstance.getZoom();
@@ -196,6 +203,8 @@ function updateCityPositions() {
 export function updateCityCallouts(map, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return;
 
+    hideBasemapCityLabels(map);
+
     const chunkIdx = activeFrameState.chunkIndex;
     const pixelData = stateManager.chunkPixelData[chunkIdx];
 
@@ -243,15 +252,10 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
                     let inches = minVal + (rawVal / 255.0) * (maxVal - minVal);
                     if (maxVal < 5.0) inches = inches * 39.3701;
 
-                    // Hide callout if dry (< 0.01") to keep map clean
-                    if (inches < 0.01) {
-                        marker.getElement().style.display = 'none';
-                    } else {
-                        marker.getElement().style.display = 'flex';
-                        if (valEl) {
-                            valEl.className = 'city-callout-val precip-val';
-                            valEl.textContent = `${inches.toFixed(2)}"`;
-                        }
+                    marker.getElement().style.display = 'flex';
+                    if (valEl) {
+                        valEl.className = 'city-callout-val precip-val';
+                        valEl.textContent = `${inches.toFixed(2)}"`;
                     }
                 } 
                 // 🌡️ 2m Temperature Formatting (°F)
