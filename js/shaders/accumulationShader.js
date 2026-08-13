@@ -1,5 +1,6 @@
 // js/shaders/accumulationShader.js
 import { PRECIP_PALETTE, getPaletteForParameter } from '../config/palettes.js';
+import { stateManager } from '../core/stateManager.js';
 
 const vsSource = `
     attribute vec2 a_pos;
@@ -19,6 +20,7 @@ const fsSource = `
     uniform float u_opacity;
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
+    uniform vec2 u_texSize;
 
     void main() {
         // Mercator UV coordinate transform for Equirectangular input images
@@ -26,18 +28,29 @@ const fsSource = `
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
+        // Map North Pole to Top of PNG
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
-        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
+        vec2 sprite_uv = vec2(
+            u_uvOffset.x + wrapped_uv.x * u_uvScale.x,
+            u_uvOffset.y + (1.0 - wrapped_uv.y) * u_uvScale.y
+        );
 
-        float rawVal = texture2D(u_dataTexture, sprite_uv).r;
+        // 🌟 GPU CUBIC SMOOTHSTEP INTERPOLATION USING EXACT SHEET DIMENSIONS
+        vec2 samplePos = sprite_uv * u_texSize - 0.5;
+        vec2 f = fract(samplePos);
+        vec2 smoothF = f * f * (3.0 - 2.0 * f);
+        vec2 smoothUv = (floor(samplePos) + 0.5 + smoothF) / u_texSize;
 
-        // 🌧️ PRECIPITATION THRESHOLD CUTOFF:
-        // Discard any pixel below 0.01 inches so dry land is 100% transparent
+        float rawVal = texture2D(u_dataTexture, smoothUv).r;
+
+        // Discard dry pixels (< 0.01 inches)
         if (rawVal < 0.0003) {
             discard;
         }
 
-        vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
+        float paletteU = (rawVal * 255.0 + 0.5) / 256.0;
+        vec4 color = texture2D(u_paletteTexture, vec2(paletteU, 0.5));
+        
         gl_FragColor = vec4(color.rgb, color.a * u_opacity);
     }
 `;
@@ -68,8 +81,9 @@ function createPaletteTexture(gl, paletteArray = PRECIP_PALETTE) {
         paletteData[i * 4 + 3] = a;
     });
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return paletteTex;
@@ -131,6 +145,7 @@ export function createAccumulationShaderLayer(mapInstance) {
             this.uOpacity = gl.getUniformLocation(this.program, 'u_opacity');
             this.uUvOffset = gl.getUniformLocation(this.program, 'u_uvOffset');
             this.uUvScale = gl.getUniformLocation(this.program, 'u_uvScale');
+            this.uTexSize = gl.getUniformLocation(this.program, 'u_texSize');
 
             const quadVertices = new Float32Array([
                 -2,0,  -1,0,  -2,1,   -2,1,  -1,0,  -1,1,
@@ -186,6 +201,14 @@ export function createAccumulationShaderLayer(mapInstance) {
             gl.uniform1f(this.uOpacity, 1.00);
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
+
+            // 🌟 FIXED JAVASCRIPT TYPES: Uses Number() instead of float()
+            const chunkIdx = stateManager.activeFrameState ? stateManager.activeFrameState.chunkIndex : 0;
+            const chunkInfo = stateManager.manifest && stateManager.manifest.chunks ? stateManager.manifest.chunks[chunkIdx] : null;
+            const sheetW = chunkInfo && chunkInfo.sheet_width ? Number(chunkInfo.sheet_width) : 2880.0;
+            const sheetH = chunkInfo && chunkInfo.sheet_height ? Number(chunkInfo.sheet_height) : 3605.0;
+
+            gl.uniform2f(this.uTexSize, sheetW, sheetH);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.enableVertexAttribArray(this.aPos);
