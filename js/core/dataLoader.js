@@ -7,18 +7,30 @@ export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
 
+    // Store active run object globally so parameter switches retain the current date/cycle
+    if (run) {
+        window.lastActiveRunObj = run;
+    }
+
+    const currentRun = run || window.lastActiveRunObj;
     const urlsToTry = [];
 
-    if (run && run.year && run.month && run.day && run.cycle) {
-        const dateStr = `${run.year}${run.month}${run.day}`;
-        const cycleStr = run.cycle.toLowerCase();
-        // 1. Parameter-specific run manifest (e.g., ecmwf_tp_20260812_06z_manifest.json)
+    if (currentRun && currentRun.year && currentRun.month && currentRun.day && currentRun.cycle) {
+        const dateStr = `${currentRun.year}${currentRun.month}${currentRun.day}`;
+        const cycleStr = currentRun.cycle.toLowerCase();
+        // 1. Parameter-specific run manifest (e.g. ecmwf_tp_20260812_06z_manifest.json)
         urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
-        // 2. Generic model run manifest (e.g., ecmwf_20260812_06z_manifest.json)
+        // 2. Generic run manifest
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${dateStr}_${cycleStr}_manifest.json`);
+    } else if (stateManager.manifest && stateManager.manifest.date && stateManager.manifest.run) {
+        const dateStr = stateManager.manifest.date;
+        const cycleStr = stateManager.manifest.run.toLowerCase();
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
         urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${dateStr}_${cycleStr}_manifest.json`);
     }
 
-    // 3. Fallback default manifest
+    // 3. Fallback parameter manifest or base manifest
+    urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_manifest.json`);
     urlsToTry.push(`${stateManager.BASE_URL}manifest.json`);
 
     let fetchedData = null;
@@ -28,6 +40,7 @@ export async function fetchManifest(run = null, model = null, param = null) {
             const resp = await fetch(url + `?t=${Date.now()}`);
             if (resp.ok) {
                 fetchedData = await resp.json();
+                console.log(`✅ Loaded parameter manifest from: ${url}`);
                 break;
             }
         } catch (err) {}
@@ -39,7 +52,7 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     stateManager.manifest = fetchedData;
     
-    // Sync active state with manifest metadata if present
+    // Sync active model/param from manifest metadata
     if (stateManager.manifest.model) stateManager.activeModel = stateManager.manifest.model;
     if (stateManager.manifest.parameter) stateManager.activeParam = stateManager.manifest.parameter;
 
