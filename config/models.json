@@ -15,7 +15,8 @@
       "unit": "°F",
       "category": "Thermodynamics",
       "shader": "scalar",
-      "palette": "temp"
+      "palette": "temp",
+      "map_style": "https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG"
     },
     "tp": {
       "id": "tp",
@@ -23,7 +24,8 @@
       "unit": "in",
       "category": "Surface and Precipitation",
       "shader": "scalar",
-      "palette": "precip"
+      "palette": "precip",
+      "map_style": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG"
     }
   }
 }
