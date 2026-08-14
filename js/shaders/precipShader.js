@@ -21,31 +21,28 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
-    // ECMWF 0.25 deg grid dimensions per frame
-    const float FRAME_WIDTH = 1440.0;
-    const float FRAME_HEIGHT = 721.0;
+    const float FRAME_W = 1440.0;
+    const float FRAME_H = 721.0;
 
     void main() {
-        // 1. Mercator UV coordinate transform for Equirectangular input images
+        // 1. Mercator UV coordinate transform
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // 2. 🌟 OPTION 2 TEXEL-CENTER INSETTING:
-        // Maps continuously to the dead-center of pixels (0.5 -> 720.5) inside the local 1440x721 frame.
-        // This completely eliminates boundary snapping between row transitions!
-        float safeX = (fract(v_texcoord.x) * (FRAME_WIDTH - 1.0) + 0.5) / FRAME_WIDTH;
-        float safeY = (normY * (FRAME_HEIGHT - 1.0) + 0.5) / FRAME_HEIGHT;
-        
-        vec2 tile_uv = vec2(safeX, safeY);
+        // 2. 🌟 Exact Half-Texel Center Lock (Stops iPhone Metal GPU Row Snapping)
+        float localX = floor(fract(v_texcoord.x) * FRAME_W);
+        float localY = floor(normY * (FRAME_H - 1.0));
 
-        // 3. Map to global 2D spritesheet atlas
-        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
+        float safeU = (localX + 0.5) / FRAME_W;
+        float safeV = (localY + 0.5) / FRAME_H;
 
-        // Fetch raw un-interpolated data point
+        vec2 sprite_uv = u_uvOffset + vec2(safeU, safeV) * u_uvScale;
+
+        // 3. Fetch raw data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
-        // Masking: Discard dry land (< 0.01" rain) completely
+        // Mask dry land
         if (rawVal < 0.002) {
             discard;
         }
