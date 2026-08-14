@@ -1,5 +1,6 @@
 // js/layers/threeGlobe.js
-import { getPaletteForParameter, TEMP_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter, TEMP_PALETTE, PRECIP_PALETTE } from '../config/palettes.js';
+import { stateManager } from '../core/stateManager.js';
 
 // 🌐 10m High-Definition Vector Datasets
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
@@ -56,7 +57,7 @@ const fsThreeGlobe = `
     varying vec3 v_normal;
 
     void main() {
-        // 🌟 100% Pure 1:1 Equirectangular UV Mapping (Full 90°N to -90°S Polar Coverage!)
+        // 🌟 100% Pure 1:1 Equirectangular UV Mapping
         vec2 wrapped_uv = vec2(v_uv.x, 1.0 - v_uv.y);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
@@ -248,7 +249,9 @@ export function initThreeGlobe() {
         };
     }
 
-    paletteTex = createPaletteTexture(TEMP_PALETTE);
+    // 🌟 Initialize with matching palette for active parameter
+    const initialPalette = (stateManager.activeParam === 'tp') ? PRECIP_PALETTE : TEMP_PALETTE;
+    paletteTex = createPaletteTexture(initialPalette);
 
     material = new THREE.ShaderMaterial({
         vertexShader: vsThreeGlobe,
@@ -300,13 +303,18 @@ export function initThreeGlobe() {
 }
 
 /**
- * 🌟 DYNAMIC PALETTE SWAP FOR 3D GLOBE: Swaps 3D GPU palette texture when picking a new parameter
+ * 🌟 DYNAMIC PALETTE SWAP FOR 3D GLOBE
  */
 export function updateThreeGlobePalette(paramIdOrHexArray) {
     if (!material) return;
-    const hexArray = Array.isArray(paramIdOrHexArray) 
-        ? paramIdOrHexArray 
-        : getPaletteForParameter(paramIdOrHexArray);
+    let hexArray;
+    if (Array.isArray(paramIdOrHexArray)) {
+        hexArray = paramIdOrHexArray;
+    } else if (paramIdOrHexArray === 'tp' || paramIdOrHexArray === 'precip') {
+        hexArray = PRECIP_PALETTE;
+    } else {
+        hexArray = getPaletteForParameter(paramIdOrHexArray);
+    }
     
     if (paletteTex) {
         paletteTex.dispose();
