@@ -30,7 +30,11 @@ const fsSource = `
 
         // MapLibre multi-world wrap
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
-        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
+        
+        // 🌟 THE FIX: Add a microscopic epsilon (0.0001) to push the coordinate 
+        // into the dead-center of the texel. This absolutely prevents GL_NEAREST 
+        // from rounding 0.2 down to 0.1999, which stops the "every 2 frames" grid shift!
+        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale + vec2(0.0001);
 
         // Fetch raw un-interpolated data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
@@ -101,7 +105,9 @@ export function createPrecipShaderLayer(mapInstance) {
             if (this.paletteTex) {
                 this.gl.deleteTexture(this.paletteTex);
             }
-            this.paletteTex = createPrecipPaletteTexture(this.gl, paletteHexArray);
+            // Fallback applied here to prevent string errors when selecting the parameter
+            const hexArray = Array.isArray(paletteHexArray) ? paletteHexArray : PRECIP_PALETTE;
+            this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray);
             mapInstance.triggerRepaint();
         },
         
