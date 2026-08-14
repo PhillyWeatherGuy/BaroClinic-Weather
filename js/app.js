@@ -127,12 +127,15 @@ async function renderFrame(globalIdx) {
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
     }
 
+    // 🌟 WebGL Y-coordinate row alignment (flips row index to match WebGL bottom-left origin)
+    const glRow = chunkInfo.rows - 1 - frameInfo.row;
+
     stateManager.activeFrameState = {
         chunkIndex: chunkIdx,
         col: frameInfo.col,
         row: frameInfo.row,
         chunkImg: stateManager.loadedChunkBitmaps[chunkIdx],
-        uvOffset: [frameInfo.col / chunkInfo.columns, frameInfo.row / chunkInfo.rows],
+        uvOffset: [frameInfo.col / chunkInfo.columns, glRow / chunkInfo.rows],
         uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
     };
     
