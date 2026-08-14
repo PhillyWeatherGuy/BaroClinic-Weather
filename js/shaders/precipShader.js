@@ -21,33 +21,25 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
-    const float FRAME_W = 1440.0;
-    const float FRAME_H = 721.0;
-
     void main() {
-        // 1. Mercator UV coordinate transform
+        // 1. Mercator UV coordinate transform for Equirectangular input images
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // 2. 🌟 Exact Half-Texel Center Lock (Stops iPhone Metal GPU Row Snapping)
-        float localX = floor(fract(v_texcoord.x) * FRAME_W);
-        float localY = floor(normY * (FRAME_H - 1.0));
+        // 2. MapLibre multi-world wrap & continuous sub-pixel sampling across atlas
+        vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
+        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
 
-        float safeU = (localX + 0.5) / FRAME_W;
-        float safeV = (localY + 0.5) / FRAME_H;
-
-        vec2 sprite_uv = u_uvOffset + vec2(safeU, safeV) * u_uvScale;
-
-        // 3. Fetch raw data point
+        // 3. Sample data texture (bilinear filtering handles 721px row transitions seamlessly)
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
-        // Mask dry land
+        // Masking: Discard dry land (< 0.01" rain) completely
         if (rawVal < 0.002) {
             discard;
         }
 
-        // Discrete step palette lookup
+        // 4. Discrete step palette lookup
         float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
         float palU = (palIndex + 0.5) / 256.0;
         vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
@@ -75,6 +67,7 @@ function createPrecipPaletteTexture(gl, paletteHexArray = PRECIP_PALETTE) {
 
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteHexArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
     
+    // Palette lookup stays NEAREST for sharp color step boundaries
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -108,6 +101,7 @@ export function createPrecipShaderLayer(mapInstance) {
             if (this.paletteTex) {
                 this.gl.deleteTexture(this.paletteTex);
             }
+            // Safe fallback if 'tp' parameter string gets passed in
             const hexArray = Array.isArray(paletteHexArray) ? paletteHexArray : PRECIP_PALETTE;
             this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray);
             mapInstance.triggerRepaint();
@@ -159,8 +153,9 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
             
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            // 🌟 LINEAR filtering eliminates the 721px odd-height boundary snapping across rows!
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
             this.chunkTextures[chunkIndex] = tex;
