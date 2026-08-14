@@ -65,7 +65,7 @@ export function updateBasemapStyle(styleUrl) {
     map.setStyle(styleUrl);
 }
 
-export function initLayer() {
+export function initLayer(shaderType = null) {
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
     }
@@ -74,7 +74,10 @@ export function initLayer() {
         customShaderLayer = null;
     }
 
-    if (stateManager.activeParam === 'tp') {
+    // 🌟 Check activeShader dynamically instead of hardcoding 'tp' to precipShader
+    const chosenShader = shaderType || stateManager.activeShader || 'scalar';
+
+    if (chosenShader === 'precip') {
         customShaderLayer = createPrecipShaderLayer(map);
     } else {
         customShaderLayer = createScalarShaderLayer(map);
