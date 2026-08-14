@@ -2,6 +2,7 @@
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
+import { createPrecipShaderLayer } from './shaders/precipShader.js'; // 🌟 Added precipitation shader
 import { initHubTransition } from './components/homeScreen.js'; 
 import { 
     initViewerUI, 
@@ -64,11 +65,21 @@ export function updateBasemapStyle(styleUrl) {
     map.setStyle(styleUrl);
 }
 
-function initLayer() {
-    if (!customShaderLayer) {
-        customShaderLayer = createScalarShaderLayer(map);
-        setShaderLayerReference(customShaderLayer);
+export function initLayer() {
+    if (map.getLayer('weather-gpu-shader')) {
+        map.removeLayer('weather-gpu-shader');
     }
+    if (customShaderLayer) {
+        customShaderLayer.clearTextures();
+        customShaderLayer = null;
+    }
+
+    if (stateManager.activeParam === 'tp') {
+        customShaderLayer = createPrecipShaderLayer(map);
+    } else {
+        customShaderLayer = createScalarShaderLayer(map);
+    }
+    setShaderLayerReference(customShaderLayer);
     
     // 🌟 Re-upload any existing bitmaps in RAM straight to the GPU layer
     for (const chunkIdx in stateManager.loadedChunkBitmaps) {
