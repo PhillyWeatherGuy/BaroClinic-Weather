@@ -12,8 +12,7 @@ const vsSource = `
 `;
 
 const fsSource = `
-    // 🌟 THE FIX: highp forces 32-bit GPU math. 
-    // It prevents the iPhone from dropping pixels on 2880x3605 textures!
+    // Keeping highp just in case the iPhone needs it to hold the 2880 pixel width
     precision highp float;
     
     varying vec2 v_texcoord;
@@ -31,11 +30,9 @@ const fsSource = `
 
         // MapLibre multi-world wrap
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
+        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
-        // Sub-Pixel Texel Centering
-        vec2 centered_uv = (vec2(0.5, 0.5) + wrapped_uv * (vec2(1440.0, 721.0) - 1.0)) / vec2(1440.0, 721.0);
-        vec2 sprite_uv = u_uvOffset + centered_uv * u_uvScale;
-
+        // Fetch raw un-interpolated data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
         // Masking: Discard dry land (< 0.01" rain) completely
@@ -43,7 +40,7 @@ const fsSource = `
             discard;
         }
 
-        // Palette Texel-Center Lock
+        // Discrete step palette lookup
         float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
         float palU = (palIndex + 0.5) / 256.0;
         vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
@@ -154,9 +151,10 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
             
-            // 🌟 Back to LINEAR for smooth curves now that the grid is bolted down!
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            // 🌟 STRICTLY NEAREST FILTERING FOR RAW DATA TESTING
+            // This will show exactly what the backend Python script output.
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
             this.chunkTextures[chunkIndex] = tex;
@@ -184,7 +182,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85);
+            gl.uniform1f(this.uOpacity, 0.85); 
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
 
