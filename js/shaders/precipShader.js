@@ -12,7 +12,6 @@ const vsSource = `
 `;
 
 const fsSource = `
-    // Keeping highp just in case the iPhone needs it to hold the 2880 pixel width
     precision highp float;
     
     varying vec2 v_texcoord;
@@ -22,19 +21,26 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
+    // ECMWF 0.25 deg grid dimensions per frame
+    const float FRAME_WIDTH = 1440.0;
+    const float FRAME_HEIGHT = 721.0;
+
     void main() {
-        // Mercator UV coordinate transform for Equirectangular input images
+        // 1. Mercator UV coordinate transform for Equirectangular input images
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // MapLibre multi-world wrap
-        vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
+        // 2. 🌟 OPTION 2 TEXEL-CENTER INSETTING:
+        // Maps continuously to the dead-center of pixels (0.5 -> 720.5) inside the local 1440x721 frame.
+        // This completely eliminates boundary snapping between row transitions!
+        float safeX = (fract(v_texcoord.x) * (FRAME_WIDTH - 1.0) + 0.5) / FRAME_WIDTH;
+        float safeY = (normY * (FRAME_HEIGHT - 1.0) + 0.5) / FRAME_HEIGHT;
         
-        // 🌟 THE FIX: Add a microscopic epsilon (0.0001) to push the coordinate 
-        // into the dead-center of the texel. This absolutely prevents GL_NEAREST 
-        // from rounding 0.2 down to 0.1999, which stops the "every 2 frames" grid shift!
-        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale + vec2(0.0001);
+        vec2 tile_uv = vec2(safeX, safeY);
+
+        // 3. Map to global 2D spritesheet atlas
+        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
 
         // Fetch raw un-interpolated data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
@@ -105,7 +111,6 @@ export function createPrecipShaderLayer(mapInstance) {
             if (this.paletteTex) {
                 this.gl.deleteTexture(this.paletteTex);
             }
-            // Fallback applied here to prevent string errors when selecting the parameter
             const hexArray = Array.isArray(paletteHexArray) ? paletteHexArray : PRECIP_PALETTE;
             this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray);
             mapInstance.triggerRepaint();
@@ -157,8 +162,6 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
             
-            // 🌟 STRICTLY NEAREST FILTERING FOR RAW DATA TESTING
-            // This will show exactly what the backend Python script output.
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
