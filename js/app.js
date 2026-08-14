@@ -92,10 +92,12 @@ export function initLayer(shaderType = null) {
         }
     }
 
+    // 🌟 Place weather layer above ocean/land fills, but below borders and labels
     let firstOverlayId = null;
     const layers = map.getStyle().layers || [];
     for (const layer of layers) {
-        if (layer.type === 'line' || layer.type === 'symbol') {
+        const id = layer.id.toLowerCase();
+        if (layer.type === 'symbol' || id.includes('admin') || id.includes('boundary') || id.includes('border') || id.includes('road')) {
             firstOverlayId = layer.id;
             break;
         }
