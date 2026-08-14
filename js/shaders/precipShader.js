@@ -28,7 +28,11 @@ const fsSource = `
 
         // MapLibre multi-world wrap
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
-        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
+
+        // 🌟 Sub-Pixel Texel Centering: Locks sampling to exact pixel centers within the 1440x721 sub-frame
+        // Prevents alternating column jitter and boundary seam bleeding across frames
+        vec2 centered_uv = (vec2(0.5, 0.5) + wrapped_uv * (vec2(1440.0, 721.0) - 1.0)) / vec2(1440.0, 721.0);
+        vec2 sprite_uv = u_uvOffset + centered_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
