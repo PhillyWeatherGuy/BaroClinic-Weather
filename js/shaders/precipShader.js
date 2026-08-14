@@ -12,7 +12,10 @@ const vsSource = `
 `;
 
 const fsSource = `
-    precision mediump float;
+    // 🌟 THE FIX: highp forces 32-bit GPU math. 
+    // It prevents the iPhone from dropping pixels on 2880x3605 textures!
+    precision highp float;
+    
     varying vec2 v_texcoord;
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
@@ -29,24 +32,22 @@ const fsSource = `
         // MapLibre multi-world wrap
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
 
-        // 🌟 Sub-Pixel Texel Centering: Locks sampling to exact pixel centers within the 1440x721 sub-frame
+        // Sub-Pixel Texel Centering
         vec2 centered_uv = (vec2(0.5, 0.5) + wrapped_uv * (vec2(1440.0, 721.0) - 1.0)) / vec2(1440.0, 721.0);
         vec2 sprite_uv = u_uvOffset + centered_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
-        // 🌧️ Masking: Discard dry land (< 0.01" rain) completely
+        // Masking: Discard dry land (< 0.01" rain) completely
         if (rawVal < 0.002) {
             discard;
         }
 
-        // 🌟 Palette Texel-Center Lock: Samples exact bin centers (0.5 to 255.5 / 256.0)
-        // Eliminates edge twitching caused by floating-point seam oscillation
+        // Palette Texel-Center Lock
         float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
         float palU = (palIndex + 0.5) / 256.0;
         vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
         
-        // If palette pixel itself has 0 alpha, discard
         if (color.a == 0.0) {
             discard;
         }
@@ -65,13 +66,11 @@ function createPrecipPaletteTexture(gl, paletteHexArray = PRECIP_PALETTE) {
         paletteData[i * 4]     = (num >> 16) & 255;
         paletteData[i * 4 + 1] = (num >> 8) & 255;
         paletteData[i * 4 + 2] = num & 255;
-        // First entry (0.00" / dry) is fully transparent
         paletteData[i * 4 + 3] = (i === 0) ? 0 : 255;
     });
 
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteHexArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
     
-    // 🌟 NEAREST filtering replicates Matplotlib BoundaryNorm (discrete steps, no color blending)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -155,9 +154,9 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
             
-            // 🌟 LINEAR filtering on spatial grid creates smooth contourf-like curves
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            // 🌟 Back to LINEAR for smooth curves now that the grid is bolted down!
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
             this.chunkTextures[chunkIndex] = tex;
@@ -185,7 +184,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85); // Matches Colab alpha=0.85
+            gl.uniform1f(this.uOpacity, 0.85);
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
 
