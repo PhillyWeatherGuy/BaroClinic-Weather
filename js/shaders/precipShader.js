@@ -30,20 +30,21 @@ const fsSource = `
         vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
 
         // 🌟 Sub-Pixel Texel Centering: Locks sampling to exact pixel centers within the 1440x721 sub-frame
-        // Prevents alternating column jitter and boundary seam bleeding across frames
         vec2 centered_uv = (vec2(0.5, 0.5) + wrapped_uv * (vec2(1440.0, 721.0) - 1.0)) / vec2(1440.0, 721.0);
         vec2 sprite_uv = u_uvOffset + centered_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
-        // 🌧️ Colab Masking: Discard zero and trace precipitation (< 0.01" / rawVal < 0.00033)
-        // 0.01 inches / 30.0 max inches ≈ 0.00033
-        if (rawVal < 0.00033) {
+        // 🌧️ Masking: Discard dry land (< 0.01" rain) completely
+        if (rawVal < 0.002) {
             discard;
         }
 
-        // Discrete step palette lookup
-        vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
+        // 🌟 Palette Texel-Center Lock: Samples exact bin centers (0.5 to 255.5 / 256.0)
+        // Eliminates edge twitching caused by floating-point seam oscillation
+        float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
+        float palU = (palIndex + 0.5) / 256.0;
+        vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
         
         // If palette pixel itself has 0 alpha, discard
         if (color.a == 0.0) {
