@@ -1,7 +1,7 @@
 // js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
-import { preloadRemainingChunks, updateBasemapStyle } from '../app.js';
+import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js';
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 
 let onStepChangeCallback = null;
@@ -288,11 +288,16 @@ export function initParameterCategoryBar() {
                 purgeAllAppMemory(shaderLayerRef);
                 const thisGen = stateManager.loadGeneration;
 
+                // 🌟 4. Mount matching shader layer (scalar vs precip)
+                if (typeof initLayer === 'function') {
+                    initLayer();
+                }
+
                 try {
-                    // 🌟 4. Fetch Parameter Manifest
+                    // 🌟 5. Fetch Parameter Manifest
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
 
-                    // 🌟 5. Load Chunk 0 and Render Frame 0
+                    // 🌟 6. Load Chunk 0 and Render Frame 0
                     const bitmap0 = await loadChunkBitmap(0, thisGen);
                     if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
                         shaderLayerRef.preloadChunkTexture(0, bitmap0);
@@ -309,7 +314,7 @@ export function initParameterCategoryBar() {
 
                     hideToast();
 
-                    // 🌟 6. Background Preload
+                    // 🌟 7. Background Preload
                     preloadRemainingChunks(thisGen);
 
                 } catch (err) {
