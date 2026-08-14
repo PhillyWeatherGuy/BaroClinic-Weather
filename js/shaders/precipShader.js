@@ -1,5 +1,5 @@
 // js/shaders/precipShader.js
-import { PRECIP_PALETTE, getPaletteForParameter } from '../config/palettes.js';
+import { PRECIP_PALETTE } from '../config/palettes.js';
 
 const vsSource = `
     attribute vec2 a_pos;
@@ -29,13 +29,8 @@ const fsSource = `
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
         // MapLibre multi-world wrap
-        vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
-
-        // Compute normalized coordinates across the entire spritesheet
-        vec2 sheet_norm = u_uvOffset + tile_uv * u_uvScale;
-
-        // 🌟 CRITICAL FIX: Flip Y so PNG Row 0 (top) maps to WebGL V=1.0 (top)
-        vec2 sprite_uv = vec2(sheet_norm.x, 1.0 - sheet_norm.y);
+        vec2 wrapped_uv = vec2(fract(v_texcoord.x), normY);
+        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         // Fetch raw un-interpolated data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
@@ -101,16 +96,12 @@ export function createPrecipShaderLayer(mapInstance) {
             this.activeTex = null;
         },
 
-        updatePalette: function(paramIdOrHexArray = PRECIP_PALETTE) {
+        updatePalette: function(paletteHexArray = PRECIP_PALETTE) {
             if (!this.gl) return;
-            const hexArray = Array.isArray(paramIdOrHexArray) 
-                ? paramIdOrHexArray 
-                : getPaletteForParameter(paramIdOrHexArray);
-
             if (this.paletteTex) {
                 this.gl.deleteTexture(this.paletteTex);
             }
-            this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray);
+            this.paletteTex = createPrecipPaletteTexture(this.gl, paletteHexArray);
             mapInstance.triggerRepaint();
         },
         
@@ -161,6 +152,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
             
             // 🌟 STRICTLY NEAREST FILTERING FOR RAW DATA TESTING
+            // This will show exactly what the backend Python script output.
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
