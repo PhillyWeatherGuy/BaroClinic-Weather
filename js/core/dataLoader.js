@@ -83,7 +83,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
     const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-    const imgResp = await fetch(chunkUrl);
+    const imgResp = await fetch(chunkUrl) + `?t=${Date.now()}`);
     if (!imgResp.ok) throw new Error(`Failed to load chunk image: ${imgResp.status}`);
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
