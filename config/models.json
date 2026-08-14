@@ -23,7 +23,7 @@
       "name": "Total Accum. Precip",
       "unit": "in",
       "category": "Surface and Precipitation",
-      "shader": "precip",
+      "shader": "scalar",
       "palette": "precip",
       "map_style": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG"
     }
