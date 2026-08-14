@@ -270,28 +270,29 @@ export function initParameterCategoryBar() {
                 showToast(`Loading ${param.name}...`);
                 
                 stateManager.activeParam = param.id;
+                stateManager.activeShader = param.shader || 'scalar';
 
                 // 🌟 1. Dynamic Basemap Style Switcher
                 if (param.map_style && typeof updateBasemapStyle === 'function') {
                     updateBasemapStyle(param.map_style);
                 }
 
-                // 🌟 2. Swap GPU Palettes for 2D Shader & 3D Globe
-                if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
-                    shaderLayerRef.updatePalette(param.id);
-                }
-                try {
-                    updateThreeGlobePalette(param.id);
-                } catch (e) {}
-
-                // 🌟 3. Unload previous memory
+                // 🌟 2. Unload previous memory & destroy old layer
                 purgeAllAppMemory(shaderLayerRef);
                 const thisGen = stateManager.loadGeneration;
 
-                // 🌟 4. Mount matching shader layer (scalar vs precip)
+                // 🌟 3. Mount matching shader layer based on models.json config!
                 if (typeof initLayer === 'function') {
-                    initLayer();
+                    initLayer(param.shader || 'scalar');
                 }
+
+                // 🌟 4. Swap GPU Palettes for the NEW Shader Layer & 3D Globe
+                if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
+                    shaderLayerRef.updatePalette(param.palette || param.id);
+                }
+                try {
+                    updateThreeGlobePalette(param.palette || param.id);
+                } catch (e) {}
 
                 try {
                     // 🌟 5. Fetch Parameter Manifest
