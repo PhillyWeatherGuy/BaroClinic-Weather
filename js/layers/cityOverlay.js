@@ -249,7 +249,7 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
 
                 // 🌧️ Total Accumulated Precipitation Formatting (Inches)
                 if (activeParam === 'tp') {
-                    let inches = minVal + (rawVal / 255.0) * (maxVal - minVal);
+                    let inches = minVal + (rawVal / 4095.0) * (maxVal - minVal); // 🌟 Updated 255.0 -> 4095.0
                     if (maxVal < 5.0) inches = inches * 39.3701;
 
                     marker.getElement().style.display = 'flex';
@@ -261,7 +261,7 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
                 // 🌡️ 2m Temperature Formatting (°F)
                 else {
                     marker.getElement().style.display = 'flex';
-                    const tempK = minVal + (rawVal / 255.0) * (maxVal - minVal);
+                    const tempK = minVal + (rawVal / 4095.0) * (maxVal - minVal); // 🌟 Updated 255.0 -> 4095.0
                     const tempC = tempK - 273.15;
                     const tempF = Math.round((tempC * 9 / 5) + 32);
 
