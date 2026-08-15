@@ -21,6 +21,9 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
+    const float FRAME_W = 1440.0;
+    const float FRAME_H = 721.0;
+
     void main() {
         // 1. Mercator UV coordinate transform
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
@@ -143,15 +146,20 @@ export function createPrecipShaderLayer(mapInstance) {
             this.paletteTex = createPrecipPaletteTexture(gl, PRECIP_PALETTE);
         },
         
-        preloadChunkTexture: function(chunkIndex, imageBitmap) {
+        preloadChunkTexture: function(chunkIndex, bufferObj) {
             if (!this.gl || this.chunkTextures[chunkIndex]) return;
             const gl = this.gl;
             const tex = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, tex);
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
             
-            // 🌟 Changed to LINEAR to replicate Python's gaussian_filter smoothing
+            // 🌟 1. Loaded raw Uint8 bytes directly from bufferObj with explicit dimensions
+            gl.texImage2D(
+                gl.TEXTURE_2D, 0, gl.LUMINANCE, 
+                bufferObj.width, bufferObj.height, 0, 
+                gl.LUMINANCE, gl.UNSIGNED_BYTE, bufferObj.data
+            );
+            
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -181,7 +189,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85); // Matches alpha=0.85 in Python Colab
+            gl.uniform1f(this.uOpacity, 0.85); 
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
 
