@@ -85,6 +85,9 @@ export function createScalarShaderLayer(mapInstance) {
             this.activeTex = null;
         },
 
+        /**
+         * 🌟 DYNAMIC PALETTE SWAP: Swaps GPU palette texture when picking a new parameter
+         */
         updatePalette: function(paramIdOrHexArray) {
             if (!this.gl) return;
             let hexArray;
@@ -143,13 +146,20 @@ export function createScalarShaderLayer(mapInstance) {
             this.paletteTex = createPaletteTexture(gl, initialPalette);
         },
         
-        preloadChunkTexture: function(chunkIndex, imageBitmap) {
+        preloadChunkTexture: function(chunkIndex, bufferObj) {
             if (!this.gl || this.chunkTextures[chunkIndex]) return;
             const gl = this.gl;
             const tex = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, tex);
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
+            
+            // 🌟 Loaded raw Uint8 bytes directly from bufferObj with explicit dimensions
+            gl.texImage2D(
+                gl.TEXTURE_2D, 0, gl.LUMINANCE, 
+                bufferObj.width, bufferObj.height, 0, 
+                gl.LUMINANCE, gl.UNSIGNED_BYTE, bufferObj.data
+            );
+            
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
