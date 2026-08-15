@@ -21,23 +21,15 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
-    const float FRAME_W = 1440.0;
-    const float FRAME_H = 721.0;
-
     void main() {
         // 1. Mercator UV coordinate transform
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // 2. Exact Half-Texel Center Lock
-        float localX = floor(fract(v_texcoord.x) * FRAME_W);
-        float localY = floor(normY * (FRAME_H - 1.0));
-
-        float safeU = (localX + 0.5) / FRAME_W;
-        float safeV = (localY + 0.5) / FRAME_H;
-
-        vec2 sprite_uv = u_uvOffset + vec2(safeU, safeV) * u_uvScale;
+        // 2. 🌟 Continuous smooth bilinear sampling (matches Python's gaussian_filter)
+        vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
+        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
 
         // 3. Fetch raw data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
