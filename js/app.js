@@ -253,7 +253,7 @@ map.on('load', async () => {
     }
 });
 
-// 🌟 Direct Uint8 Pixel Inspection on Click
+// 🌟 Direct Uint16 Pixel Inspection on Click
 map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
@@ -289,7 +289,7 @@ map.on('click', (e) => {
     if (stateManager.activeParam === 'tp') {
         const minVal = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 0.0;
         const maxVal = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 0.762;
-        let inches = minVal + (rawGrayValue / 255.0) * (maxVal - minVal);
+        let inches = minVal + (rawGrayValue / 4095.0) * (maxVal - minVal); // 🌟 Updated 255.0 -> 4095.0
         if (maxVal < 5.0) inches = inches * 39.3701;
 
         popup.setLngLat(e.lngLat)
@@ -298,7 +298,7 @@ map.on('click', (e) => {
     } else {
         const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
         const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
-        const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
+        const tempK = minK + (rawGrayValue / 4095.0) * (maxK - minK); // 🌟 Updated 255.0 -> 4095.0
         const tempC = tempK - 273.15;
 
         popup.setLngLat(e.lngLat)
