@@ -30,7 +30,7 @@ const fsSource = `
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // 2. 🌟 Exact Half-Texel Center Lock (Stops iPhone Metal GPU Row Snapping)
+        // 2. Exact Half-Texel Center Lock
         float localX = floor(fract(v_texcoord.x) * FRAME_W);
         float localY = floor(normY * (FRAME_H - 1.0));
 
@@ -159,6 +159,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, imageBitmap);
             
+            // 🌟 Changed to LINEAR to replicate Python's gaussian_filter smoothing
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -188,7 +189,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85); 
+            gl.uniform1f(this.uOpacity, 0.85); // Matches alpha=0.85 in Python Colab
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
 
