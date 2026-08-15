@@ -35,7 +35,7 @@ const fsSource = `
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
         // Mask dry land
-        if (rawVal < 0.002) {
+        if (rawVal < 0.00001) {
             discard;
         }
 
