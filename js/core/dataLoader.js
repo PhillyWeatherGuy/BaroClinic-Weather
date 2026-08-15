@@ -82,45 +82,43 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const chunk = stateManager.manifest.chunks[chunkIndex];
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
-    const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-    const imgResp = await fetch(chunkUrl);
-    if (!imgResp.ok) throw new Error(`Failed to load chunk image: ${imgResp.status}`);
+    const chunkUrl = (chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file) + `?t=${Date.now()}`;
+    const resp = await fetch(chunkUrl);
+    if (!resp.ok) throw new Error(`Failed to load chunk binary: ${resp.status}`);
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
         throw new Error("Load cancelled");
     }
 
-    const blob = await imgResp.blob();
-    const bitmap = await createImageBitmap(blob);
+    // 🌟 Native browser-level Gzip decompression stream
+    const decompressedStream = resp.body.pipeThrough(new DecompressionStream('gzip'));
+    const blob = await new Response(decompressedStream).blob();
+    const buffer = await blob.arrayBuffer();
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-        bitmap.close();
         throw new Error("Load cancelled");
     }
 
-    stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
-
-    let offCanvas = document.createElement('canvas');
-    offCanvas.width = bitmap.width;
-    offCanvas.height = bitmap.height;
-    let offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
-    offCtx.drawImage(bitmap, 0, 0);
-
-    const rgba = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
-    const singleChannel = new Uint8Array(bitmap.width * bitmap.height);
-
-    for (let i = 0; i < singleChannel.length; i++) {
-        singleChannel[i] = rgba[i * 4];
+    // 🌟 Parse 16-bit uint16 array for high precision (0 - 4095)
+    const u16 = new Uint16Array(buffer);
+    
+    // 🌟 Derive 8-bit version for smooth GPU texture rendering
+    const u8 = new Uint8Array(u16.length);
+    for (let i = 0; i < u16.length; i++) {
+        u8[i] = u16[i] >> 4;
     }
 
-    stateManager.chunkPixelData[chunkIndex] = singleChannel;
+    // Save full 16-bit array for precise click inspections
+    stateManager.chunkPixelData[chunkIndex] = u16;
 
-    offCanvas.width = 0;
-    offCanvas.height = 0;
-    offCanvas = null;
-    offCtx = null;
+    const bufferObj = {
+        data: u8,
+        width: chunk.sheet_width,
+        height: chunk.sheet_height
+    };
 
-    return bitmap;
+    stateManager.loadedChunkBitmaps[chunkIndex] = bufferObj;
+    return bufferObj;
 }
 
 /**
@@ -133,16 +131,10 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
     clearThreeGlobeTextures();
     clearVectorContours();
 
-    // 1. Close CPU ImageBitmap handles
-    for (const key in stateManager.loadedChunkBitmaps) {
-        const bitmap = stateManager.loadedChunkBitmaps[key];
-        if (bitmap && typeof bitmap.close === 'function') {
-            bitmap.close();
-        }
-    }
+    // 1. Clear CPU chunk buffers
     stateManager.loadedChunkBitmaps = {};
 
-    // 2. Clear raw city temperature pixel memory
+    // 2. Clear raw pixel memory
     stateManager.chunkPixelData = {};
 
     // 3. Delete 2D WebGL textures from GPU VRAM
@@ -150,7 +142,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
         shaderLayerRef.clearTextures();
     }
 
-    // 4. Clear state references (Note: currentDate & currentCycle are preserved so parameter switches remember the run!)
+    // 4. Clear state references
     stateManager.manifest = null;
     stateManager.globalSteps = [];
     stateManager.currentStepIndex = 0;
