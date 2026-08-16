@@ -64,6 +64,11 @@ const fsThreeGlobe = `
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
+        // 🌟 Discard transparent pixels (dry land for precip)
+        if (color.a == 0.0) {
+            discard;
+        }
+
         // Subtle 3D atmospheric limb depth glow
         float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
         vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
@@ -77,9 +82,15 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     canvas.width = paletteHexArray.length;
     canvas.height = 1;
     const ctx = canvas.getContext('2d');
+    const isPrecip = (paletteHexArray === PRECIP_PALETTE);
+
     paletteHexArray.forEach((hex, i) => {
-        ctx.fillStyle = hex;
-        ctx.fillRect(i, 0, 1, 1);
+        if (isPrecip && i === 0) {
+            ctx.clearRect(i, 0, 1, 1); // 🌟 Transparent index 0 for dry land
+        } else {
+            ctx.fillStyle = hex;
+            ctx.fillRect(i, 0, 1, 1);
+        }
     });
     const texture = new THREE.CanvasTexture(canvas);
     texture.minFilter = THREE.LinearFilter;
@@ -328,9 +339,23 @@ export function updateThreeGlobeFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
     const chunkIdx = frameState.chunkIndex;
+    const source = frameState.chunkImg;
 
     if (!globeChunkTextures[chunkIdx]) {
-        const texture = new THREE.CanvasTexture(frameState.chunkImg);
+        let texture;
+        // 🌟 Polymorphic texture creation: binary buffer vs ImageBitmap
+        if (source.data && source.width && source.height) {
+            texture = new THREE.DataTexture(
+                source.data,
+                source.width,
+                source.height,
+                THREE.LuminanceFormat,
+                THREE.UnsignedByteType
+            );
+            texture.needsUpdate = true;
+        } else {
+            texture = new THREE.CanvasTexture(source);
+        }
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
         globeChunkTextures[chunkIdx] = texture;
