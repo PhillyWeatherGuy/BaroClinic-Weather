@@ -74,27 +74,29 @@ const LIGHT_PRECIP_HEX = [
 ];
 
 /**
- * 🌟 WebGL Piecewise Non-Linear Step Interpolator
- * Replicates the exact 2-zone curve (Zone 1: 0-1", Zone 2: 1-30") into a 256-color GPU texture
+ * 🌟 WebGL Dynamic Breakpoint Step Interpolator
+ * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
  */
-function createNonLinearPrecipPalette(levels, colors, maxInches = 30.0, numEntries = 256) {
+function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.0], bytePoints = [0, 100, 255], numEntries = 256) {
     const palette = [];
     for (let i = 0; i < numEntries; i++) {
-        // 🌟 Piecewise mapping: 0-100 is 0-1", 101-255 is 1-maxInches
-        let inches = 0.0;
-        if (i <= 100) {
-            inches = (i / 100.0) * 1.0;
-        } else {
-            inches = 1.0 + ((i - 100.0) / 155.0) * (maxInches - 1.0);
+        // 🌟 Piecewise segment interpolation matching parameters.json
+        let physicalVal = valPoints[0];
+        for (let j = 0; j < bytePoints.length - 1; j++) {
+            if (i >= bytePoints[j] && i <= bytePoints[j + 1]) {
+                const t = (i - bytePoints[j]) / (bytePoints[j + 1] - bytePoints[j]);
+                physicalVal = valPoints[j] + t * (valPoints[j + 1] - valPoints[j]);
+                break;
+            }
         }
         
         let colorIdx = 0;
         for (let k = 0; k < levels.length - 1; k++) {
-            if (inches >= levels[k] && inches < levels[k + 1]) {
+            if (physicalVal >= levels[k] && physicalVal < levels[k + 1]) {
                 colorIdx = k;
                 break;
             }
-            if (inches >= levels[levels.length - 1]) {
+            if (physicalVal >= levels[levels.length - 1]) {
                 colorIdx = colors.length - 1;
             }
         }
@@ -103,7 +105,13 @@ function createNonLinearPrecipPalette(levels, colors, maxInches = 30.0, numEntri
     return palette;
 }
 
-export const PRECIP_PALETTE = createNonLinearPrecipPalette(LIGHT_PRECIP_LEVELS, LIGHT_PRECIP_HEX, 30.0, 256);
+export const PRECIP_PALETTE = createNonLinearPrecipPalette(
+    LIGHT_PRECIP_LEVELS, 
+    LIGHT_PRECIP_HEX, 
+    [0.0, 1.0, 30.0], 
+    [0, 100, 255], 
+    256
+);
 
 /**
  * 🌟 Dynamic Palette Selector
