@@ -2,7 +2,6 @@
 import { stateManager } from './stateManager.js';
 import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
 import { clearVectorContours } from '../layers/vectorContours.js'; // 🌟 Vector Contour Disposer
-import { decompress } from 'https://cdn.jsdelivr.net/npm/fzstd/+esm'; // 🌟 Zstd browser decompressor
 
 export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
@@ -83,48 +82,45 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const chunk = stateManager.manifest.chunks[chunkIndex];
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
-    const chunkUrl = (chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file) + `?t=${Date.now()}`;
-    const resp = await fetch(chunkUrl);
-    if (!resp.ok) throw new Error(`Failed to load chunk binary: ${resp.status}`);
+    const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+    const imgResp = await fetch(chunkUrl);
+    if (!imgResp.ok) throw new Error(`Failed to load chunk image: ${imgResp.status}`);
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
         throw new Error("Load cancelled");
     }
 
-    const compressedBytes = new Uint8Array(await resp.arrayBuffer());
+    const blob = await imgResp.blob();
+    const bitmap = await createImageBitmap(blob);
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        bitmap.close();
         throw new Error("Load cancelled");
     }
 
-    // 🌟 Decompress Zstandard buffer using fzstd
-    const decompressedBytes = decompress(compressedBytes);
-    const buffer = decompressedBytes.buffer;
+    stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
 
-    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-        throw new Error("Load cancelled");
+    let offCanvas = document.createElement('canvas');
+    offCanvas.width = bitmap.width;
+    offCanvas.height = bitmap.height;
+    let offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+    offCtx.drawImage(bitmap, 0, 0);
+
+    const rgba = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const singleChannel = new Uint8Array(bitmap.width * bitmap.height);
+
+    for (let i = 0; i < singleChannel.length; i++) {
+        singleChannel[i] = rgba[i * 4];
     }
 
-    // 🌟 Parse 16-bit uint16 array for high precision (0 - 4095)
-    const u16 = new Uint16Array(buffer);
-    
-    // 🌟 Derive 8-bit version for smooth GPU texture rendering
-    const u8 = new Uint8Array(u16.length);
-    for (let i = 0; i < u16.length; i++) {
-        u8[i] = u16[i] >> 4;
-    }
+    stateManager.chunkPixelData[chunkIndex] = singleChannel;
 
-    // Save full 16-bit array for precise click inspections
-    stateManager.chunkPixelData[chunkIndex] = u16;
+    offCanvas.width = 0;
+    offCanvas.height = 0;
+    offCanvas = null;
+    offCtx = null;
 
-    const bufferObj = {
-        data: u8,
-        width: chunk.sheet_width,
-        height: chunk.sheet_height
-    };
-
-    stateManager.loadedChunkBitmaps[chunkIndex] = bufferObj;
-    return bufferObj;
+    return bitmap;
 }
 
 /**
@@ -137,10 +133,16 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
     clearThreeGlobeTextures();
     clearVectorContours();
 
-    // 1. Clear CPU chunk buffers
+    // 1. Close CPU ImageBitmap handles
+    for (const key in stateManager.loadedChunkBitmaps) {
+        const bitmap = stateManager.loadedChunkBitmaps[key];
+        if (bitmap && typeof bitmap.close === 'function') {
+            bitmap.close();
+        }
+    }
     stateManager.loadedChunkBitmaps = {};
 
-    // 2. Clear raw pixel memory
+    // 2. Clear raw city temperature pixel memory
     stateManager.chunkPixelData = {};
 
     // 3. Delete 2D WebGL textures from GPU VRAM
@@ -148,7 +150,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
         shaderLayerRef.clearTextures();
     }
 
-    // 4. Clear state references
+    // 4. Clear state references (Note: currentDate & currentCycle are preserved so parameter switches remember the run!)
     stateManager.manifest = null;
     stateManager.globalSteps = [];
     stateManager.currentStepIndex = 0;
