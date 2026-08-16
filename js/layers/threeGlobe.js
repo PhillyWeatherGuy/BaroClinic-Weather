@@ -328,20 +328,11 @@ export function updateThreeGlobeFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
     const chunkIdx = frameState.chunkIndex;
-    const bufferObj = frameState.chunkImg; // 🌟 Raw binary buffer object { data, width, height }
 
     if (!globeChunkTextures[chunkIdx]) {
-        // 🌟 THREE.DataTexture loads raw Uint8 bytes directly for the 3D globe
-        const texture = new THREE.DataTexture(
-            bufferObj.data,
-            bufferObj.width,
-            bufferObj.height,
-            THREE.LuminanceFormat,
-            THREE.UnsignedByteType
-        );
+        const texture = new THREE.CanvasTexture(frameState.chunkImg);
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
-        texture.needsUpdate = true;
         globeChunkTextures[chunkIdx] = texture;
     }
 
