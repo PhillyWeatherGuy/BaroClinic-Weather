@@ -47,6 +47,32 @@ style.textContent = `
 document.head.appendChild(style);
 
 /**
+ * 🌟 UNIVERSAL PIXEL DECODER
+ * Dynamically decodes piecewise or linear pixel values based on manifest.json
+ */
+export function decodePixelValue(rawVal, manifest) {
+    if (rawVal === undefined || !manifest) return 0.0;
+
+    const scaling = manifest.scaling;
+    if (scaling && scaling.mode === 'piecewise') {
+        const breakByte = scaling.break_byte || 100;
+        const breakVal = scaling.break_val || 1.0;
+        const maxVal = scaling.max_val || 30.0;
+
+        if (rawVal <= breakByte) {
+            return (rawVal / breakByte) * breakVal; // 🌟 Exact 0.01" increments!
+        } else {
+            return breakVal + ((rawVal - breakByte) / (255.0 - breakByte)) * (maxVal - breakVal);
+        }
+    }
+
+    // Standard Linear Decoding (Temperature, Wind, Pressure, etc.)
+    const minVal = manifest.min_val ?? manifest.temp_min_k ?? scaling?.min_val ?? 0.0;
+    const maxVal = manifest.max_val ?? manifest.temp_max_k ?? scaling?.max_val ?? 255.0;
+    return minVal + (rawVal / 255.0) * (maxVal - minVal);
+}
+
+/**
  * 🌟 Thoroughly hides native MapTiler basemap city/place symbol layers
  */
 export function hideBasemapCityLabels(map) {
@@ -198,7 +224,7 @@ function updateCityPositions() {
 
 /**
  * 🌟 MASTER CALLOUT SAMPLER & FORMATTER
- * Automatically formats display units (°F, in, kts, hPa) based on active parameter
+ * Automatically formats display units based on dynamic scaling from manifest
  */
 export function updateCityCallouts(map, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return;
@@ -219,9 +245,6 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
     const frameH = manifest.frame_height;
     const chunkInfo = manifest.chunks[chunkIdx];
     const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
-
-    const minVal = manifest.temp_min_k !== undefined ? manifest.temp_min_k : 0.0;
-    const maxVal = manifest.temp_max_k !== undefined ? manifest.temp_max_k : 255.0;
 
     for (let i = 0; i < activeCities.length; i++) {
         const city = activeCities[i];
@@ -246,23 +269,21 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
 
             if (rawVal !== undefined) {
                 const valEl = marker.getElement().querySelector('.city-callout-val');
+                // 🌟 Dynamic decoding based on manifest scaling
+                const decodedVal = decodePixelValue(rawVal, manifest);
 
                 // 🌧️ Total Accumulated Precipitation Formatting (Inches)
                 if (activeParam === 'tp') {
-                    let inches = minVal + (rawVal / 255.0) * (maxVal - minVal);
-                    if (maxVal < 5.0) inches = inches * 39.3701;
-
                     marker.getElement().style.display = 'flex';
                     if (valEl) {
                         valEl.className = 'city-callout-val precip-val';
-                        valEl.textContent = `${inches.toFixed(2)}"`;
+                        valEl.textContent = `${decodedVal.toFixed(2)}"`;
                     }
                 } 
                 // 🌡️ 2m Temperature Formatting (°F)
                 else {
                     marker.getElement().style.display = 'flex';
-                    const tempK = minVal + (rawVal / 255.0) * (maxVal - minVal);
-                    const tempC = tempK - 273.15;
+                    const tempC = decodedVal - 273.15;
                     const tempF = Math.round((tempC * 9 / 5) + 32);
 
                     if (valEl) {
