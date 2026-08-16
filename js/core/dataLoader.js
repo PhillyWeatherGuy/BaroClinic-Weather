@@ -84,12 +84,42 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
     const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
     const imgResp = await fetch(chunkUrl);
-    if (!imgResp.ok) throw new Error(`Failed to load chunk image: ${imgResp.status}`);
+    if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
         throw new Error("Load cancelled");
     }
 
+    // 🌟 PATH A: Raw/Gzipped Binary Buffer (.bin)
+    if (chunk.file.endsWith('.bin')) {
+        let buffer;
+        try {
+            const decompressedStream = imgResp.body.pipeThrough(new DecompressionStream('gzip'));
+            const blob = await new Response(decompressedStream).blob();
+            buffer = await blob.arrayBuffer();
+        } catch (e) {
+            buffer = await imgResp.arrayBuffer();
+        }
+
+        if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+            throw new Error("Load cancelled");
+        }
+
+        const singleChannel = new Uint8Array(buffer);
+        stateManager.chunkPixelData[chunkIndex] = singleChannel;
+
+        const bufferObj = {
+            data: singleChannel,
+            width: chunk.sheet_width,
+            height: chunk.sheet_height,
+            isBinary: true
+        };
+
+        stateManager.loadedChunkBitmaps[chunkIndex] = bufferObj;
+        return bufferObj;
+    }
+
+    // 🌟 PATH B: Image (.png / .webp)
     const blob = await imgResp.blob();
     const bitmap = await createImageBitmap(blob);
 
@@ -135,9 +165,9 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
 
     // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
-        const bitmap = stateManager.loadedChunkBitmaps[key];
-        if (bitmap && typeof bitmap.close === 'function') {
-            bitmap.close();
+        const item = stateManager.loadedChunkBitmaps[key];
+        if (item && typeof item.close === 'function') {
+            item.close();
         }
     }
     stateManager.loadedChunkBitmaps = {};
