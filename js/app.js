@@ -254,7 +254,7 @@ map.on('load', async () => {
     }
 });
 
-// 🌟 100% Dynamic Pixel Inspection on Click
+// 🌟 Smooth Bilinear Interpolation on Click (Matches GPU shader gradients 1:1)
 map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
@@ -275,19 +275,46 @@ map.on('click', (e) => {
     const chunkInfo = stateManager.manifest.chunks[chunkIdx];
     const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
 
-    const px = Math.floor(normX * frameW);
-    const py = Math.floor(normY * frameH);
+    // 🌟 Continuous sub-pixel coordinates
+    const contX = (((normX % 1) + 1) % 1) * frameW;
+    const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
 
-    const sheetX = stateManager.activeFrameState.col * frameW + px;
-    const sheetY = stateManager.activeFrameState.row * frameH + py;
+    const x0 = Math.floor(contX) % frameW;
+    const x1 = (x0 + 1) % frameW;
+    const y0 = Math.floor(contY);
+    const y1 = Math.min(y0 + 1, frameH - 1);
 
-    const pixelIdx = sheetY * sheetW + sheetX;
-    const rawGrayValue = pixelData[pixelIdx];
+    const fracX = contX - Math.floor(contX);
+    const fracY = contY - y0;
 
-    if (rawGrayValue === undefined) return;
+    const colOffset = stateManager.activeFrameState.col * frameW;
+    const rowOffset = stateManager.activeFrameState.row * frameH;
 
-    // 🌟 100% Dynamic decoding & unit formatting based on manifest definitions
-    const decodedVal = decodePixelValue(rawGrayValue, stateManager.manifest);
+    // Sample the 4 surrounding corner pixels
+    const idx00 = (rowOffset + y0) * sheetW + (colOffset + x0);
+    const idx10 = (rowOffset + y0) * sheetW + (colOffset + x1);
+    const idx01 = (rowOffset + y1) * sheetW + (colOffset + x0);
+    const idx11 = (rowOffset + y1) * sheetW + (colOffset + x1);
+
+    const v00 = pixelData[idx00];
+    const v10 = pixelData[idx10];
+    const v01 = pixelData[idx01];
+    const v11 = pixelData[idx11];
+
+    if (v00 === undefined) return;
+
+    // Decode all 4 corners into physical values
+    const d00 = decodePixelValue(v00, stateManager.manifest);
+    const d10 = decodePixelValue(v10 ?? v00, stateManager.manifest);
+    const d01 = decodePixelValue(v01 ?? v00, stateManager.manifest);
+    const d11 = decodePixelValue(v11 ?? v00, stateManager.manifest);
+
+    // 🌟 Bilinear Interpolation across the 4 corners
+    const top = d00 * (1.0 - fracX) + d10 * fracX;
+    const bottom = d01 * (1.0 - fracX) + d11 * fracX;
+    const decodedVal = top * (1.0 - fracY) + bottom * fracY;
+
+    // Format display string based on dynamic manifest rules
     const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
     const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
 
