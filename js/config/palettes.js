@@ -74,13 +74,19 @@ const LIGHT_PRECIP_HEX = [
 ];
 
 /**
- * 🌟 WebGL Non-Linear Step Interpolator
- * Replicates Matplotlib's BoundaryNorm(precip_levels) into a 256-color GPU texture
+ * 🌟 WebGL Piecewise Non-Linear Step Interpolator
+ * Replicates the exact 2-zone curve (Zone 1: 0-1", Zone 2: 1-30") into a 256-color GPU texture
  */
 function createNonLinearPrecipPalette(levels, colors, maxInches = 30.0, numEntries = 256) {
     const palette = [];
     for (let i = 0; i < numEntries; i++) {
-        const inches = (i / (numEntries - 1)) * maxInches;
+        // 🌟 Piecewise mapping: 0-100 is 0-1", 101-255 is 1-maxInches
+        let inches = 0.0;
+        if (i <= 100) {
+            inches = (i / 100.0) * 1.0;
+        } else {
+            inches = 1.0 + ((i - 100.0) / 155.0) * (maxInches - 1.0);
+        }
         
         let colorIdx = 0;
         for (let k = 0; k < levels.length - 1; k++) {
@@ -103,7 +109,8 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(LIGHT_PRECIP_LEVELS, 
  * 🌟 Dynamic Palette Selector
  */
 export function getPaletteForParameter(paramId) {
-    if (paramId === 'tp') {
+    const id = (paramId || '').toLowerCase();
+    if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
     }
     return TEMP_PALETTE;
