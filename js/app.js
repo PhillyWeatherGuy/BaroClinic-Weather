@@ -15,7 +15,8 @@ import {
     hideToast 
 } from './components/viewerUI.js';
 
-import { initCityOverlay, updateCityCallouts } from './layers/cityOverlay.js'; // 🌟 Master Dynamic City Overlay
+// 🌟 Imported universal decoders from cityOverlay.js
+import { initCityOverlay, updateCityCallouts, decodePixelValue, formatParameterValue } from './layers/cityOverlay.js'; 
 import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
 
@@ -253,7 +254,7 @@ map.on('load', async () => {
     }
 });
 
-// 🌟 Direct Uint8 Pixel Inspection on Click
+// 🌟 100% Dynamic Pixel Inspection on Click
 map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
@@ -265,7 +266,6 @@ map.on('click', (e) => {
     if (lng > 180) lng -= 360;
 
     const normX = (lng + 180.0) / 360.0;
-    // Equirectangular latitude conversion matching source chunk projection (+90°N to -90°S)
     const normY = (90.0 - e.lngLat.lat) / 180.0;
 
     if (normY < 0 || normY > 1) return;
@@ -286,23 +286,12 @@ map.on('click', (e) => {
 
     if (rawGrayValue === undefined) return;
 
-    if (stateManager.activeParam === 'tp') {
-        const minVal = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 0.0;
-        const maxVal = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 0.762;
-        let inches = minVal + (rawGrayValue / 255.0) * (maxVal - minVal);
-        if (maxVal < 5.0) inches = inches * 39.3701;
+    // 🌟 100% Dynamic decoding & unit formatting based on manifest definitions
+    const decodedVal = decodePixelValue(rawGrayValue, stateManager.manifest);
+    const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
+    const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
 
-        popup.setLngLat(e.lngLat)
-             .setHTML(`<div class="temp-f">${inches.toFixed(2)}"</div><div class="temp-c">Total Accum. Precip</div>`)
-             .addTo(map);
-    } else {
-        const minK = stateManager.manifest.temp_min_k !== undefined ? stateManager.manifest.temp_min_k : 210.0;
-        const maxK = stateManager.manifest.temp_max_k !== undefined ? stateManager.manifest.temp_max_k : 330.0;
-        const tempK = minK + (rawGrayValue / 255.0) * (maxK - minK);
-        const tempC = tempK - 273.15;
-
-        popup.setLngLat(e.lngLat)
-             .setHTML(`<div class="temp-f">${((tempC * 9/5) + 32).toFixed(1)}°F</div><div class="temp-c">${tempC.toFixed(1)}°C</div>`)
-             .addTo(map);
-    }
+    popup.setLngLat(e.lngLat)
+         .setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`)
+         .addTo(map);
 });
