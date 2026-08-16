@@ -2,6 +2,7 @@
 import { stateManager } from './stateManager.js';
 import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
 import { clearVectorContours } from '../layers/vectorContours.js'; // 🌟 Vector Contour Disposer
+import { decompress } from 'https://cdn.jsdelivr.net/npm/fzstd/+esm'; // 🌟 Zstd browser decompressor
 
 export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
@@ -90,10 +91,15 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    // 🌟 Native browser-level Gzip decompression stream
-    const decompressedStream = resp.body.pipeThrough(new DecompressionStream('gzip'));
-    const blob = await new Response(decompressedStream).blob();
-    const buffer = await blob.arrayBuffer();
+    const compressedBytes = new Uint8Array(await resp.arrayBuffer());
+
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        throw new Error("Load cancelled");
+    }
+
+    // 🌟 Decompress Zstandard buffer using fzstd
+    const decompressedBytes = decompress(compressedBytes);
+    const buffer = decompressedBytes.buffer;
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
         throw new Error("Load cancelled");
