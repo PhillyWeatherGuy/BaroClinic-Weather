@@ -48,13 +48,11 @@ document.head.appendChild(style);
 
 /**
  * 🌟 UNIVERSAL PIXEL DECODER
- * Dynamically decodes arbitrary breakpoint arrays based on manifest.json
  */
 export function decodePixelValue(rawVal, manifest) {
     if (rawVal === undefined || !manifest) return 0.0;
 
     const scaling = manifest.scaling;
-    // 🌟 Handles any number of custom scale breakpoints dynamically
     if (scaling && scaling.mode === 'piecewise' && scaling.val_points && scaling.byte_points) {
         const vp = scaling.val_points;
         const bp = scaling.byte_points;
@@ -68,53 +66,102 @@ export function decodePixelValue(rawVal, manifest) {
         return vp[vp.length - 1];
     }
 
-    // Standard Linear Decoding
     const minVal = manifest.min_val ?? manifest.temp_min_k ?? scaling?.min_val ?? 0.0;
     const maxVal = manifest.max_val ?? manifest.temp_max_k ?? scaling?.max_val ?? 255.0;
     return minVal + (rawVal / 255.0) * (maxVal - minVal);
 }
 
 /**
+ * 🌟 SHARED BILINEAR SAMPLER (High-Precision GPS Sampling)
+ */
+export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
+    if (!activeFrameState || !manifest) return 0.0;
+
+    const chunkIdx = activeFrameState.chunkIndex;
+    const pixelData = stateManager.chunkPixelData[chunkIdx];
+    if (!pixelData) return 0.0;
+
+    let normLng = ((lng % 360) + 360) % 360;
+    if (normLng > 180) normLng -= 360;
+
+    const normX = (normLng + 180.0) / 360.0;
+    const normY = (90.0 - lat) / 180.0;
+
+    if (normY < 0 || normY > 1) return 0.0;
+
+    const frameW = manifest.frame_width;
+    const frameH = manifest.frame_height;
+    const chunkInfo = manifest.chunks[chunkIdx];
+    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
+
+    const contX = (((normX % 1) + 1) % 1) * frameW;
+    const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
+
+    const x0 = Math.floor(contX) % frameW;
+    const x1 = (x0 + 1) % frameW;
+    const y0 = Math.floor(contY);
+    const y1 = Math.min(y0 + 1, frameH - 1);
+
+    const fracX = contX - Math.floor(contX);
+    const fracY = contY - y0;
+
+    const colOffset = activeFrameState.col * frameW;
+    const rowOffset = activeFrameState.row * frameH;
+
+    const idx00 = (rowOffset + y0) * sheetW + (colOffset + x0);
+    const idx10 = (rowOffset + y0) * sheetW + (colOffset + x1);
+    const idx01 = (rowOffset + y1) * sheetW + (colOffset + x0);
+    const idx11 = (rowOffset + y1) * sheetW + (colOffset + x1);
+
+    const v00 = pixelData[idx00];
+    const v10 = pixelData[idx10];
+    const v01 = pixelData[idx01];
+    const v11 = pixelData[idx11];
+
+    if (v00 === undefined) return 0.0;
+
+    const d00 = decodePixelValue(v00, manifest);
+    const d10 = decodePixelValue(v10 ?? v00, manifest);
+    const d01 = decodePixelValue(v01 ?? v00, manifest);
+    const d11 = decodePixelValue(v11 ?? v00, manifest);
+
+    const top = d00 * (1.0 - fracX) + d10 * fracX;
+    const bottom = d01 * (1.0 - fracX) + d11 * fracX;
+    return top * (1.0 - fracY) + bottom * fracY;
+}
+
+/**
  * 🌟 TRULY DYNAMIC UNIT FORMATTER
- * Automatically formats display numbers based on manifest.unit
  */
 export function formatParameterValue(decodedVal, manifest) {
     if (!manifest) return `${Math.round(decodedVal)}`;
 
     const unit = (manifest.unit || '').trim();
 
-    // 1. Precipitation & Snowfall (Inches)
     if (unit === 'in' || unit.toLowerCase().includes('inch')) {
         return `${decodedVal.toFixed(2)}"`;
     }
 
-    // 2. Temperature (Kelvin in raw GRIB -> °F)
     if (unit === '°F' || unit.includes('F') || manifest.parameter === '2t') {
         let tempF = decodedVal;
-        if (decodedVal > 150) { // If raw data is in Kelvin
+        if (decodedVal > 150) {
             const tempC = decodedVal - 273.15;
             tempF = (tempC * 9 / 5) + 32;
         }
         return `${Math.round(tempF)}°`;
     }
 
-    // 3. Wind Speed / Wind Gusts (Knots or MPH)
     if (unit === 'kts' || unit === 'mph') {
         return `${Math.round(decodedVal)} ${unit}`;
     }
 
-    // 4. Pressure (hPa / mb) or CAPE (J/kg) or Percentage (%)
     if (unit === 'hPa' || unit === 'mb' || unit === 'J/kg' || unit === '%') {
         return `${Math.round(decodedVal)}`;
     }
 
-    // Fallback
     return `${Math.round(decodedVal)}`;
 }
 
-/**
- * 🌟 Thoroughly hides native MapTiler basemap city/place symbol layers
- */
 export function hideBasemapCityLabels(map) {
     if (!map) return;
     const style = map.getStyle();
@@ -262,63 +309,32 @@ function updateCityPositions() {
 }
 
 /**
- * 🌟 MASTER CALLOUT SAMPLER & FORMATTER
- * 100% dynamically decodes and formats city values based on manifest definitions
+ * 🌟 MASTER CALLOUT SAMPLER (Uses Bilinear GPS Interpolation)
  */
 export function updateCityCallouts(map, activeFrameState, manifest) {
-    if (!activeFrameState || !manifest) return;
+    if (!activeFrameState || !manifest || !isLoaded || activeCities.length === 0) return;
 
     hideBasemapCityLabels(map);
-
-    const chunkIdx = activeFrameState.chunkIndex;
-    const pixelData = stateManager.chunkPixelData[chunkIdx];
 
     window.lastActiveFrameState = activeFrameState;
     window.lastManifest = manifest;
 
-    if (!pixelData || !isLoaded || activeCities.length === 0) return;
-
-    const frameW = manifest.frame_width;
-    const frameH = manifest.frame_height;
-    const chunkInfo = manifest.chunks[chunkIdx];
-    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
-
     for (let i = 0; i < activeCities.length; i++) {
         const city = activeCities[i];
-
-        let normX = (city.lng + 180.0) / 360.0;
-        normX = ((normX % 1) + 1) % 1;
-
-        const normY = (90.0 - city.lat) / 180.0;
-
         const marker = cityMarkers[city.name];
         if (!marker) continue;
 
-        if (normY >= 0 && normY <= 1) {
-            const px = Math.floor(normX * frameW);
-            const py = Math.floor(normY * frameH);
+        // 🌟 Exact same high-precision bilinear interpolation as the clicker!
+        const decodedVal = sampleBilinearValue(city.lng, city.lat, activeFrameState, manifest);
+        const formattedText = formatParameterValue(decodedVal, manifest);
 
-            const sheetX = activeFrameState.col * frameW + px;
-            const sheetY = activeFrameState.row * frameH + py;
-
-            const pixelIdx = sheetY * sheetW + sheetX;
-            const rawVal = pixelData[pixelIdx];
-
-            if (rawVal !== undefined) {
-                const valEl = marker.getElement().querySelector('.city-callout-val');
-                
-                // 🌟 Decode math and format text 100% dynamically from manifest definitions
-                const decodedVal = decodePixelValue(rawVal, manifest);
-                const formattedText = formatParameterValue(decodedVal, manifest);
-
-                marker.getElement().style.display = 'flex';
-                if (valEl) {
-                    valEl.className = (manifest.unit === 'in' || manifest.parameter === 'tp') 
-                        ? 'city-callout-val precip-val' 
-                        : 'city-callout-val';
-                    valEl.textContent = formattedText;
-                }
-            }
+        const valEl = marker.getElement().querySelector('.city-callout-val');
+        marker.getElement().style.display = 'flex';
+        if (valEl) {
+            valEl.className = (manifest.unit === 'in' || manifest.parameter === 'tp') 
+                ? 'city-callout-val precip-val' 
+                : 'city-callout-val';
+            valEl.textContent = formattedText;
         }
     }
 }
