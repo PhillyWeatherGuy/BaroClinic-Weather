@@ -48,28 +48,68 @@ document.head.appendChild(style);
 
 /**
  * 🌟 UNIVERSAL PIXEL DECODER
- * Dynamically decodes piecewise or linear pixel values based on manifest.json
+ * Dynamically decodes arbitrary breakpoint arrays based on manifest.json
  */
 export function decodePixelValue(rawVal, manifest) {
     if (rawVal === undefined || !manifest) return 0.0;
 
     const scaling = manifest.scaling;
-    if (scaling && scaling.mode === 'piecewise') {
-        const breakByte = scaling.break_byte || 100;
-        const breakVal = scaling.break_val || 1.0;
-        const maxVal = scaling.max_val || 30.0;
+    // 🌟 Handles any number of custom scale breakpoints dynamically
+    if (scaling && scaling.mode === 'piecewise' && scaling.val_points && scaling.byte_points) {
+        const vp = scaling.val_points;
+        const bp = scaling.byte_points;
 
-        if (rawVal <= breakByte) {
-            return (rawVal / breakByte) * breakVal; // 🌟 Exact 0.01" increments!
-        } else {
-            return breakVal + ((rawVal - breakByte) / (255.0 - breakByte)) * (maxVal - breakVal);
+        for (let i = 0; i < bp.length - 1; i++) {
+            if (rawVal >= bp[i] && rawVal <= bp[i + 1]) {
+                const t = (rawVal - bp[i]) / (bp[i + 1] - bp[i]);
+                return vp[i] + t * (vp[i + 1] - vp[i]);
+            }
         }
+        return vp[vp.length - 1];
     }
 
-    // Standard Linear Decoding (Temperature, Wind, Pressure, etc.)
+    // Standard Linear Decoding
     const minVal = manifest.min_val ?? manifest.temp_min_k ?? scaling?.min_val ?? 0.0;
     const maxVal = manifest.max_val ?? manifest.temp_max_k ?? scaling?.max_val ?? 255.0;
     return minVal + (rawVal / 255.0) * (maxVal - minVal);
+}
+
+/**
+ * 🌟 TRULY DYNAMIC UNIT FORMATTER
+ * Automatically formats display numbers based on manifest.unit
+ */
+export function formatParameterValue(decodedVal, manifest) {
+    if (!manifest) return `${Math.round(decodedVal)}`;
+
+    const unit = (manifest.unit || '').trim();
+
+    // 1. Precipitation & Snowfall (Inches)
+    if (unit === 'in' || unit.toLowerCase().includes('inch')) {
+        return `${decodedVal.toFixed(2)}"`;
+    }
+
+    // 2. Temperature (Kelvin in raw GRIB -> °F)
+    if (unit === '°F' || unit.includes('F') || manifest.parameter === '2t') {
+        let tempF = decodedVal;
+        if (decodedVal > 150) { // If raw data is in Kelvin
+            const tempC = decodedVal - 273.15;
+            tempF = (tempC * 9 / 5) + 32;
+        }
+        return `${Math.round(tempF)}°`;
+    }
+
+    // 3. Wind Speed / Wind Gusts (Knots or MPH)
+    if (unit === 'kts' || unit === 'mph') {
+        return `${Math.round(decodedVal)} ${unit}`;
+    }
+
+    // 4. Pressure (hPa / mb) or CAPE (J/kg) or Percentage (%)
+    if (unit === 'hPa' || unit === 'mb' || unit === 'J/kg' || unit === '%') {
+        return `${Math.round(decodedVal)}`;
+    }
+
+    // Fallback
+    return `${Math.round(decodedVal)}`;
 }
 
 /**
@@ -108,7 +148,6 @@ export async function initCityOverlay(map) {
     map.on('move', updateCityPositions);
     map.on('zoom', updateCityPositions);
 
-    // Load models config for parameter metadata
     try {
         const cResp = await fetch('./config/models.json');
         if (cResp.ok) modelsConfig = await cResp.json();
@@ -224,7 +263,7 @@ function updateCityPositions() {
 
 /**
  * 🌟 MASTER CALLOUT SAMPLER & FORMATTER
- * Automatically formats display units based on dynamic scaling from manifest
+ * 100% dynamically decodes and formats city values based on manifest definitions
  */
 export function updateCityCallouts(map, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return;
@@ -238,8 +277,6 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
     window.lastManifest = manifest;
 
     if (!pixelData || !isLoaded || activeCities.length === 0) return;
-
-    const activeParam = stateManager.activeParam || manifest.parameter || '2t';
 
     const frameW = manifest.frame_width;
     const frameH = manifest.frame_height;
@@ -269,27 +306,17 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
 
             if (rawVal !== undefined) {
                 const valEl = marker.getElement().querySelector('.city-callout-val');
-                // 🌟 Dynamic decoding based on manifest scaling
+                
+                // 🌟 Decode math and format text 100% dynamically from manifest definitions
                 const decodedVal = decodePixelValue(rawVal, manifest);
+                const formattedText = formatParameterValue(decodedVal, manifest);
 
-                // 🌧️ Total Accumulated Precipitation Formatting (Inches)
-                if (activeParam === 'tp') {
-                    marker.getElement().style.display = 'flex';
-                    if (valEl) {
-                        valEl.className = 'city-callout-val precip-val';
-                        valEl.textContent = `${decodedVal.toFixed(2)}"`;
-                    }
-                } 
-                // 🌡️ 2m Temperature Formatting (°F)
-                else {
-                    marker.getElement().style.display = 'flex';
-                    const tempC = decodedVal - 273.15;
-                    const tempF = Math.round((tempC * 9 / 5) + 32);
-
-                    if (valEl) {
-                        valEl.className = 'city-callout-val';
-                        valEl.textContent = `${tempF}°`;
-                    }
+                marker.getElement().style.display = 'flex';
+                if (valEl) {
+                    valEl.className = (manifest.unit === 'in' || manifest.parameter === 'tp') 
+                        ? 'city-callout-val precip-val' 
+                        : 'city-callout-val';
+                    valEl.textContent = formattedText;
                 }
             }
         }
