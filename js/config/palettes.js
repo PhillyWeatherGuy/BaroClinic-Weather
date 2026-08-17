@@ -108,8 +108,8 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
 export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     LIGHT_PRECIP_LEVELS, 
     LIGHT_PRECIP_HEX, 
-    [0.0, 1.0, 30.0], 
-    [0, 100, 255], 
+    [0.0, 1.0, 10.0, 30.0], 
+    [0, 100, 200, 255], 
     256
 );
 
