@@ -7,7 +7,7 @@ import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../laye
 let onStepChangeCallback = null;
 let isPlaying = false;
 let playInterval = null;
-const PLAYBACK_SPEED_MS = 400;
+const PLAYBACK_SPEED_MS = 800;
 let shaderLayerRef = null;
 let isGlobe = false;
 
