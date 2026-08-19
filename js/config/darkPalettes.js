@@ -1,9 +1,9 @@
 // js/config/darkPalettes.js
 
 /**
- * 🌡️ Dark Mode 2m Temperature Palette
+ * 🌡️ Exact 2m Temperature Palette extracted from provided_colors[::-1]
  */
-export const DARK_TEMP_PALETTE = [
+export const TEMP_PALETTE = [
 "#E4E3E7", "#B3B1B7", "#ADACB5", "#A8A6B2", "#9E9DAC", "#9D9CAF", "#9897AE", "#9693AF",
 "#908BAB", "#8E89AC", "#8E85AC", "#887BA6", "#806D9E", "#8169A0", "#8367A2", "#8467A3",
 "#81659F", "#8164A0", "#795B9D", "#72539A", "#73539E", "#664393", "#5E378C", "#5B308B",
@@ -58,26 +58,31 @@ export const DARK_TEMP_PALETTE = [
 
 // 🌧️ Dark Mode Precip Levels (Inches)
 const DARK_PRECIP_LEVELS = [
-    0.01, 0.02, 0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
-    1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5,
-    9.0, 9.5, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 50.0
+    0.01, 0.02, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50,
+    0.60, 0.70, 0.80, 0.90, 1.00, 1.20, 1.40, 1.60, 1.80, 2.00, 2.50, 3.00,
+    3.50, 4.00, 4.50, 5.00, 5.50, 6.00, 6.50, 7.00, 7.50, 8.00, 8.50, 9.00,
+    9.50, 10.00, 12.00, 14.00, 16.00, 20.00, 24.00, 30.00, 100.00
 ];
 
 // 🌧️ Dark Mode Precip Hex Colors
 const DARK_PRECIP_HEX = [
-"#D0D0D0", "#A8A8A8", "#8A8A8A", "#787878", "#8C9987", "#B1CFA4", "#91CB7F", "#5DAD4E", "#4F9C3C", "#448D31",
-"#37725C", "#3361B6", "#5687C3", "#7BA6CA", "#A1BCCF", "#C5D0C8", "#D3CFAA", "#CFC37C", "#CBAC58", "#C88931",
-"#C67B30", "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841", "#8B7069", "#9D827B",
-"#B19E97", "#BEB5B4", "#A69EB5", "#877E9D", "#756A92", "#635785", "#594176", "#66136B", "#A223AA", "#B627BF",
-"#C038CA", "#C45BCD", "#C574CD"
+    '#1A1A1A', '#2D3139', '#474F5D', '#646F81', '#808CA1', '#9BA8BC', '#194734', '#125C3F',
+    '#0C6945', '#008855', '#009A69', '#00B087', '#00B59C', '#00BAB0', '#00CDD4', '#00B8DE',
+    '#0094F0', '#0070FA', '#1C6CF8', '#3764F9', '#5752FA', '#7949FA', '#A241FA', '#C238FA',
+    '#E52DFA', '#FA2AE3', '#FF3C00', '#FF6A00', '#FF9100', '#FFB300', '#FFCC11', '#FFE522',
+    '#FFEE55', '#FFFBBA', '#FFFFFF',
+    // ---- Fixed Top End: Continuous bright, crisp ice colors that never darken ----
+    '#E6FAFF', '#CDf5FF', '#B3F0FF', '#99EAFF', '#80E5FF', '#66E0FF', '#4DDBFF', '#33D6FF', '#1AD1FF'
 ];
 
 /**
- * 🌟 WebGL Dynamic Breakpoint Step Interpolator for Dark Mode
+ * 🌟 WebGL Dynamic Breakpoint Step Interpolator
+ * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
  */
-function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.0], bytePoints = [0, 100, 255], numEntries = 256) {
+function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 10.0, 30.0], bytePoints = [0, 100, 200, 255], numEntries = 256) {
     const palette = [];
     for (let i = 0; i < numEntries; i++) {
+        // 🌟 Piecewise segment interpolation matching parameters.json
         let physicalVal = valPoints[0];
         for (let j = 0; j < bytePoints.length - 1; j++) {
             if (i >= bytePoints[j] && i <= bytePoints[j + 1]) {
@@ -89,4 +94,34 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
         
         let colorIdx = 0;
         for (let k = 0; k < levels.length - 1; k++) {
-            if (physicalVal >= levels[k] && physicalVal < leve
+            if (physicalVal >= levels[k] && physicalVal < levels[k + 1]) {
+                colorIdx = k;
+                break;
+            }
+            if (physicalVal >= levels[levels.length - 1]) {
+                colorIdx = colors.length - 1;
+            }
+        }
+        palette.push(colors[colorIdx] || colors[colors.length - 1]);
+    }
+    return palette;
+}
+
+export const PRECIP_PALETTE = createNonLinearPrecipPalette(
+    DARK_PRECIP_LEVELS, 
+    DARK_PRECIP_HEX, 
+    [0.0, 1.0, 10.0, 30.0], 
+    [0, 100, 200, 255], 
+    256
+);
+
+/**
+ * 🌟 Dynamic Palette Selector
+ */
+export function getPaletteForParameter(paramId) {
+    const id = (paramId || '').toLowerCase();
+    if (id === 'tp' || id === 'precip' || id.includes('precip')) {
+        return PRECIP_PALETTE;
+    }
+    return TEMP_PALETTE;
+}
