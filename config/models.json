@@ -33,7 +33,7 @@
       "id": "pwat",
       "name": "Precipitable Water",
       "shader": "precip"
-      "palette: "PWAT"
+      "palette": "PWAT"
       "map_style_light": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG",
       "map_style_dark": "https://api.maptiler.com/maps/01a00fc8-041b-74f2-bdaf-cdf4c900ec01/style.json?key=f9fTA5Ce0HKefPDICSVG"
     }
