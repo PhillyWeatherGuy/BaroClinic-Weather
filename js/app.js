@@ -17,8 +17,12 @@ import {
 
 // 🌟 Imported universal decoders from cityOverlay.js
 import { initCityOverlay, updateCityCallouts, decodePixelValue, formatParameterValue } from './layers/cityOverlay.js'; 
-import { initThreeGlobe, updateThreeGlobeFrame } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
+import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
+
+// 🌟 Import Light and Dark Palette Resolvers
+import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
+import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.js';
 
 let customShaderLayer = null;
 let renderDebounceId = null;
@@ -66,6 +70,39 @@ export function updateBasemapStyle(styleUrl) {
     map.setStyle(styleUrl);
 }
 
+/**
+ * 🌟 DYNAMIC THEME APPLIER (DARK / LIGHT MODE)
+ */
+export async function applyTheme(theme) {
+    try {
+        const resp = await fetch('./config/models.json');
+        if (resp.ok) {
+            const data = await resp.json();
+            const paramConfig = data?.parameters?.[stateManager.activeParam];
+            if (paramConfig) {
+                const targetStyle = theme === 'dark'
+                    ? (paramConfig.map_style_dark || paramConfig.map_style)
+                    : (paramConfig.map_style_light || paramConfig.map_style);
+                if (targetStyle) {
+                    updateBasemapStyle(targetStyle);
+                }
+            }
+        }
+    } catch (err) {
+        console.warn("Could not resolve theme basemap URL:", err);
+    }
+
+    const paletteFunc = (theme === 'dark') ? getDarkPalette : getLightPalette;
+    const newPalette = paletteFunc(stateManager.activeParam);
+
+    if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
+        customShaderLayer.updatePalette(newPalette);
+    }
+    try {
+        updateThreeGlobePalette(newPalette);
+    } catch (e) {}
+}
+
 export function initLayer(shaderType = null) {
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
@@ -85,6 +122,12 @@ export function initLayer(shaderType = null) {
     }
     setShaderLayerReference(customShaderLayer);
     
+    // 🌟 Apply theme-aware palette immediately on creation
+    const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+    if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
+        customShaderLayer.updatePalette(paletteFunc(stateManager.activeParam));
+    }
+
     // 🌟 Re-upload any existing bitmaps in RAM straight to the GPU layer
     for (const chunkIdx in stateManager.loadedChunkBitmaps) {
         const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
@@ -187,10 +230,15 @@ export async function preloadRemainingChunks(currentGen) {
     }
 }
 
-initViewerUI((stepIndex) => {
-    if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
-    renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
-});
+initViewerUI(
+    (stepIndex) => {
+        if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
+        renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
+    },
+    (newTheme) => {
+        applyTheme(newTheme);
+    }
+);
 
 map.on('load', async () => {
     stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
