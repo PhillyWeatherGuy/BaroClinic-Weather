@@ -772,3 +772,78 @@
     padding: 2px 6px;
     font-style: italic;
 }
+
+/* ==========================================
+   DARK / LIGHT MODE TOGGLE PILL
+   ========================================== */
+.theme-toggle-pill {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 4px;
+    border-radius: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s ease;
+}
+
+.theme-toggle-pill:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.theme-pill-track {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 44px;
+    height: 20px;
+    padding: 0 4px;
+    box-sizing: border-box;
+}
+
+.theme-icon {
+    z-index: 2;
+    transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.sun-icon {
+    color: #94a3b8;
+}
+
+.moon-icon {
+    color: #38bdf8;
+}
+
+.theme-thumb {
+    position: absolute;
+    top: 1px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(56, 189, 248, 0.3);
+    border: 1px solid rgba(56, 189, 248, 0.8);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, border-color 0.2s ease;
+    transform: translateX(22px); /* Default Dark Mode (thumb over moon on the right) */
+    z-index: 1;
+}
+
+/* Light Mode Active State */
+.theme-toggle-pill.light-mode .theme-thumb {
+    transform: translateX(0px); /* Slides to sun on the left */
+    background: rgba(251, 191, 36, 0.3);
+    border-color: rgba(251, 191, 36, 0.8);
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
+}
+
+.theme-toggle-pill.light-mode .sun-icon {
+    color: #fbbf24;
+}
+
+.theme-toggle-pill.light-mode .moon-icon {
+    color: #94a3b8;
+}
