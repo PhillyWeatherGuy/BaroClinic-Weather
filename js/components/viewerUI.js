@@ -5,6 +5,7 @@ import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 
 let onStepChangeCallback = null;
+let onThemeChangeCallback = null;
 let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 200;
@@ -38,6 +39,39 @@ export function initGlobeToggle(map) {
             console.log("🗺️ 2D MapLibre Map Engine Activated");
         }
     };
+}
+
+/**
+ * 🌟 DARK / LIGHT MODE THEME TOGGLE
+ */
+export function initThemeToggle() {
+    const themeBtn = document.getElementById('btn-theme-toggle');
+    if (!themeBtn) return;
+
+    // Sync initial state (defaults to light mode)
+    if (stateManager.currentTheme === 'light') {
+        themeBtn.classList.add('light-mode');
+    } else {
+        themeBtn.classList.remove('light-mode');
+    }
+
+    themeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const newTheme = stateManager.currentTheme === 'light' ? 'dark' : 'light';
+        stateManager.currentTheme = newTheme;
+
+        if (newTheme === 'light') {
+            themeBtn.classList.add('light-mode');
+        } else {
+            themeBtn.classList.remove('light-mode');
+        }
+
+        console.log(`[UI] Theme switched to: ${newTheme}`);
+
+        if (typeof onThemeChangeCallback === 'function') {
+            onThemeChangeCallback(newTheme);
+        }
+    });
 }
 
 export function getMaxLoadedStepIndex() {
@@ -272,9 +306,13 @@ export function initParameterCategoryBar() {
                 stateManager.activeParam = param.id;
                 stateManager.activeShader = param.shader || 'scalar';
 
-                // 🌟 1. Dynamic Basemap Style Switcher
-                if (param.map_style && typeof updateBasemapStyle === 'function') {
-                    updateBasemapStyle(param.map_style);
+                // 🌟 1. Dynamic Basemap Style Switcher (Supports Light and Dark Mode URLs)
+                const targetStyle = (stateManager.currentTheme === 'dark' && param.map_style_dark)
+                    ? param.map_style_dark
+                    : (param.map_style_light || param.map_style);
+
+                if (targetStyle && typeof updateBasemapStyle === 'function') {
+                    updateBasemapStyle(targetStyle);
                 }
 
                 // 🌟 2. Unload previous memory & destroy old layer
@@ -395,8 +433,9 @@ export function initParameterCategoryBar() {
     });
 }
 
-export function initViewerUI(stepCallback) {
+export function initViewerUI(stepCallback, themeCallback = null) {
     onStepChangeCallback = stepCallback;
+    onThemeChangeCallback = themeCallback;
 
     const slider = document.getElementById('timeline-slider');
     const playBtn = document.getElementById('btn-play');
@@ -407,6 +446,7 @@ export function initViewerUI(stepCallback) {
     initModelRunDropdown();
     initModelCategoryBar();
     initParameterCategoryBar();
+    initThemeToggle();
 
     if (slider) {
         slider.addEventListener('input', (e) => {
