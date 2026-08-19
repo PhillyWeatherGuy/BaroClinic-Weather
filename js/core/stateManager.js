@@ -11,5 +11,6 @@ export const stateManager = {
     activeModel: 'ecmwf',    // 🌟 Active Model ID
     activeParam: '2t',       // 🌟 Active Parameter ID (e.g. '2t', 'tp')
     currentMapStyle: null,   // 🌟 Active MapTiler Basemap Style URL
+    currentTheme: 'light',   // 🌟 Active Theme ('light' | 'dark')
     loadGeneration: 0        // 🌟 Cancellation token to abort stale background promises
 };
