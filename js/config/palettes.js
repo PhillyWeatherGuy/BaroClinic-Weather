@@ -65,7 +65,6 @@ const LIGHT_PRECIP_LEVELS = [
 
 // 🌧️ Matplotlib Light Mode Precip Hex Colors
 const LIGHT_PRECIP_HEX = [
-    8s
 "#D0D0D0", "#A8A8A8", "#8A8A8A", "#787878", "#8C9987", "#B1CFA4", "#91CB7F", "#5DAD4E", "#4F9C3C", "#448D31",
 "#37725C", "#3361B6", "#5687C3", "#7BA6CA", "#A1BCCF", "#C5D0C8", "#D3CFAA", "#CFC37C", "#CBAC58", "#C88931",
 "#C67B30", "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841", "#8B7069", "#9D827B",
