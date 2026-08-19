@@ -777,8 +777,15 @@
    DARK / LIGHT MODE TOGGLE PILL
    ========================================== */
 .theme-toggle-pill {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    position: absolute;
+    top: 62px;
+    left: 16px;
+    z-index: 26;
+    background: rgba(11, 15, 25, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     padding: 4px;
     border-radius: 20px;
     cursor: pointer;
@@ -789,8 +796,9 @@
 }
 
 .theme-toggle-pill:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.25);
+    background: rgba(11, 15, 25, 0.95);
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
 }
 
 .theme-pill-track {
@@ -828,13 +836,13 @@
     border: 1px solid rgba(56, 189, 248, 0.8);
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
     transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, border-color 0.2s ease;
-    transform: translateX(22px); /* Default Dark Mode (thumb over moon on the right) */
+    transform: translateX(22px); /* Dark Mode: thumb on right */
     z-index: 1;
 }
 
 /* Light Mode Active State */
 .theme-toggle-pill.light-mode .theme-thumb {
-    transform: translateX(0px); /* Slides to sun on the left */
+    transform: translateX(0px); /* Light Mode: slides to sun on left */
     background: rgba(251, 191, 36, 0.3);
     border-color: rgba(251, 191, 36, 0.8);
     box-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
