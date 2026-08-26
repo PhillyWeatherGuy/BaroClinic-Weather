@@ -69,7 +69,27 @@ const LIGHT_PRECIP_HEX = [
 "#37725C", "#3361B6", "#5687C3", "#7BA6CA", "#A1BCCF", "#C5D0C8", "#D3CFAA", "#CFC37C", "#CBAC58", "#C88931",
 "#C67B30", "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841", "#8B7069", "#9D827B",
 "#B19E97", "#BEB5B4", "#A69EB5", "#877E9D", "#756A92", "#635785", "#594176", "#66136B", "#A223AA", "#B627BF",
-"#C038CA", "#C45BCD", "#C574CD",
+"#C038CA", "#C45BCD", "#C574CD"
+];
+
+// 💧 Light Mode PWAT Levels (Inches)
+const LIGHT_PWAT_LEVELS = [
+    0.00, 0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45,
+    0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10,
+    1.15, 1.20, 1.30, 1.40, 1.50, 1.60, 1.70, 1.80, 1.90, 2.00, 2.10, 2.15, 2.20,
+    2.25, 2.30, 2.40, 2.45, 2.50, 2.60, 2.70, 2.75, 2.80, 2.90, 3.00, 3.10, 3.20,
+    3.30, 3.50, 6.00
+];
+
+// 💧 Light Mode PWAT Hex Colors
+const LIGHT_PWAT_HEX = [
+    "#d3d3d3", "#c3c3c5", "#b0b0b0", "#a0a19a", "#78797b", "#656567", "#515151", "#3b3e3d",
+    "#574222", "#725633", "#856741", "#9a7c4a", "#b1895b", "#c99e6c", "#d7a977", "#b5b6fe",
+    "#a7a7ec", "#8788c5", "#8688c8", "#6d6eab", "#575b94", "#4a4683", "#006668", "#166e5c",
+    "#277a4f", "#3c8645", "#589835", "#70a624", "#70a624", "#9f9d51", "#adac46", "#c5c431",
+    "#d8d81b", "#eeee0c", "#e5705a", "#c85343", "#af3d37", "#95282a", "#87111b", "#77000e",
+    "#760177", "#880588", "#b200b1", "#d807db", "#a301da", "#7b00d8", "#6401da", "#3c00db",
+    "#2600dc", "#0027da", "#004ddb", "#0673de", "#009bd5"
 ];
 
 /**
@@ -112,6 +132,15 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+// 💧 Light Mode PWAT Palette (0.0" -> 4.0" piecewise mapped matching parameters.json)
+export const PWAT_PALETTE = createNonLinearPrecipPalette(
+    LIGHT_PWAT_LEVELS,
+    LIGHT_PWAT_HEX,
+    [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
+    [0, 32, 64, 96, 128, 160, 192, 255],
+    256
+);
+
 /**
  * 🌟 Dynamic Palette Selector
  */
@@ -119,6 +148,9 @@ export function getPaletteForParameter(paramId) {
     const id = (paramId || '').toLowerCase();
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
+    }
+    if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
+        return PWAT_PALETTE;
     }
     return TEMP_PALETTE;
 }
