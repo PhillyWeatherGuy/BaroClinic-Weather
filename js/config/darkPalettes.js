@@ -75,11 +75,34 @@ const DARK_PRECIP_HEX = [
     '#E6FAFF', '#CDf5FF', '#B3F0FF', '#99EAFF', '#80E5FF', '#66E0FF', '#4DDBFF', '#33D6FF', '#1AD1FF'
 ];
 
+// 💧 Dark Mode PWAT Levels (Inches)
+const DARK_PWAT_LEVELS = [
+    0.00, 0.05, 0.11, 0.16, 0.21, 0.26, 0.31, 0.37, 0.42, 0.47,
+    0.55, 0.59, 0.63, 0.66, 0.70, 0.74, 0.78, 0.81, 0.85, 0.89,
+    0.93, 0.96, 1.00, 1.04, 1.08, 1.11, 1.15, 1.19, 1.23, 1.26,
+    1.30, 1.34, 1.38, 1.41, 1.45, 1.49, 1.53, 1.56, 1.60, 1.64,
+    1.68, 1.71, 1.75, 1.79, 1.83, 1.86, 1.90, 1.94, 1.98, 2.01,
+    2.05, 2.10, 2.15, 2.20, 2.25, 2.30, 2.35, 2.40, 2.45, 2.50,
+    2.56, 2.62, 2.68, 2.75, 2.88, 3.00, 3.12, 3.25, 3.38, 3.50,
+    6.00
+];
+
+// 💧 Dark Mode PWAT Hex Colors
+const DARK_PWAT_HEX = [
+    "#1c1a18", "#1e1b19", "#211d1a", "#24201c", "#26221d", "#29241f", "#2c2620", "#2f2a23", "#342e25", "#393328",
+    "#194734", "#174b36", "#154e38", "#13533b", "#125c3f", "#0f6242", "#0c6945", "#097249", "#008855", "#008e5c",
+    "#009462", "#009a69", "#00b087", "#00b59c", "#00bab0", "#00bfc3", "#00cdd4", "#00c2d9", "#00b8de", "#00ade2",
+    "#0094f0", "#008ef3", "#0085f6", "#007cf8", "#0070fa", "#1c6cf8", "#3764f9", "#525df9", "#5752fa", "#684efa",
+    "#7949fa", "#8a44fa", "#9246fa", "#a241fa", "#b23dfa", "#c238fa", "#cc33fa", "#d830fa", "#e52dfa", "#f129f1",
+    "#fa2ae3", "#ff3c00", "#ff5500", "#ff6a00", "#ff7d00", "#ff9100", "#ffb300", "#ffcc11", "#ffe522", "#ffee55",
+    "#fff377", "#fff799", "#fffbba", "#ffffff", "#eaccff", "#cb94ff", "#ab5cff", "#8624ff", "#5e00e0", "#3c00aa"
+];
+
 /**
  * 🌟 WebGL Dynamic Breakpoint Step Interpolator
  * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
  */
-function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 10.0, 30.0], bytePoints = [0, 100, 200, 255], numEntries = 256) {
+function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.0], bytePoints = [0, 100, 255], numEntries = 256) {
     const palette = [];
     for (let i = 0; i < numEntries; i++) {
         // 🌟 Piecewise segment interpolation matching parameters.json
@@ -115,6 +138,15 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+// 💧 Dark Mode PWAT Palette (0.0" -> 4.0" piecewise mapped matching parameters.json)
+export const PWAT_PALETTE = createNonLinearPrecipPalette(
+    DARK_PWAT_LEVELS,
+    DARK_PWAT_HEX,
+    [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
+    [0, 32, 64, 96, 128, 160, 192, 255],
+    256
+);
+
 /**
  * 🌟 Dynamic Palette Selector
  */
@@ -122,6 +154,9 @@ export function getPaletteForParameter(paramId) {
     const id = (paramId || '').toLowerCase();
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
+    }
+    if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
+        return PWAT_PALETTE;
     }
     return TEMP_PALETTE;
 }
