@@ -1,5 +1,7 @@
 // js/shaders/precipShader.js
-import { PRECIP_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter as getLightPalette } from '../config/palettes.js';
+import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
+import { stateManager } from '../core/stateManager.js';
 
 const vsSource = `
     attribute vec2 a_pos;
@@ -52,7 +54,7 @@ const fsSource = `
     }
 `;
 
-function createPrecipPaletteTexture(gl, paletteHexArray = PRECIP_PALETTE) {
+function createPrecipPaletteTexture(gl, paletteHexArray) {
     const paletteTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, paletteTex);
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
@@ -62,7 +64,7 @@ function createPrecipPaletteTexture(gl, paletteHexArray = PRECIP_PALETTE) {
         paletteData[i * 4]     = (num >> 16) & 255;
         paletteData[i * 4 + 1] = (num >> 8) & 255;
         paletteData[i * 4 + 2] = num & 255;
-        paletteData[i * 4 + 3] = (i === 0) ? 0 : 255;
+        paletteData[i * 4 + 3] = (i === 0) ? 0 : 255; // Transparent index 0 for dry land
     });
 
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteHexArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
@@ -95,12 +97,19 @@ export function createPrecipShaderLayer(mapInstance) {
             this.activeTex = null;
         },
 
-        updatePalette: function(paletteHexArray = PRECIP_PALETTE) {
+        updatePalette: function(paramIdOrHexArray) {
             if (!this.gl) return;
+            let hexArray;
+            if (Array.isArray(paramIdOrHexArray)) {
+                hexArray = paramIdOrHexArray;
+            } else {
+                const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+                hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam || 'tp');
+            }
+
             if (this.paletteTex) {
                 this.gl.deleteTexture(this.paletteTex);
             }
-            const hexArray = Array.isArray(paletteHexArray) ? paletteHexArray : PRECIP_PALETTE;
             this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray);
             mapInstance.triggerRepaint();
         },
@@ -140,7 +149,10 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
 
-            this.paletteTex = createPrecipPaletteTexture(gl, PRECIP_PALETTE);
+            // 🌟 Theme-aware initial palette on add
+            const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+            const initialPalette = paletteFunc(stateManager.activeParam || 'tp');
+            this.paletteTex = createPrecipPaletteTexture(gl, initialPalette);
         },
         
         preloadChunkTexture: function(chunkIndex, source) {
