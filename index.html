@@ -57,14 +57,14 @@
             </div>
         </div>
         <div class="nav-right">
-            <!-- 🌟 Model Button -->
+            <!-- 🌟 Model Button (Defaults to ECMWF) -->
             <button id="btn-model-menu" class="nav-dropdown-btn">
-                <span>Model</span>
+                <span>ECMWF</span>
                 <svg class="chevron-icon" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <!-- 🌟 Parameter Button -->
+            <!-- 🌟 Parameter Button (Defaults to 2m Temperature) -->
             <button id="btn-param-menu" class="nav-dropdown-btn">
-                <span>Parameter</span>
+                <span>2m Temperature</span>
                 <svg class="chevron-icon" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
         </div>
@@ -106,9 +106,9 @@
     <!-- 🌟 Horizontal Parameter Category Sub-Bar -->
     <div id="param-category-bar" class="sub-nav-bar" style="display: none;">
         <div class="category-scroll-container">
-            <button class="param-cat-pill active" data-category="Surface and Precipitation">Surface and Precipitation</button>
+            <button class="param-cat-pill" data-category="Surface and Precipitation">Surface and Precipitation</button>
             <button class="param-cat-pill" data-category="Upper/Lower Air Dynamics">Upper/Lower Air Dynamics</button>
-            <button class="param-cat-pill" data-category="Thermodynamics">Thermodynamics</button>
+            <button class="param-cat-pill active" data-category="Thermodynamics">Thermodynamics</button>
             <button class="param-cat-pill" data-category="Severe Weather">Severe Weather</button>
             <button class="param-cat-pill" data-category="Winter Weather">Winter Weather</button>
         </div>
