@@ -1,5 +1,6 @@
 // js/layers/threeGlobe.js
-import { getPaletteForParameter, TEMP_PALETTE, PRECIP_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE, PWAT_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
 // 🌐 10m High-Definition Vector Datasets
@@ -12,6 +13,7 @@ let scene, camera, renderer, controls, globeMesh, material, paletteTex;
 let globeChunkTextures = {}; // Texture cache per chunk index
 let countyMesh = null;
 let isGlobeActive = false;
+let currentViewMode = '3d'; // '3d' | 'polar'
 
 const style = document.createElement('style');
 style.textContent = `
@@ -64,7 +66,7 @@ const fsThreeGlobe = `
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // 🌟 Discard transparent pixels (dry land for precip)
+        // 🌟 Discard transparent pixels (e.g. dry land for precip)
         if (color.a == 0.0) {
             discard;
         }
@@ -82,11 +84,12 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     canvas.width = paletteHexArray.length;
     canvas.height = 1;
     const ctx = canvas.getContext('2d');
-    const isPrecip = (paletteHexArray === PRECIP_PALETTE);
+    const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeShader === 'precip');
 
     paletteHexArray.forEach((hex, i) => {
+        // Only discard index 0 for precipitation (keep 2t and PWAT continuous)
         if (isPrecip && i === 0) {
-            ctx.clearRect(i, 0, 1, 1); // 🌟 Transparent index 0 for dry land
+            ctx.clearRect(i, 0, 1, 1);
         } else {
             ctx.fillStyle = hex;
             ctx.fillRect(i, 0, 1, 1);
@@ -260,8 +263,9 @@ export function initThreeGlobe() {
         };
     }
 
-    // 🌟 Initialize with matching palette for active parameter
-    const initialPalette = (stateManager.activeParam === 'tp') ? PRECIP_PALETTE : TEMP_PALETTE;
+    // 🌟 Theme & parameter-aware initial palette
+    const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+    const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
 
     material = new THREE.ShaderMaterial({
@@ -304,7 +308,7 @@ export function initThreeGlobe() {
             controls.update();
 
             if (countyMesh) {
-                countyMesh.visible = (dist < 4.2);
+                countyMesh.visible = (dist < 4.2 && currentViewMode === '3d');
             }
 
             renderer.render(scene, camera);
@@ -314,17 +318,50 @@ export function initThreeGlobe() {
 }
 
 /**
- * 🌟 DYNAMIC PALETTE SWAP FOR 3D GLOBE
+ * 🌟 NORTH POLAR STEREOGRAPHIC VIEW ORIENTATION
+ */
+export function setPolarView() {
+    if (!camera || !controls) return;
+    currentViewMode = 'polar';
+    camera.up.set(0, 0, -1);
+    camera.position.set(0, 5.2, 0.01);
+    controls.target.set(0, 0, 0);
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI * 0.42; // Locks camera to Northern Hemisphere
+    controls.minDistance = 2.6;
+    controls.maxDistance = 8.0;
+    controls.update();
+    console.log("❄️ [3D Engine] North Polar Stereographic Mode Activated");
+}
+
+/**
+ * 🌟 STANDARD 3D GLOBE VIEW ORIENTATION
+ */
+export function setGlobeView() {
+    if (!camera || !controls) return;
+    currentViewMode = '3d';
+    camera.up.set(0, 1, 0);
+    camera.position.set(0, 0.8, 6.0);
+    controls.target.set(0, 0, 0);
+    controls.minPolarAngle = Math.PI * 0.08;
+    controls.maxPolarAngle = Math.PI * 0.92;
+    controls.minDistance = 2.8;
+    controls.maxDistance = 12.0;
+    controls.update();
+    console.log("🌐 [3D Engine] Standard 3D Globe Mode Activated");
+}
+
+/**
+ * 🌟 DYNAMIC PALETTE SWAP FOR 3D GLOBE (Precip, Scalar, PWAT, Temp)
  */
 export function updateThreeGlobePalette(paramIdOrHexArray) {
     if (!material) return;
     let hexArray;
     if (Array.isArray(paramIdOrHexArray)) {
         hexArray = paramIdOrHexArray;
-    } else if (paramIdOrHexArray === 'tp' || paramIdOrHexArray === 'precip') {
-        hexArray = PRECIP_PALETTE;
     } else {
-        hexArray = getPaletteForParameter(paramIdOrHexArray);
+        const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+        hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam);
     }
     
     if (paletteTex) {
@@ -343,7 +380,6 @@ export function updateThreeGlobeFrame(frameState) {
 
     if (!globeChunkTextures[chunkIdx]) {
         let texture;
-        // 🌟 Polymorphic texture creation: binary buffer vs ImageBitmap
         if (source.data && source.width && source.height) {
             texture = new THREE.DataTexture(
                 source.data,
@@ -376,12 +412,18 @@ export function clearThreeGlobeTextures() {
     globeChunkTextures = {};
 }
 
-export function showThreeGlobe() {
+export function showThreeGlobe(viewMode = '3d') {
     const container = document.getElementById('globe-container');
     const mapDiv = document.getElementById('map');
     if (container) container.style.display = 'block';
     if (mapDiv) mapDiv.style.display = 'none';
     isGlobeActive = true;
+
+    if (viewMode === 'polar') {
+        setPolarView();
+    } else {
+        setGlobeView();
+    }
 }
 
 export function hideThreeGlobe() {
