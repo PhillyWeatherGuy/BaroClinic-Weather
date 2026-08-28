@@ -251,8 +251,9 @@ map.on('load', async () => {
         console.error("Three.js globe init error:", err);
     }
 
+    // 🌟 Explicitly fetch ECMWF 2m Temperature on initial startup
     try {
-        await fetchManifest();
+        await fetchManifest(null, 'ecmwf', '2t');
     } catch (err) {
         showToast('❌ ' + err.message);
     }
