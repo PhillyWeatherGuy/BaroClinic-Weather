@@ -10,14 +10,13 @@ import {
     syncModelRunDropdown,
     setShaderLayerReference,
     updateSliderTrackAndBounds,
-    initGlobeToggle,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
 
 // 🌟 Imported universal decoders from cityOverlay.js
 import { initCityOverlay, updateCityCallouts, decodePixelValue, formatParameterValue } from './layers/cityOverlay.js'; 
-import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe
+import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe & Polar Engine
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
 
 // 🌟 Import Light and Dark Palette Resolvers
@@ -68,6 +67,21 @@ export function updateBasemapStyle(styleUrl) {
 
     map.on('styledata', onStyleLoaded);
     map.setStyle(styleUrl);
+}
+
+/**
+ * 🌟 DYNAMIC PROJECTION / VIEW SWITCHER (2D Map, 3D Globe, Polar Stereographic)
+ */
+export function applyView(targetView) {
+    stateManager.activeView = targetView;
+    if (targetView === '2d') {
+        hideThreeGlobe();
+        if (map) map.resize();
+    } else if (targetView === '3d') {
+        showThreeGlobe('3d');
+    } else if (targetView === 'polar') {
+        showThreeGlobe('polar');
+    }
 }
 
 /**
@@ -237,6 +251,9 @@ initViewerUI(
     },
     (newTheme) => {
         applyTheme(newTheme);
+    },
+    (newView) => {
+        applyView(newView);
     }
 );
 
@@ -277,10 +294,6 @@ map.on('load', async () => {
 
     try {
         syncModelRunDropdown();
-    } catch (err) {}
-
-    try {
-        initGlobeToggle(map);
     } catch (err) {}
 
     if (stateManager.manifest && stateManager.manifest.chunks) {
