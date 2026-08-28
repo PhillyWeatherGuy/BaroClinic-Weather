@@ -6,39 +6,80 @@ import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../laye
 
 let onStepChangeCallback = null;
 let onThemeChangeCallback = null;
+let onViewChangeCallback = null;
 let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 200;
 let shaderLayerRef = null;
-let isGlobe = false;
 
 export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
 }
 
 /**
- * 🌟 2D Map <-> 3D Three.js Globe Engine Switcher with Glowing Icon
+ * 🌟 UNIVERSAL VIEW / PROJECTION SELECTOR (2D Map, 3D Globe, Polar Stereographic)
  */
-export function initGlobeToggle(map) {
-    const globeBtn = document.getElementById('btn-globe');
-    if (!globeBtn) return;
+export function initViewSelector(viewCallback = null) {
+    onViewChangeCallback = viewCallback;
 
-    globeBtn.onclick = (e) => {
-        e.stopPropagation();
-        isGlobe = !isGlobe;
+    const toggleBtn = document.getElementById('btn-view-toggle');
+    const menu = document.getElementById('view-dropdown-menu');
+    const optionBtns = document.querySelectorAll('.view-option-btn');
 
-        if (isGlobe) {
-            // 🌟 Activate 3D Three.js Globe Engine & Turn ON Glow
-            showThreeGlobe();
-            globeBtn.classList.add('active');
-            console.log("🌐 3D Three.js Globe Engine Activated");
+    if (!menu) return;
+
+    // Sync initial active state (default: 2d)
+    const currentView = stateManager.activeView || '2d';
+    optionBtns.forEach(btn => {
+        if (btn.getAttribute('data-view') === currentView) {
+            btn.classList.add('active');
         } else {
-            // 🌟 Return to 2D MapLibre Engine & Turn OFF Glow
-            hideThreeGlobe();
-            globeBtn.classList.remove('active');
-            console.log("🗺️ 2D MapLibre Map Engine Activated");
+            btn.classList.remove('active');
         }
-    };
+    });
+
+    // Mobile Toggle Button Click
+    if (toggleBtn) {
+        toggleBtn.onclick = (e) => {
+            e.stopPropagation();
+            const isVisible = menu.style.display === 'flex' || menu.style.display === 'block';
+            menu.style.display = isVisible ? 'none' : 'flex';
+        };
+    }
+
+    // Option selection (Handles both Mobile Flyout & Desktop Segmented Pill)
+    optionBtns.forEach(btn => {
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            const targetView = btn.getAttribute('data-view');
+            if (!targetView) return;
+
+            optionBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            stateManager.activeView = targetView;
+
+            // Close mobile flyout
+            if (window.innerWidth < 1024) {
+                menu.style.display = 'none';
+            }
+
+            console.log(`🌐 [UI] View changed to: ${targetView}`);
+
+            if (typeof onViewChangeCallback === 'function') {
+                onViewChangeCallback(targetView);
+            }
+        };
+    });
+
+    // Close dropdown when clicking outside on mobile
+    document.addEventListener('click', (e) => {
+        if (window.innerWidth < 1024 && menu && toggleBtn) {
+            if (!menu.contains(e.target) && !toggleBtn.contains(e.target)) {
+                menu.style.display = 'none';
+            }
+        }
+    });
 }
 
 /**
@@ -441,7 +482,7 @@ export function initParameterCategoryBar() {
     });
 }
 
-export function initViewerUI(stepCallback, themeCallback = null) {
+export function initViewerUI(stepCallback, themeCallback = null, viewCallback = null) {
     onStepChangeCallback = stepCallback;
     onThemeChangeCallback = themeCallback;
 
@@ -455,6 +496,7 @@ export function initViewerUI(stepCallback, themeCallback = null) {
     initModelCategoryBar();
     initParameterCategoryBar();
     initThemeToggle();
+    initViewSelector(viewCallback);
 
     if (slider) {
         slider.addEventListener('input', (e) => {
