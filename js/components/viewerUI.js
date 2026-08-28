@@ -125,6 +125,10 @@ export function initModelCategoryBar() {
         .then(data => {
             if (data) {
                 modelsData = data;
+                const labelSpan = modelBtn.querySelector('span');
+                if (labelSpan && modelsData.models?.[stateManager.activeModel]) {
+                    labelSpan.textContent = modelsData.models[stateManager.activeModel].name;
+                }
                 renderCategoryModels('Global');
             }
         })
@@ -252,7 +256,12 @@ export function initParameterCategoryBar() {
         .then(data => {
             if (data) {
                 modelsData = data;
-                renderCategoryParameters('Surface and Precipitation');
+                const labelSpan = paramBtn.querySelector('span');
+                if (labelSpan && modelsData.parameters?.[stateManager.activeParam]) {
+                    labelSpan.textContent = modelsData.parameters[stateManager.activeParam].name;
+                }
+                // 🌟 Defaults to Thermodynamics category (where 2m Temperature lives)
+                renderCategoryParameters('Thermodynamics');
             }
         })
         .catch(err => console.warn("Could not load config/models.json:", err));
@@ -284,8 +293,7 @@ export function initParameterCategoryBar() {
 
         matchingParams.forEach((param, idx) => {
             const btn = document.createElement('button');
-            btn.className = `model-select-btn ${idx === 0 && stateManager.activeParam === param.id ? 'active' : ''}`;
-            if (stateManager.activeParam === param.id) btn.classList.add('active');
+            btn.className = `model-select-btn ${stateManager.activeParam === param.id ? 'active' : ''}`;
             btn.setAttribute('data-param-id', param.id);
             btn.textContent = param.name;
 
