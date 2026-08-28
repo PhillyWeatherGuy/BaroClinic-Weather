@@ -485,6 +485,43 @@
         padding: 0 14px;
         font-size: 12px;
     }
+
+    /* 🌟 Desktop Segmented View Pill Overrides */
+    .view-toggle-btn {
+        display: none !important;
+    }
+
+    .view-dropdown-menu {
+        display: flex !important;
+        position: static !important;
+        transform: none !important;
+        width: auto !important;
+        max-height: none !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        border-radius: 10px !important;
+        padding: 3px !important;
+        flex-direction: row !important;
+        gap: 4px !important;
+        box-shadow: none !important;
+    }
+
+    .view-option-btn {
+        padding: 5px 12px !important;
+        font-size: 12px !important;
+        letter-spacing: 0.5px !important;
+        border-radius: 6px !important;
+    }
+
+    .view-option-btn .check-icon {
+        display: none !important;
+    }
+
+    .view-option-btn.active {
+        background: rgba(56, 189, 248, 0.2) !important;
+        border: 1px solid rgba(56, 189, 248, 0.5) !important;
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.3) !important;
+    }
 }
 
 /* ==========================================
@@ -582,9 +619,15 @@
 }
 
 /* ==========================================
-   GLOBE BUTTON & GLOW STYLING
+   VIEW / PROJECTION SELECTOR & FLYOUT STYLING
    ========================================== */
-.globe-btn {
+.view-selector-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.view-toggle-btn {
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #94a3b8;
@@ -597,17 +640,72 @@
     transition: all 0.25s ease;
 }
 
-.globe-btn:hover {
+.view-toggle-btn:hover {
     background: rgba(255, 255, 255, 0.2);
     color: #ffffff;
 }
 
-/* 🌟 Active / Glowing 3D Mode State */
-.globe-btn.active {
+.view-toggle-btn.active {
     background: rgba(56, 189, 248, 0.2) !important;
     border-color: rgba(56, 189, 248, 0.6) !important;
     color: #38bdf8 !important;
     box-shadow: 0 0 12px rgba(56, 189, 248, 0.4), inset 0 0 8px rgba(56, 189, 248, 0.2) !important;
+}
+
+.view-dropdown-menu {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    background: rgba(11, 15, 25, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 14px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+    padding: 6px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.view-option-btn {
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: left;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.15s ease;
+}
+
+.view-option-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.view-option-btn.active {
+    background: rgba(56, 189, 248, 0.2);
+    color: #38bdf8;
+    font-weight: 700;
+}
+
+.view-option-btn .check-icon {
+    font-size: 12px;
+    opacity: 0;
+}
+
+.view-option-btn.active .check-icon {
+    opacity: 1;
 }
 
 /* ==========================================
