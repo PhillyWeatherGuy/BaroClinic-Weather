@@ -140,14 +140,30 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
             </button>
 
-            <!-- 🌟 Vector SVG Globe Icon Button -->
-            <button id="btn-globe" class="ctrl-btn globe-btn active" title="Toggle 3D Globe">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="2" y1="12" x2="22" y2="12"></line>
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10z"></path>
-                </svg>
-            </button>
+            <!-- 🌟 Projection / View Selector (Mobile Upward Flyout / Desktop Segmented Pill) -->
+            <div class="view-selector-container">
+                <button id="btn-view-toggle" class="ctrl-btn view-toggle-btn active" title="Switch Projection / View">
+                    <svg id="view-active-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10z"></path>
+                    </svg>
+                </button>
+                <div id="view-dropdown-menu" class="view-dropdown-menu" style="display: none;">
+                    <button class="view-option-btn active" data-view="2d" title="2D Mercator Map">
+                        <span class="view-opt-text">2D Map</span>
+                        <span class="check-icon">✓</span>
+                    </button>
+                    <button class="view-option-btn" data-view="3d" title="3D Earth Globe">
+                        <span class="view-opt-text">3D Globe</span>
+                        <span class="check-icon">✓</span>
+                    </button>
+                    <button class="view-option-btn" data-view="polar" title="North Polar Stereographic">
+                        <span class="view-opt-text">Polar</span>
+                        <span class="check-icon">✓</span>
+                    </button>
+                </div>
+            </div>
 
             <button id="btn-gif" class="gif-btn" title="Create GIF">GIF</button>
         </div>
