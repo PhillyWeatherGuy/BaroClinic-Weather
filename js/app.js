@@ -2,7 +2,7 @@
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
-import { createPrecipShaderLayer } from './shaders/precipShader.js'; // 🌟 Added precipitation shader
+import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { initHubTransition } from './components/homeScreen.js'; 
 import { 
     initViewerUI, 
@@ -14,10 +14,13 @@ import {
     hideToast 
 } from './components/viewerUI.js';
 
-// 🌟 Imported universal decoders from cityOverlay.js
+// 🌟 Universal overlays & 3D Globe
 import { initCityOverlay, updateCityCallouts, decodePixelValue, formatParameterValue } from './layers/cityOverlay.js'; 
-import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe } from './layers/threeGlobe.js'; // 🌟 Three.js 3D Globe & Polar Engine
-import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js'; // 🌟 Parameter Contour Loader & Preloader
+import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe } from './layers/threeGlobe.js';
+import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
+
+// 🌟 Dedicated 2D North Polar Stereographic Engine
+import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap } from './layers/polarMap.js';
 
 // 🌟 Import Light and Dark Palette Resolvers
 import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
@@ -37,7 +40,6 @@ const map = new maplibregl.Map({
 
 /**
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
- * Switches MapTiler basemap style URL and re-attaches layers when style loads
  */
 export function updateBasemapStyle(styleUrl) {
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
@@ -70,17 +72,26 @@ export function updateBasemapStyle(styleUrl) {
 }
 
 /**
- * 🌟 DYNAMIC PROJECTION / VIEW SWITCHER (2D Map, 3D Globe, Polar Stereographic)
+ * 🌟 DYNAMIC 3-WAY PROJECTION / VIEW SWITCHER
  */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
+
     if (targetView === '2d') {
         hideThreeGlobe();
+        hidePolarMap();
+        const mapDiv = document.getElementById('map');
+        if (mapDiv) mapDiv.style.display = 'block';
         if (map) map.resize();
+        console.log("🗺️ [App Engine] 2D MapLibre Mercator Activated");
     } else if (targetView === '3d') {
+        hidePolarMap();
         showThreeGlobe('3d');
+        console.log("🌐 [App Engine] 3D Earth Globe Activated");
     } else if (targetView === 'polar') {
-        showThreeGlobe('polar');
+        hideThreeGlobe();
+        showPolarMap();
+        console.log("❄️ [App Engine] 2D Polar Stereographic Conformal Map Activated");
     }
 }
 
@@ -115,6 +126,9 @@ export async function applyTheme(theme) {
     try {
         updateThreeGlobePalette(newPalette);
     } catch (e) {}
+    try {
+        updatePolarPalette(newPalette);
+    } catch (e) {}
 }
 
 export function initLayer(shaderType = null) {
@@ -126,7 +140,6 @@ export function initLayer(shaderType = null) {
         customShaderLayer = null;
     }
 
-    // 🌟 Check activeShader dynamically instead of hardcoding 'tp' to precipShader
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
     if (chosenShader === 'precip') {
@@ -136,13 +149,12 @@ export function initLayer(shaderType = null) {
     }
     setShaderLayerReference(customShaderLayer);
     
-    // 🌟 Apply theme-aware palette immediately on creation
+    // Apply theme-aware palette immediately on creation
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
         customShaderLayer.updatePalette(paletteFunc(stateManager.activeParam));
     }
 
-    // 🌟 Re-upload any existing bitmaps in RAM straight to the GPU layer
     for (const chunkIdx in stateManager.loadedChunkBitmaps) {
         const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
         if (bitmap && customShaderLayer) {
@@ -150,7 +162,6 @@ export function initLayer(shaderType = null) {
         }
     }
 
-    // 🌟 Place weather layer above ocean/land fills, but below borders and labels
     let firstOverlayId = null;
     const layers = map.getStyle().layers || [];
     for (const layer of layers) {
@@ -186,7 +197,6 @@ async function renderFrame(globalIdx) {
             return;
         }
     } else if (customShaderLayer && !customShaderLayer.chunkTextures[chunkIdx]) {
-        // 🌟 SAFETY FIX: If bitmap is in RAM but missing from GPU VRAM, upload it immediately
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
     }
 
@@ -203,20 +213,21 @@ async function renderFrame(globalIdx) {
         customShaderLayer.updateFrame(stateManager.activeFrameState);
     }
 
-    // 🌟 Update 3D Three.js Globe Frame Texture
+    // 🌟 Update 3D Globe & 2D Polar Stereographic Frames
     updateThreeGlobeFrame(stateManager.activeFrameState);
+    updatePolarFrame(stateManager.activeFrameState);
 
-    // 🌟 Update 2D City Callouts (Master Overlay handles units dynamically)
+    // 🌟 Update City Callouts
     try {
         updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
     } catch (e) {}
 
-    // 🌟 Fetch Static Vector Contours from CDN (~5ms / 0ms if RAM cached)
+    // 🌟 Fetch Static Vector Contours
     updateVectorContours(frameInfo.step);
 }
 
 /**
- * 🌟 SEQUENTIAL PRELOADER: Updates slider red/blue progress as each chunk finishes downloading
+ * 🌟 SEQUENTIAL PRELOADER
  */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
@@ -261,33 +272,40 @@ map.on('load', async () => {
     stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
     initHubTransition();
 
-    // 🌟 Initialize Three.js 3D Globe Engine
+    // 🌟 1. Initialize 3D Globe Engine
     try {
         initThreeGlobe();
     } catch (err) {
         console.error("Three.js globe init error:", err);
     }
 
-    // 🌟 Explicitly fetch ECMWF 2m Temperature on initial startup
+    // 🌟 2. Initialize 2D Polar Stereographic Engine
+    try {
+        initPolarMap();
+    } catch (err) {
+        console.error("Polar map init error:", err);
+    }
+
+    // 🌟 3. Explicitly fetch ECMWF 2m Temperature on initial startup
     try {
         await fetchManifest(null, 'ecmwf', '2t');
     } catch (err) {
         showToast('❌ ' + err.message);
     }
 
-    // 1. Initialize Base Weather Heatmap Layer
+    // 4. Initialize Base Weather Heatmap Layer
     try {
         initLayer();
     } catch (err) {}
 
-    // 2. Initialize Master Vector Contour Layer
+    // 5. Initialize Master Vector Contour Layer
     try {
         initVectorContours(map);
     } catch (err) {
         console.error("Vector contours init error:", err);
     }
 
-    // 3. Initialize Master City Overlay
+    // 6. Initialize Master City Overlay
     try {
         initCityOverlay(map);
     } catch (err) {}
@@ -307,7 +325,6 @@ map.on('load', async () => {
             await renderFrame(0);
             hideToast();
 
-            // 🌟 Background preload image chunks & parameter-specific vector contours
             preloadRemainingChunks(stateManager.loadGeneration);
             preloadAllContours(stateManager.loadGeneration);
         } catch (err) {
@@ -316,7 +333,7 @@ map.on('load', async () => {
     }
 });
 
-// 🌟 Smooth Bilinear Interpolation on Click (Matches GPU shader gradients 1:1)
+// 🌟 Bilinear Interpolation on Click
 map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
@@ -337,7 +354,6 @@ map.on('click', (e) => {
     const chunkInfo = stateManager.manifest.chunks[chunkIdx];
     const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
 
-    // 🌟 Continuous sub-pixel coordinates
     const contX = (((normX % 1) + 1) % 1) * frameW;
     const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
 
@@ -352,7 +368,6 @@ map.on('click', (e) => {
     const colOffset = stateManager.activeFrameState.col * frameW;
     const rowOffset = stateManager.activeFrameState.row * frameH;
 
-    // Sample the 4 surrounding corner pixels
     const idx00 = (rowOffset + y0) * sheetW + (colOffset + x0);
     const idx10 = (rowOffset + y0) * sheetW + (colOffset + x1);
     const idx01 = (rowOffset + y1) * sheetW + (colOffset + x0);
@@ -365,18 +380,15 @@ map.on('click', (e) => {
 
     if (v00 === undefined) return;
 
-    // Decode all 4 corners into physical values
     const d00 = decodePixelValue(v00, stateManager.manifest);
     const d10 = decodePixelValue(v10 ?? v00, stateManager.manifest);
     const d01 = decodePixelValue(v01 ?? v00, stateManager.manifest);
     const d11 = decodePixelValue(v11 ?? v00, stateManager.manifest);
 
-    // 🌟 Bilinear Interpolation across the 4 corners
     const top = d00 * (1.0 - fracX) + d10 * fracX;
     const bottom = d01 * (1.0 - fracX) + d11 * fracX;
     const decodedVal = top * (1.0 - fracY) + bottom * fracY;
 
-    // Format display string based on dynamic manifest rules
     const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
     const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
 
