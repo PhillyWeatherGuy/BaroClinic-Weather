@@ -25,7 +25,7 @@ function initKeyboardControls() {
     let keyHoldInterval = null;
     let activeKey = null;
 
-    const FAST_SCRUB_INTERVAL_MS = 80; // Speed when holding down arrow key
+    const FAST_SCRUB_INTERVAL_MS = 40; // Speed when holding down arrow key
     const HOLD_DELAY_MS = 250;          // Time before rapid "zoom" scrub starts
 
     function handleStep(delta) {
