@@ -82,7 +82,6 @@ style.textContent = `
     .polar-compass-btn svg {
         transition: transform 0.1s linear;
     }
-    /* Hidden on Mobile by default */
     .polar-rot-capsule {
         display: none;
         align-items: center;
@@ -541,17 +540,23 @@ export function fitSynopticSector() {
 }
 
 /**
- * 🌟 UNIFIED 2D PLANAR GESTURE CONTROLLER (Desktop & Mobile: Horizontal Drag = Rotate, Vertical Drag = North/South)
+ * 🌟 DIRECTIONALLY-LOCKED 2D MAP CONTROLS (Disambiguates Pan vs. Rotate)
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
+    let dragMode = 'none'; // 'none' | 'rotate' | 'pan'
     let startX = 0, startY = 0;
+    let accumDx = 0, accumDy = 0;
+    const DRAG_LOCK_THRESHOLD = 5; // Pixels to determine intent
     let initialTouchDist = 0;
 
     // Desktop Mouse Handlers
     canvas.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         isDragging = true;
+        dragMode = 'none';
+        accumDx = 0;
+        accumDy = 0;
         startX = e.clientX;
         startY = e.clientY;
     });
@@ -564,29 +569,39 @@ function init2DMapControls(canvas) {
         startX = e.clientX;
         startY = e.clientY;
 
-        const h = window.innerHeight;
-        const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
-        const unitsPerPixel = visibleHeight / h;
-
-        // 🌟 1. Horizontal Drag (dx) strictly ROTATES around the Pole (0, 0)
-        mapRotation += dx * 0.004;
-        if (polarMesh) {
-            polarMesh.rotation.z = mapRotation;
+        // Determine intent if not locked yet
+        if (dragMode === 'none') {
+            accumDx += Math.abs(dx);
+            accumDy += Math.abs(dy);
+            if (accumDx + accumDy >= DRAG_LOCK_THRESHOLD) {
+                dragMode = (accumDx > accumDy) ? 'rotate' : 'pan';
+            }
         }
-        updateCompassUI();
 
-        // 🌟 2. Vertical Drag (dy) strictly PANS North / South
-        mapTargetY += dy * unitsPerPixel * 0.9;
-        mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
+        if (dragMode === 'rotate') {
+            // 🌟 1. Rotation strictly active; vertical movement FORCED LOCKED
+            mapRotation += dx * 0.004;
+            if (polarMesh) {
+                polarMesh.rotation.z = mapRotation;
+            }
+            updateCompassUI();
+        } else if (dragMode === 'pan') {
+            // 🌟 2. North/South Pan strictly active; rotation FORCED LOCKED
+            const h = window.innerHeight;
+            const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
+            const unitsPerPixel = visibleHeight / h;
 
-        mapTargetX = 0.0; // Locked horizontal translation on desktop as well
-
-        camera.position.x = 0.0;
-        camera.position.y = mapTargetY;
+            mapTargetY += dy * unitsPerPixel * 0.9;
+            mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
+            camera.position.y = mapTargetY;
+        }
     });
 
     window.addEventListener('mouseup', () => {
         isDragging = false;
+        dragMode = 'none';
+        accumDx = 0;
+        accumDy = 0;
     });
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -607,10 +622,14 @@ function init2DMapControls(canvas) {
     canvas.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
             isDragging = true;
+            dragMode = 'none';
+            accumDx = 0;
+            accumDy = 0;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
         } else if (e.touches.length === 2) {
             isDragging = false;
+            dragMode = 'none';
             const t1 = e.touches[0];
             const t2 = e.touches[1];
             initialTouchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
@@ -630,25 +649,32 @@ function init2DMapControls(canvas) {
             startX = clientX;
             startY = clientY;
 
-            const h = window.innerHeight;
-            const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
-            const unitsPerPixel = visibleHeight / h;
-
-            // 🌟 1. Horizontal Motion (dx) ROTATES around the Pole (Natural direction matching drag)
-            mapRotation += dx * 0.005;
-            if (polarMesh) {
-                polarMesh.rotation.z = mapRotation;
+            // Determine intent if not locked yet
+            if (dragMode === 'none') {
+                accumDx += Math.abs(dx);
+                accumDy += Math.abs(dy);
+                if (accumDx + accumDy >= DRAG_LOCK_THRESHOLD) {
+                    dragMode = (accumDx > accumDy) ? 'rotate' : 'pan';
+                }
             }
-            updateCompassUI();
 
-            // 🌟 2. Vertical Motion (dy) strictly PANS North / South
-            mapTargetY += dy * unitsPerPixel * 0.9;
-            mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
+            if (dragMode === 'rotate') {
+                // 🌟 1. Rotation strictly active; vertical movement FORCED LOCKED
+                mapRotation += dx * 0.005;
+                if (polarMesh) {
+                    polarMesh.rotation.z = mapRotation;
+                }
+                updateCompassUI();
+            } else if (dragMode === 'pan') {
+                // 🌟 2. North/South Pan strictly active; rotation FORCED LOCKED
+                const h = window.innerHeight;
+                const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
+                const unitsPerPixel = visibleHeight / h;
 
-            mapTargetX = 0.0; // Locked horizontal translation on mobile
-
-            camera.position.x = 0.0;
-            camera.position.y = mapTargetY;
+                mapTargetY += dy * unitsPerPixel * 0.9;
+                mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
+                camera.position.y = mapTargetY;
+            }
         } else if (e.touches.length === 2 && initialTouchDist > 0) {
             // Pinch-to-zoom
             const t1 = e.touches[0];
@@ -665,8 +691,14 @@ function init2DMapControls(canvas) {
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
             isDragging = true;
+            dragMode = 'none';
+            accumDx = 0;
+            accumDy = 0;
         } else {
             isDragging = false;
+            dragMode = 'none';
+            accumDx = 0;
+            accumDy = 0;
         }
     });
 }
