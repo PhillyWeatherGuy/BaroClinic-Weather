@@ -541,14 +541,14 @@ export function fitSynopticSector() {
 }
 
 /**
- * 🌟 2D PLANAR GESTURE CONTROLLER (Mobile: Swipe Left/Right = Rotate, Swipe Up/Down = North/South)
+ * 🌟 UNIFIED 2D PLANAR GESTURE CONTROLLER (Desktop & Mobile: Horizontal Drag = Rotate, Vertical Drag = North/South)
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
     let startX = 0, startY = 0;
     let initialTouchDist = 0;
 
-    // Desktop Mouse Drag (Left-click full pan)
+    // Desktop Mouse Handlers
     canvas.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         isDragging = true;
@@ -568,10 +568,20 @@ function init2DMapControls(canvas) {
         const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
         const unitsPerPixel = visibleHeight / h;
 
-        mapTargetX -= dx * unitsPerPixel;
-        mapTargetY += dy * unitsPerPixel;
+        // 🌟 1. Horizontal Drag (dx) strictly ROTATES around the Pole (0, 0)
+        mapRotation += dx * 0.004;
+        if (polarMesh) {
+            polarMesh.rotation.z = mapRotation;
+        }
+        updateCompassUI();
 
-        camera.position.x = mapTargetX;
+        // 🌟 2. Vertical Drag (dy) strictly PANS North / South
+        mapTargetY += dy * unitsPerPixel * 0.9;
+        mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
+
+        mapTargetX = 0.0; // Locked horizontal translation on desktop as well
+
+        camera.position.x = 0.0;
         camera.position.y = mapTargetY;
     });
 
@@ -581,7 +591,7 @@ function init2DMapControls(canvas) {
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Desktop Wheel Zoom
+    // Desktop Mouse Wheel Zoom
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const zoomSensitivity = 0.0012;
@@ -593,7 +603,7 @@ function init2DMapControls(canvas) {
         camera.updateProjectionMatrix();
     }, { passive: false });
 
-    // Mobile Touch Gestures
+    // Mobile Touch Handlers
     canvas.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
             isDragging = true;
@@ -624,8 +634,8 @@ function init2DMapControls(canvas) {
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
             const unitsPerPixel = visibleHeight / h;
 
-            // 🌟 1. Horizontal Motion (dx) strictly ROTATES around the Pole (0, 0)
-            mapRotation -= dx * 0.005;
+            // 🌟 1. Horizontal Motion (dx) ROTATES around the Pole (Natural direction matching drag)
+            mapRotation += dx * 0.005;
             if (polarMesh) {
                 polarMesh.rotation.z = mapRotation;
             }
@@ -633,9 +643,9 @@ function init2DMapControls(canvas) {
 
             // 🌟 2. Vertical Motion (dy) strictly PANS North / South
             mapTargetY += dy * unitsPerPixel * 0.9;
-            mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY)); // Keep within synoptic bounds
+            mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
 
-            mapTargetX = 0.0; // Locked to center axis on mobile (no horizontal translation)
+            mapTargetX = 0.0; // Locked horizontal translation on mobile
 
             camera.position.x = 0.0;
             camera.position.y = mapTargetY;
