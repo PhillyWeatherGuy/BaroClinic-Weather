@@ -15,9 +15,9 @@ let vectorLinesMesh = null;
 let graticuleMesh = null;
 let rawGeoJsonFeatures = [];
 
-// Map State: Position, Zoom, and 2D Planar Rotation
+// Map State: Position, Zoom, and Pole-Anchored 2D Rotation
 let currentPole = 'north'; // 'north' | 'south'
-let mapRotation = 0.0;     // Radians
+let mapRotation = 0.0;     // Radians (around the Pole at 0,0)
 let mapTargetY = -0.45;
 let mapTargetX = 0.0;
 let mapZoom = 1.0;
@@ -385,7 +385,7 @@ function updateCompassUI() {
 
 export function resetRotation() {
     mapRotation = 0.0;
-    if (camera) camera.rotation.z = 0;
+    if (polarMesh) polarMesh.rotation.z = 0.0;
     updateCompassUI();
 }
 
@@ -427,6 +427,8 @@ export function fitSynopticSector() {
     mapTargetY = (currentPole === 'north') ? -0.45 : -0.20;
     mapRotation = 0.0;
 
+    if (polarMesh) polarMesh.rotation.z = 0.0;
+
     camera.position.set(mapTargetX, mapTargetY, 10);
     camera.rotation.z = 0;
     camera.updateProjectionMatrix();
@@ -434,7 +436,7 @@ export function fitSynopticSector() {
 }
 
 /**
- * 🌟 2D PLANAR GESTURE CONTROLLER (Free North/South Pan + Zoom + Central Axis Rotation)
+ * 🌟 2D PLANAR GESTURE CONTROLLER (Pole-Anchored Rotation & Smooth Non-Sensitive Zoom)
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
@@ -451,7 +453,7 @@ function init2DMapControls(canvas) {
         startX = e.clientX;
         startY = e.clientY;
 
-        // Right-click or Shift+Left-click triggers rotation; Normal Left-click triggers pan
+        // Right-click or Shift+Left-click triggers Pole-Anchored Rotation; Normal Left-click triggers Pan
         if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
             isRotating = true;
         } else if (e.button === 0) {
@@ -472,17 +474,16 @@ function init2DMapControls(canvas) {
         const unitsPerPixel = visibleHeight / h;
 
         if (isRotating) {
-            // Smooth Rotation around the central axis
-            mapRotation += dx * 0.007;
-            camera.rotation.z = mapRotation;
+            // 🌟 Smooth Rotation locked specifically around the geographic pole (0, 0)
+            mapRotation -= dx * 0.004;
+            if (polarMesh) {
+                polarMesh.rotation.z = mapRotation;
+            }
             updateCompassUI();
         } else if (isDragging) {
-            // Rotation-aware panning (moving mouse up always pans north/screen-up)
-            const worldDx = (-dx * unitsPerPixel) * Math.cos(mapRotation) - (dy * unitsPerPixel) * Math.sin(mapRotation);
-            const worldDy = (-dx * unitsPerPixel) * Math.sin(mapRotation) + (dy * unitsPerPixel) * Math.cos(mapRotation);
-
-            mapTargetX += worldDx;
-            mapTargetY += worldDy;
+            // Free North/South/East/West Panning
+            mapTargetX -= dx * unitsPerPixel;
+            mapTargetY += dy * unitsPerPixel;
 
             camera.position.x = mapTargetX;
             camera.position.y = mapTargetY;
@@ -496,16 +497,19 @@ function init2DMapControls(canvas) {
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Mouse Wheel Zoom
+    // 🌟 Smooth, Non-Sensitive Mouse Wheel Zoom
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
-        const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-        const newZoom = Math.max(0.4, Math.min(8.0, camera.zoom * zoomFactor));
+        const zoomSensitivity = 0.0012; // Gentle, smooth rate
+        const factor = Math.exp(-e.deltaY * zoomSensitivity);
+        const clampedFactor = Math.max(0.93, Math.min(1.07, factor)); // Prevents sudden jumps
+
+        const newZoom = Math.max(0.4, Math.min(6.0, camera.zoom * clampedFactor));
         camera.zoom = newZoom;
         camera.updateProjectionMatrix();
     }, { passive: false });
 
-    // Touch / Mobile Multi-Gesture Handlers (1-finger pan, 2-finger pinch & rotate)
+    // Touch / Mobile Multi-Gesture Handlers (1-finger pan, 2-finger pinch & rotate around pole)
     canvas.addEventListener('touchstart', (e) => {
         for (let i = 0; i < e.changedTouches.length; i++) {
             const t = e.changedTouches[i];
@@ -541,11 +545,8 @@ function init2DMapControls(canvas) {
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
             const unitsPerPixel = visibleHeight / h;
 
-            const worldDx = (-dx * unitsPerPixel) * Math.cos(mapRotation) - (dy * unitsPerPixel) * Math.sin(mapRotation);
-            const worldDy = (-dx * unitsPerPixel) * Math.sin(mapRotation) + (dy * unitsPerPixel) * Math.cos(mapRotation);
-
-            mapTargetX += worldDx;
-            mapTargetY += worldDy;
+            mapTargetX -= dx * unitsPerPixel;
+            mapTargetY += dy * unitsPerPixel;
 
             camera.position.x = mapTargetX;
             camera.position.y = mapTargetY;
@@ -553,19 +554,21 @@ function init2DMapControls(canvas) {
             const t1 = e.touches[0];
             const t2 = e.touches[1];
 
-            // 1. Pinch Zoom
+            // 1. Smooth Pinch Zoom
             const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
             if (initialTouchDistance > 0) {
                 const pinchRatio = currentDist / initialTouchDistance;
-                camera.zoom = Math.max(0.4, Math.min(8.0, mapZoom * pinchRatio));
+                camera.zoom = Math.max(0.4, Math.min(6.0, mapZoom * pinchRatio));
                 camera.updateProjectionMatrix();
             }
 
-            // 2. 2-Finger Twist Rotation
+            // 2. 2-Finger Twist Rotation around the Pole
             const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
             const angleDelta = currentAngle - initialTouchAngle;
-            mapRotation = initialRotationOnTouch - angleDelta;
-            camera.rotation.z = mapRotation;
+            mapRotation = initialRotationOnTouch + angleDelta;
+            if (polarMesh) {
+                polarMesh.rotation.z = mapRotation;
+            }
             updateCompassUI();
         }
     }, { passive: false });
