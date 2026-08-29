@@ -15,11 +15,17 @@ let scene, camera, renderer, polarGroup, polarMesh, material, paletteTex;
 let oceanMesh = null, landMesh = null, lakesMesh = null;
 let polarChunkTextures = {};
 let isPolarActive = false;
-let coastlineLinesMesh = null;
-let countryLinesMesh = null;
-let stateLinesMesh = null;
-let countyLinesMesh = null;
-let graticuleMesh = null;
+
+// 2D High-DPI Overlay Canvas
+let overlayCanvas = null;
+let overlayCtx = null;
+
+// Cached Path2D Vector Objects
+let pathCoastlines = null;
+let pathCountries = null;
+let pathStates = null;
+let pathCounties = null;
+let pathGraticule = null;
 
 let rawLandFeatures = [];
 let rawLakesFeatures = [];
@@ -45,22 +51,24 @@ const THEME_COLORS = {
         ocean: 0x161920,
         land: 0x1a1a1a,
         lakes: 0x161920,
-        coastline: 0xffffff,
-        countryBorders: 0xffffff,
-        stateBorders: 0xcbd5e1,
-        countyBorders: 0x64748b,
-        graticule: 0x334155
+        coastline: '#ffffff',
+        countryBorders: '#ffffff',
+        stateBorders: '#cbd5e1',
+        countyBorders: 'rgba(100, 116, 139, 0.65)',
+        graticule: 'rgba(51, 65, 85, 0.45)',
+        halo: 'rgba(0, 0, 0, 0.6)'
     },
     light: {
         bg: '#FFFFFF',
         ocean: 0xebf2f7,
         land: 0xf4f6f8,
         lakes: 0xebf2f7,
-        coastline: 0x2b2d31,
-        countryBorders: 0x2b2d31,
-        stateBorders: 0x5c6370,
-        countyBorders: 0x94a3b8,
-        graticule: 0xcbd5e1
+        coastline: '#1e293b',
+        countryBorders: '#1e293b',
+        stateBorders: '#475569',
+        countyBorders: 'rgba(148, 163, 184, 0.65)',
+        graticule: 'rgba(203, 213, 225, 0.6)',
+        halo: 'rgba(255, 255, 255, 0.6)'
     }
 };
 
@@ -80,15 +88,15 @@ style.textContent = `
     }
     #polar-container canvas {
         display: block;
+        position: absolute;
+        top: 0;
+        left: 0;
         width: 100% !important;
         height: 100% !important;
-        touch-action: none !important;
-        user-select: none !important;
-        -webkit-user-select: none !important;
-        cursor: grab;
     }
-    #polar-container canvas:active {
-        cursor: grabbing;
+    #polar-overlay-canvas {
+        pointer-events: none;
+        z-index: 3;
     }
     .polar-top-controls {
         position: absolute;
@@ -237,7 +245,6 @@ const fsPolar = `
             discard;
         }
 
-        // Exact Inverse Polar Stereographic Conformal Formula
         float c = 2.0 * atan(r);
         float lat = u_poleSign * ((PI * 0.5) - c);
         
@@ -263,40 +270,6 @@ const fsPolar = `
         }
 
         gl_FragColor = vec4(color.rgb, color.a * u_opacity);
-    }
-`;
-
-// 🌟 SCREEN-SPACE THICK LINE SHADER (Guarantees exact pixel width at all zoom levels)
-const vsThickLine = `
-    uniform vec2 u_resolution;
-    uniform float u_lineWidth;
-    attribute vec3 a_pointOther;
-    attribute float a_side;
-
-    void main() {
-        vec4 currentClip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        vec4 otherClip   = projectionMatrix * modelViewMatrix * vec4(a_pointOther, 1.0);
-
-        vec2 currentScreen = (currentClip.xy / currentClip.w) * u_resolution * 0.5;
-        vec2 otherScreen   = (otherClip.xy / otherClip.w) * u_resolution * 0.5;
-
-        vec2 dir = normalize(otherScreen - currentScreen);
-        vec2 normal = vec2(-dir.y, dir.x);
-
-        vec2 offsetScreen = normal * (u_lineWidth * 0.5 * a_side);
-        vec2 offsetClip = (offsetScreen / (u_resolution * 0.5)) * currentClip.w;
-
-        gl_Position = vec4(currentClip.xy + offsetClip, currentClip.z, currentClip.w);
-    }
-`;
-
-const fsThickLine = `
-    precision highp float;
-    uniform vec3 u_color;
-    uniform float u_opacity;
-
-    void main() {
-        gl_FragColor = vec4(u_color, u_opacity);
     }
 `;
 
@@ -411,14 +384,10 @@ function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
 }
 
 /**
- * 🌟 Screen-Space Extruded Thick Line Mesh Generator
+ * 🌟 Build Native 2D Path2D Objects for 60fps Razor-Sharp Rendering
  */
-function buildThickLineMesh(features, isNorth, zHeight, lineWidthPx, colorHex, opacity) {
-    const positions = [];
-    const otherPoints = [];
-    const sides = [];
-    const indices = [];
-    let vertCount = 0;
+function buildPath2D(features, isNorth) {
+    const path = new Path2D();
 
     features.forEach(feature => {
         const geom = feature.geometry;
@@ -431,77 +400,52 @@ function buildThickLineMesh(features, isNorth, zHeight, lineWidthPx, colorHex, o
         else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
 
         lineStrings.forEach(coords => {
-            for (let i = 0; i < coords.length - 1; i++) {
-                const p1Base = coords[i];
-                const p2Base = coords[i + 1];
+            let isDrawing = false;
+            for (let i = 0; i < coords.length; i++) {
+                const pt = lngLatToPolarPlanar(coords[i][0], coords[i][1], isNorth);
+                if (!pt) {
+                    isDrawing = false;
+                    continue;
+                }
 
-                if (isNorth && (p1Base[1] < -10 || p2Base[1] < -10)) continue;
-                if (!isNorth && (p1Base[1] > 10 || p2Base[1] > 10)) continue;
-                if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
-
-                const pt1 = lngLatToPolarPlanar(p1Base[0], p1Base[1], isNorth);
-                const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
-
-                if (pt1 && pt2) {
-                    const x1 = pt1.x, y1 = pt1.y;
-                    const x2 = pt2.x, y2 = pt2.y;
-
-                    // Quad vertex 0
-                    positions.push(x1, y1, zHeight);
-                    otherPoints.push(x2, y2, zHeight);
-                    sides.push(1.0);
-
-                    // Quad vertex 1
-                    positions.push(x1, y1, zHeight);
-                    otherPoints.push(x2, y2, zHeight);
-                    sides.push(-1.0);
-
-                    // Quad vertex 2
-                    positions.push(x2, y2, zHeight);
-                    otherPoints.push(x1, y1, zHeight);
-                    sides.push(1.0);
-
-                    // Quad vertex 3
-                    positions.push(x2, y2, zHeight);
-                    otherPoints.push(x1, y1, zHeight);
-                    sides.push(-1.0);
-
-                    indices.push(
-                        vertCount, vertCount + 1, vertCount + 2,
-                        vertCount + 2, vertCount + 1, vertCount + 3
-                    );
-                    vertCount += 4;
+                if (!isDrawing) {
+                    path.moveTo(pt.x, pt.y);
+                    isDrawing = true;
+                } else {
+                    const prevCoords = coords[i - 1];
+                    if (prevCoords && Math.abs(coords[i][0] - prevCoords[0]) > 180) {
+                        path.moveTo(pt.x, pt.y);
+                    } else {
+                        path.lineTo(pt.x, pt.y);
+                    }
                 }
             }
         });
     });
 
-    const geometry = new THREE.BufferGeometry();
-    if (positions.length > 0) {
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute('a_pointOther', new THREE.Float32BufferAttribute(otherPoints, 3));
-        geometry.setAttribute('a_side', new THREE.Float32BufferAttribute(sides, 1));
-        geometry.setIndex(indices);
+    return path;
+}
+
+function buildGraticulePath(isNorth) {
+    const path = new Path2D();
+
+    for (let lat = 10; lat <= 80; lat += 10) {
+        const c = (90 - lat) * (Math.PI / 180.0);
+        const r = Math.tan(c * 0.5);
+        path.moveTo(r, 0);
+        path.arc(0, 0, r, 0, Math.PI * 2);
     }
 
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (let deg = 0; deg < 360; deg += 30) {
+        const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
+        const pEnd = lngLatToPolarPlanar(deg, isNorth ? 5 : -5, isNorth);
+        if (pStart && pEnd) {
+            path.moveTo(pStart.x, pStart.y);
+            path.lineTo(pEnd.x, pEnd.y);
+        }
+    }
 
-    const mat = new THREE.ShaderMaterial({
-        vertexShader: vsThickLine,
-        fragmentShader: fsThickLine,
-        uniforms: {
-            u_resolution: { value: new THREE.Vector2(w * dpr, h * dpr) },
-            u_lineWidth: { value: lineWidthPx * dpr },
-            u_color: { value: new THREE.Color(colorHex) },
-            u_opacity: { value: opacity }
-        },
-        transparent: true,
-        depthWrite: false
-    });
-
-    return new THREE.Mesh(geometry, mat);
+    return path;
 }
 
 function rebuildPolygonFills() {
@@ -509,7 +453,6 @@ function rebuildPolygonFills() {
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. High-Def 50m Land Mesh (z = 0.0003)
     if (landMesh) {
         polarGroup.remove(landMesh);
         if (landMesh.geometry) landMesh.geometry.dispose();
@@ -519,7 +462,6 @@ function rebuildPolygonFills() {
     landMesh = new THREE.Mesh(landGeom, landMat);
     polarGroup.add(landMesh);
 
-    // 2. High-Def 50m Lakes Mesh (z = 0.0006)
     if (lakesMesh) {
         polarGroup.remove(lakesMesh);
         if (lakesMesh.geometry) lakesMesh.geometry.dispose();
@@ -530,88 +472,80 @@ function rebuildPolygonFills() {
     polarGroup.add(lakesMesh);
 }
 
-function rebuildPolarGraticule() {
-    if (graticuleMesh) {
-        polarGroup.remove(graticuleMesh);
-        if (graticuleMesh.geometry) graticuleMesh.geometry.dispose();
-    }
-
-    const lines = [];
+function rebuildAllPaths() {
     const isNorth = (currentPole === 'north');
-    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
-
-    for (let lat = 10; lat <= 80; lat += 10) {
-        const c = (90 - lat) * (Math.PI / 180.0);
-        const r = Math.tan(c * 0.5);
-        const segments = 256;
-        for (let i = 0; i < segments; i++) {
-            const theta1 = (i / segments) * Math.PI * 2;
-            const theta2 = ((i + 1) / segments) * Math.PI * 2;
-            lines.push(
-                r * Math.cos(theta1), r * Math.sin(theta1), 0.0015,
-                r * Math.cos(theta2), r * Math.sin(theta2), 0.0015
-            );
-        }
-    }
-
-    for (let deg = 0; deg < 360; deg += 20) {
-        const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
-        const pEnd = lngLatToPolarPlanar(deg, isNorth ? 5 : -5, isNorth);
-        if (pStart && pEnd) {
-            lines.push(pStart.x, pStart.y, 0.0015, pEnd.x, pEnd.y, 0.0015);
-        }
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-
-    const material = new THREE.LineBasicMaterial({
-        color: THEME_COLORS[themeKey].graticule,
-        opacity: 0.35,
-        transparent: true
-    });
-
-    graticuleMesh = new THREE.LineSegments(geometry, material);
-    polarGroup.add(graticuleMesh);
+    pathCoastlines = buildPath2D(rawCoastlineFeatures, isNorth);
+    pathCountries = buildPath2D(rawCountryFeatures, isNorth);
+    pathStates = buildPath2D(rawStateFeatures, isNorth);
+    pathCounties = buildPath2D(rawCountyFeatures, isNorth);
+    pathGraticule = buildGraticulePath(isNorth);
+    render2DOverlay();
 }
 
-function rebuildVectorLines() {
-    const isNorth = (currentPole === 'north');
+/**
+ * 🌟 RENDER HIGH-DPI 2D OVERLAY CANVAS (Crisp, Bold Boundaries & Smooth Antialiasing)
+ */
+function render2DOverlay() {
+    if (!overlayCanvas || !overlayCtx || !camera) return;
+
+    const w = overlayCanvas.width;
+    const h = overlayCanvas.height;
+    const dpr = window.devicePixelRatio || 1;
+
+    overlayCtx.clearRect(0, 0, w, h);
+
+    const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
+    const scale = (h / visibleHeight);
+
+    const screenCenterX = (w / 2) - (camera.position.x * scale);
+    const screenCenterY = (h / 2) + (camera.position.y * scale);
+
+    overlayCtx.save();
+    overlayCtx.translate(screenCenterX, screenCenterY);
+    overlayCtx.rotate(-mapRotation);
+    overlayCtx.scale(scale, -scale); // Flip Y to match Cartesian polar plane
+
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. Coastlines: Solid 2.8px thick ribbon (z = 0.0025)
-    if (coastlineLinesMesh) {
-        polarGroup.remove(coastlineLinesMesh);
-        if (coastlineLinesMesh.geometry) coastlineLinesMesh.geometry.dispose();
+    // 1. Soft Graticules (Subtle & Clean)
+    if (pathGraticule) {
+        overlayCtx.lineWidth = (0.8 * dpr) / scale;
+        overlayCtx.strokeStyle = cfg.graticule;
+        overlayCtx.setLineDash([4 * dpr / scale, 6 * dpr / scale]);
+        overlayCtx.stroke(pathGraticule);
+        overlayCtx.setLineDash([]);
     }
-    coastlineLinesMesh = buildThickLineMesh(rawCoastlineFeatures, isNorth, 0.0025, 2.8, cfg.coastline, 1.0);
-    polarGroup.add(coastlineLinesMesh);
 
-    // 2. Country Borders: Solid 2.2px thick ribbon (z = 0.0022)
-    if (countryLinesMesh) {
-        polarGroup.remove(countryLinesMesh);
-        if (countryLinesMesh.geometry) countryLinesMesh.geometry.dispose();
+    // 2. County Lines (When zoomed in)
+    if (pathCounties && camera.zoom > 2.6) {
+        overlayCtx.lineWidth = (0.75 * dpr) / scale;
+        overlayCtx.strokeStyle = cfg.countyBorders;
+        overlayCtx.stroke(pathCounties);
     }
-    countryLinesMesh = buildThickLineMesh(rawCountryFeatures, isNorth, 0.0022, 2.2, cfg.countryBorders, 0.95);
-    polarGroup.add(countryLinesMesh);
 
-    // 3. State & Province Borders: Solid 1.6px thick ribbon (z = 0.0020)
-    if (stateLinesMesh) {
-        polarGroup.remove(stateLinesMesh);
-        if (stateLinesMesh.geometry) stateLinesMesh.geometry.dispose();
+    // 3. State & Province Lines
+    if (pathStates) {
+        overlayCtx.lineWidth = (1.2 * dpr) / scale;
+        overlayCtx.strokeStyle = cfg.stateBorders;
+        overlayCtx.stroke(pathStates);
     }
-    stateLinesMesh = buildThickLineMesh(rawStateFeatures, isNorth, 0.0020, 1.6, cfg.stateBorders, 0.85);
-    polarGroup.add(stateLinesMesh);
 
-    // 4. Detailed County Borders: 1.0px ribbon (z = 0.0018, pops in at zoom > 2.6)
-    if (countyLinesMesh) {
-        polarGroup.remove(countyLinesMesh);
-        if (countyLinesMesh.geometry) countyLinesMesh.geometry.dispose();
+    // 4. Country Borders
+    if (pathCountries) {
+        overlayCtx.lineWidth = (1.8 * dpr) / scale;
+        overlayCtx.strokeStyle = cfg.countryBorders;
+        overlayCtx.stroke(pathCountries);
     }
-    countyLinesMesh = buildThickLineMesh(rawCountyFeatures, isNorth, 0.0018, 1.0, cfg.countyBorders, 0.5);
-    countyLinesMesh.visible = (camera && camera.zoom > 2.6);
-    polarGroup.add(countyLinesMesh);
+
+    // 5. Bold Coastlines (High-Definition Primary Boundary)
+    if (pathCoastlines) {
+        overlayCtx.lineWidth = (2.2 * dpr) / scale;
+        overlayCtx.strokeStyle = cfg.coastline;
+        overlayCtx.stroke(pathCoastlines);
+    }
+
+    overlayCtx.restore();
 }
 
 async function loadAllBasemapGeoJson() {
@@ -651,8 +585,7 @@ async function loadAllBasemapGeoJson() {
         }
 
         rebuildPolygonFills();
-        rebuildPolarGraticule();
-        rebuildVectorLines();
+        rebuildAllPaths();
     } catch (err) {
         console.warn("Basemap GeoJSON load error:", err);
     }
@@ -752,6 +685,7 @@ export function setRotationDegrees(deg) {
         polarGroup.rotation.z = mapRotation;
     }
     updateCompassUI();
+    render2DOverlay();
 }
 
 export function resetRotation() {
@@ -769,9 +703,7 @@ export function setHemisphere(pole) {
     }
 
     rebuildPolygonFills();
-    rebuildPolarGraticule();
-    rebuildVectorLines();
-
+    rebuildAllPaths();
     fitSynopticSector();
 }
 
@@ -801,25 +733,7 @@ export function fitSynopticSector() {
     camera.rotation.z = 0;
     camera.updateProjectionMatrix();
     updateCompassUI();
-}
-
-function updateZoomVisibility() {
-    if (countyLinesMesh && camera) {
-        countyLinesMesh.visible = (camera.zoom > 2.6);
-    }
-}
-
-function updateShaderResolutions() {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const res = new THREE.Vector2(w * dpr, h * dpr);
-
-    [coastlineLinesMesh, countryLinesMesh, stateLinesMesh, countyLinesMesh].forEach(mesh => {
-        if (mesh && mesh.material && mesh.material.uniforms && mesh.material.uniforms.u_resolution) {
-            mesh.material.uniforms.u_resolution.value.copy(res);
-        }
-    });
+    render2DOverlay();
 }
 
 /**
@@ -865,6 +779,7 @@ function init2DMapControls(canvas) {
                 polarGroup.rotation.z = mapRotation;
             }
             updateCompassUI();
+            render2DOverlay();
         } else if (dragMode === 'pan') {
             const h = window.innerHeight;
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
@@ -873,6 +788,7 @@ function init2DMapControls(canvas) {
             mapTargetY += dy * unitsPerPixel * 0.9;
             mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
             camera.position.y = mapTargetY;
+            render2DOverlay();
         }
     });
 
@@ -894,7 +810,7 @@ function init2DMapControls(canvas) {
         const newZoom = Math.max(0.4, Math.min(6.0, camera.zoom * clampedFactor));
         camera.zoom = newZoom;
         camera.updateProjectionMatrix();
-        updateZoomVisibility();
+        render2DOverlay();
     }, { passive: false });
 
     canvas.addEventListener('touchstart', (e) => {
@@ -941,6 +857,7 @@ function init2DMapControls(canvas) {
                     polarGroup.rotation.z = mapRotation;
                 }
                 updateCompassUI();
+                render2DOverlay();
             } else if (dragMode === 'pan') {
                 const h = window.innerHeight;
                 const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
@@ -949,6 +866,7 @@ function init2DMapControls(canvas) {
                 mapTargetY += dy * unitsPerPixel * 0.9;
                 mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
                 camera.position.y = mapTargetY;
+                render2DOverlay();
             }
         } else if (e.touches.length === 2 && initialTouchDist > 0) {
             const t1 = e.touches[0];
@@ -957,7 +875,7 @@ function init2DMapControls(canvas) {
             const pinchRatio = currentDist / initialTouchDist;
             camera.zoom = Math.max(0.4, Math.min(6.0, mapZoom * pinchRatio));
             camera.updateProjectionMatrix();
-            updateZoomVisibility();
+            render2DOverlay();
         }
     }, { passive: false });
 
@@ -998,6 +916,15 @@ export function initPolarMap() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
+
+    // 🌟 High-DPI 2D Overlay Canvas Setup
+    overlayCanvas = document.createElement('canvas');
+    overlayCanvas.id = 'polar-overlay-canvas';
+    const dpr = window.devicePixelRatio || 1;
+    overlayCanvas.width = window.innerWidth * dpr;
+    overlayCanvas.height = window.innerHeight * dpr;
+    container.appendChild(overlayCanvas);
+    overlayCtx = overlayCanvas.getContext('2d');
 
     init2DMapControls(renderer.domElement);
 
@@ -1040,15 +967,17 @@ export function initPolarMap() {
     polarMesh.position.z = 0.001;
     polarGroup.add(polarMesh);
 
-    // Load High-Def 50m Vector Land, Lakes, and Borders
+    // Load High-Def 50m Vector Land, Lakes, and Path2D Vectors
     loadAllBasemapGeoJson();
 
     fitSynopticSector();
 
     window.addEventListener('resize', () => {
-        if (!renderer || !camera) return;
+        if (!renderer || !camera || !overlayCanvas) return;
+        const newDpr = window.devicePixelRatio || 1;
+        overlayCanvas.width = window.innerWidth * newDpr;
+        overlayCanvas.height = window.innerHeight * newDpr;
         renderer.setSize(window.innerWidth, window.innerHeight);
-        updateShaderResolutions();
         fitSynopticSector();
     });
 
@@ -1088,19 +1017,7 @@ export function updatePolarPalette(paramIdOrHexArray) {
     if (landMesh && landMesh.material) landMesh.material.color.setHex(cfg.land);
     if (lakesMesh && lakesMesh.material) lakesMesh.material.color.setHex(cfg.lakes);
 
-    if (coastlineLinesMesh && coastlineLinesMesh.material && coastlineLinesMesh.material.uniforms) {
-        coastlineLinesMesh.material.uniforms.u_color.value.setHex(cfg.coastline);
-    }
-    if (countryLinesMesh && countryLinesMesh.material && countryLinesMesh.material.uniforms) {
-        countryLinesMesh.material.uniforms.u_color.value.setHex(cfg.countryBorders);
-    }
-    if (stateLinesMesh && stateLinesMesh.material && stateLinesMesh.material.uniforms) {
-        stateLinesMesh.material.uniforms.u_color.value.setHex(cfg.stateBorders);
-    }
-    if (countyLinesMesh && countyLinesMesh.material && countyLinesMesh.material.uniforms) {
-        countyLinesMesh.material.uniforms.u_color.value.setHex(cfg.countyBorders);
-    }
-    if (graticuleMesh && graticuleMesh.material) graticuleMesh.material.color.setHex(cfg.graticule);
+    render2DOverlay();
 }
 
 export function updatePolarFrame(frameState) {
@@ -1153,7 +1070,6 @@ export function showPolarMap() {
     if (mapDiv) mapDiv.style.display = 'none';
 
     isPolarActive = true;
-    updateShaderResolutions();
     fitSynopticSector();
 }
 
