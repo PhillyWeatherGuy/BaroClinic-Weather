@@ -107,13 +107,13 @@ const fsPolar = `
     void main() {
         float r = length(v_pos);
         
-        // Discard outside the Equator boundary ring
+        // Discard anything outside the Equator boundary ring
         if (r > 1.0) {
             discard;
         }
 
-        // Exact Inverse Polar Stereographic Conformal Mapping (North & South Hemispheres)
-        float c = 2.0 * atan(r); // Angular distance from active pole
+        // Exact Inverse Polar Stereographic Conformal Mapping
+        float c = 2.0 * atan(r);
         float lat = u_poleSign * ((PI * 0.5) - c);
         
         float lon;
@@ -127,7 +127,7 @@ const fsPolar = `
         lon = mod(lon + PI, 2.0 * PI) - PI;
 
         float u = (lon + PI) / (2.0 * PI);
-        float v = (PI * 0.5 - lat) / PI; // 0.0 at 90N, 0.5 at Equator, 1.0 at 90S
+        float v = (PI * 0.5 - lat) / PI;
 
         vec2 sprite_uv = u_uvOffset + vec2(fract(u), clamp(v, 0.0, 1.0)) * u_uvScale;
 
@@ -138,7 +138,7 @@ const fsPolar = `
             discard;
         }
 
-        // Luminous outer boundary ring
+        // Crisp outer circular border ring
         if (r > 0.993) {
             gl_FragColor = vec4(0.22, 0.74, 0.97, 0.95);
             return;
@@ -169,9 +169,6 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     return texture;
 }
 
-/**
- * 🌟 Forward Polar Stereographic Coordinate Projection (Handles North & South Hemispheres)
- */
 function lngLatToPolarPlanar(lng, lat, isNorth = true) {
     if (isNorth && lat < 0.0) return null;
     if (!isNorth && lat > 0.0) return null;
@@ -196,9 +193,6 @@ function lngLatToPolarPlanar(lng, lat, isNorth = true) {
     return new THREE.Vector3(x, y, 0.002);
 }
 
-/**
- * 🌟 Polar Graticule (Concentric Latitude Rings & Radial Meridian Spokes)
- */
 function rebuildPolarGraticule(parentMesh) {
     if (graticuleMesh) {
         parentMesh.remove(graticuleMesh);
@@ -208,7 +202,6 @@ function rebuildPolarGraticule(parentMesh) {
     const lines = [];
     const isNorth = (currentPole === 'north');
 
-    // 1. Concentric Latitude Rings (80°, 60°, 40°, 20°)
     const latRings = [80, 60, 40, 20];
     latRings.forEach(latVal => {
         const c = (90 - latVal) * (Math.PI / 180.0);
@@ -224,7 +217,6 @@ function rebuildPolarGraticule(parentMesh) {
         }
     });
 
-    // 2. Radial Longitude Spokes (every 30°)
     for (let deg = 0; deg < 360; deg += 30) {
         const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
         const pEnd = lngLatToPolarPlanar(deg, 0, isNorth);
@@ -365,6 +357,43 @@ export function setHemisphere(pole) {
     console.log(`❄️ [Polar Map] Switched to ${isNorth ? 'North Pole (Arctic)' : 'South Pole (Antarctic)'}`);
 }
 
+/**
+ * 🌟 TROPICAL TIDBITS AUTO-FIT SCREEN FRAMING
+ * Calculates exact orthographic bounds to make the polar map fill the viewport
+ */
+export function fitCameraToScreen() {
+    if (!camera || !renderer) return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const aspect = w / h;
+
+    // Framed target size: fills mobile height/width edge-to-edge
+    const targetSize = (w < 768) ? 2.05 : 2.12;
+    
+    let halfW, halfH;
+    if (aspect >= 1.0) {
+        halfH = targetSize / 2;
+        halfW = halfH * aspect;
+    } else {
+        halfW = targetSize / 2;
+        halfH = halfW / aspect;
+    }
+
+    camera.left = -halfW;
+    camera.right = halfW;
+    camera.top = halfH;
+    camera.bottom = -halfH;
+    camera.updateProjectionMatrix();
+
+    // Center between top nav (50px) and bottom timeline (80px)
+    const yOffset = ((50 - 75) / h) * halfH;
+    camera.position.set(0, yOffset, 10);
+    if (controls) {
+        controls.target.set(0, yOffset, 0);
+        controls.update();
+    }
+}
+
 export function initPolarMap() {
     let container = document.getElementById('polar-container');
     if (!container) {
@@ -379,8 +408,10 @@ export function initPolarMap() {
     if (scene) return;
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 0, 3.2);
+    
+    // 🌟 2D Orthographic Camera for Tropical Tidbits Style Screen-Fitting
+    camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+    camera.position.set(0, 0, 10);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -389,20 +420,19 @@ export function initPolarMap() {
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+    controls.dampingFactor = 0.06;
     
-    // 🌟 Free 2D Pan, Zoom & Rotation Setup
+    // Free 2D Pan, Zoom & Screen-Space Rotation
     controls.enableRotate = true;
     controls.rotateSpeed = 0.7;
     controls.enablePan = true;
     controls.panSpeed = 1.0;
     controls.screenSpacePanning = true;
     controls.enableZoom = true;
-    controls.zoomSpeed = 0.8;
-    controls.minDistance = 0.6;
-    controls.maxDistance = 5.5;
+    controls.zoomSpeed = 0.9;
+    controls.minZoom = 0.7;
+    controls.maxZoom = 8.0;
 
-    // Mobile gesture controls: 1-finger pan, 2-finger zoom & rotate!
     if (THREE.TOUCH) {
         controls.touches = {
             ONE: THREE.TOUCH.PAN,
@@ -410,7 +440,6 @@ export function initPolarMap() {
         };
     }
 
-    // Theme-aware initial palette
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
@@ -437,11 +466,12 @@ export function initPolarMap() {
     rebuildPolarGraticule(polarMesh);
     loadPolarVectorData(polarMesh);
 
+    fitCameraToScreen();
+
     window.addEventListener('resize', () => {
         if (!renderer || !camera) return;
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        fitCameraToScreen();
     });
 
     function animate() {
@@ -454,9 +484,6 @@ export function initPolarMap() {
     animate();
 }
 
-/**
- * 🌟 Dynamic Palette Swap for Polar Map
- */
 export function updatePolarPalette(paramIdOrHexArray) {
     if (!material) return;
     let hexArray;
@@ -529,6 +556,7 @@ export function showPolarMap() {
     if (mapDiv) mapDiv.style.display = 'none';
 
     isPolarActive = true;
+    fitCameraToScreen();
 }
 
 export function hidePolarMap() {
