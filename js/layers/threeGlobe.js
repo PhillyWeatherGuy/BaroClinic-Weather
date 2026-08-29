@@ -14,14 +14,15 @@ let linesMesh = null, countyMesh = null;
 let globeChunkTextures = {};
 let isGlobeActive = false;
 
+// 🌟 Custom Color Matrix
 const THEME_COLORS = {
     dark: {
-        ocean: 0x161920,
+        ocean: 0x21242C, // #21242C
         borders: 0xffffff,
         counties: 0x64748b
     },
     light: {
-        ocean: 0xebf2f7,
+        ocean: 0xE7F1F4, // #E7F1F4
         borders: 0x2b2d31,
         counties: 0x94a3b8
     }
@@ -71,19 +72,16 @@ const fsThreeGlobe = `
     varying vec3 v_normal;
 
     void main() {
-        // 🌟 100% Pure 1:1 Equirectangular UV Mapping
         vec2 wrapped_uv = vec2(v_uv.x, 1.0 - v_uv.y);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // 🌟 Discard transparent pixels (dry land for precip)
         if (color.a == 0.0) {
             discard;
         }
 
-        // Subtle 3D atmospheric limb depth glow
         float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
         vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
 
@@ -273,13 +271,13 @@ export function initThreeGlobe() {
     globeGroup.rotation.y = -Math.PI / 2;
     scene.add(globeGroup);
 
-    // 🌟 Layer 0: Styled Ocean Base Underlay Sphere (Radius 1.998)
+    // Layer 0: Styled Ocean Base Underlay Sphere
     const baseGeometry = new THREE.SphereGeometry(1.998, 64, 64);
     const baseMaterial = new THREE.MeshBasicMaterial({ color: cfg.ocean });
     baseGlobeMesh = new THREE.Mesh(baseGeometry, baseMaterial);
     globeGroup.add(baseGlobeMesh);
 
-    // 🌟 Layer 1: Weather Heatmap Sphere (Radius 2.000, Opacity 0.85)
+    // Layer 1: Weather Heatmap Sphere
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
@@ -292,7 +290,7 @@ export function initThreeGlobe() {
             u_paletteTexture: { value: paletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
-            u_opacity: { value: 0.85 } // Matches 2D MapLibre exact 0.85 opacity
+            u_opacity: { value: 0.85 }
         },
         transparent: true,
         depthWrite: false
@@ -302,7 +300,7 @@ export function initThreeGlobe() {
     globeMesh = new THREE.Mesh(geometry, material);
     globeGroup.add(globeMesh);
 
-    // 🌟 Layer 2: Vector Coastlines & Admin Borders (Radius 2.003)
+    // Layer 2: Vector Coastlines & Admin Borders
     load3DVectorBorders(globeGroup);
 
     window.addEventListener('resize', () => {
@@ -332,9 +330,6 @@ export function initThreeGlobe() {
     animate();
 }
 
-/**
- * 🌟 DYNAMIC PALETTE & THEME SWAP FOR 3D GLOBE
- */
 export function updateThreeGlobePalette(paramIdOrHexArray) {
     if (!material) return;
     let hexArray;
@@ -352,7 +347,6 @@ export function updateThreeGlobePalette(paramIdOrHexArray) {
     material.uniforms.u_paletteTexture.value = paletteTex;
     material.needsUpdate = true;
 
-    // Update Basemap Theme Colors
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
@@ -421,6 +415,8 @@ export function showThreeGlobe() {
 
 export function hideThreeGlobe() {
     const container = document.getElementById('globe-container');
+    const mapDiv = document.getElementById('map');
     if (container) container.style.display = 'none';
+    if (mapDiv) mapDiv.style.display = 'block';
     isGlobeActive = false;
 }
