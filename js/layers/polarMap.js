@@ -45,12 +45,13 @@ let mapZoom = 1.0;
 const NORTH_CENTRAL_LON = -95.0 * (Math.PI / 180.0);
 const SOUTH_CENTRAL_LON = 0.0 * (Math.PI / 180.0);
 
+// 🌟 Custom Color Matrix
 const THEME_COLORS = {
     dark: {
         bg: '#121212',
-        ocean: 0x161920,
-        land: 0x1a1a1a,
-        lakes: 0x161920,
+        ocean: 0x21242C, // #21242C
+        land: 0x443E47,  // #443E47
+        lakes: 0x21242C,
         coastline: '#ffffff',
         countryBorders: '#ffffff',
         stateBorders: '#cbd5e1',
@@ -59,9 +60,9 @@ const THEME_COLORS = {
     },
     light: {
         bg: '#FFFFFF',
-        ocean: 0xebf2f7,
-        land: 0xf4f6f8,
-        lakes: 0xebf2f7,
+        ocean: 0xE7F1F4, // #E7F1F4
+        land: 0xE2DBCF,  // #E2DBCF
+        lakes: 0xE7F1F4,
         coastline: '#1e293b',
         countryBorders: '#1e293b',
         stateBorders: '#475569',
@@ -231,7 +232,7 @@ const fsPolar = `
     uniform vec2 u_uvScale;
     uniform float u_opacity;
     uniform float u_centralLon;
-    uniform float u_poleSign; // +1.0 for North, -1.0 for South
+    uniform float u_poleSign;
     varying vec2 v_pos;
 
     const float PI = 3.141592653589793;
@@ -243,27 +244,23 @@ const fsPolar = `
             discard;
         }
 
-        // 🌟 Exact Conformal Inverse Polar Stereographic Formulas (North & South Hemispheres)
-        float c = 2.0 * atan(r); // Angular distance from active pole
+        float c = 2.0 * atan(r);
         
         float lat;
         float lon;
 
         if (u_poleSign > 0.0) {
-            // North Pole: c = 90° - lat, central meridian points DOWN (-y)
             lat = (PI * 0.5) - c;
             lon = u_centralLon + atan(v_pos.x, -v_pos.y);
         } else {
-            // South Pole: c = 90° + lat, central meridian points UP (+y)
             lat = -(PI * 0.5 - c);
             lon = u_centralLon + atan(v_pos.x, v_pos.y);
         }
 
-        // Normalize longitude into [-PI, PI]
         lon = mod(lon + PI, 2.0 * PI) - PI;
 
         float u = (lon + PI) / (2.0 * PI);
-        float v = (PI * 0.5 - lat) / PI; // 0.0 at 90N, 0.5 at 0N, 1.0 at 90S
+        float v = (PI * 0.5 - lat) / PI;
 
         vec2 sprite_uv = u_uvOffset + vec2(fract(u), clamp(v, 0.0, 1.0)) * u_uvScale;
 
@@ -299,11 +296,7 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     return texture;
 }
 
-/**
- * 🌟 Exact Forward Polar Stereographic Coordinate Projection (Matches Shader 1:1)
- */
 function lngLatToPolarPlanar(lng, lat, isNorth = true) {
-    // Cutoff where projection diverges far into opposite hemisphere
     if (isNorth && lat < -35.0) return null;
     if (!isNorth && lat > 35.0) return null;
 
@@ -531,7 +524,7 @@ function render2DOverlay() {
         overlayCtx.setLineDash([]);
     }
 
-    // 2. County Lines (When zoomed in)
+    // 2. County Lines (When zoomed in deep)
     if (pathCounties && camera.zoom > 2.6) {
         overlayCtx.lineWidth = (0.75 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.countyBorders;
@@ -967,7 +960,7 @@ export function initPolarMap() {
             u_paletteTexture: { value: paletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
-            u_opacity: { value: 0.86 },
+            u_opacity: { value: 0.85 }, // Matches 2D MapLibre exact 0.85 opacity
             u_centralLon: { value: NORTH_CENTRAL_LON },
             u_poleSign: { value: 1.0 }
         },
