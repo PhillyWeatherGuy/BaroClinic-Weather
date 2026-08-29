@@ -55,8 +55,7 @@ const THEME_COLORS = {
         countryBorders: '#ffffff',
         stateBorders: '#cbd5e1',
         countyBorders: 'rgba(100, 116, 139, 0.65)',
-        graticule: 'rgba(51, 65, 85, 0.45)',
-        halo: 'rgba(0, 0, 0, 0.6)'
+        graticule: 'rgba(51, 65, 85, 0.45)'
     },
     light: {
         bg: '#FFFFFF',
@@ -67,8 +66,7 @@ const THEME_COLORS = {
         countryBorders: '#1e293b',
         stateBorders: '#475569',
         countyBorders: 'rgba(148, 163, 184, 0.65)',
-        graticule: 'rgba(203, 213, 225, 0.6)',
-        halo: 'rgba(255, 255, 255, 0.6)'
+        graticule: 'rgba(203, 213, 225, 0.6)'
     }
 };
 
@@ -245,6 +243,7 @@ const fsPolar = `
             discard;
         }
 
+        // Exact Inverse Polar Stereographic Conformal Formula
         float c = 2.0 * atan(r);
         float lat = u_poleSign * ((PI * 0.5) - c);
         
@@ -294,23 +293,31 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     return texture;
 }
 
+/**
+ * 🌟 TRUE Forward Polar Stereographic Coordinate Projection (Matches Shader 1:1 Across Equator)
+ */
 function lngLatToPolarPlanar(lng, lat, isNorth = true) {
-    if (isNorth && lat < -15.0) return null;
-    if (!isNorth && lat > 15.0) return null;
+    // Cutoff where projection diverges far into opposite hemisphere
+    if (isNorth && lat < -35.0) return null;
+    if (!isNorth && lat > 35.0) return null;
 
-    const phi = Math.abs(lat) * (Math.PI / 180.0);
     const lambda = lng * (Math.PI / 180.0);
+    const phi = lat * (Math.PI / 180.0);
 
-    const c = (Math.PI * 0.5) - phi;
-    const r = Math.tan(c * 0.5);
+    let c, r, deltaLambda, x, y;
 
-    let x, y;
     if (isNorth) {
-        const deltaLambda = lambda - NORTH_CENTRAL_LON;
+        // True signed angular distance from North Pole: c = 90° - lat
+        c = (Math.PI * 0.5) - phi;
+        r = Math.tan(c * 0.5);
+        deltaLambda = lambda - NORTH_CENTRAL_LON;
         x = r * Math.sin(deltaLambda);
         y = -r * Math.cos(deltaLambda);
     } else {
-        const deltaLambda = lambda - SOUTH_CENTRAL_LON;
+        // True signed angular distance from South Pole: c = 90° + lat
+        c = (Math.PI * 0.5) + phi;
+        r = Math.tan(c * 0.5);
+        deltaLambda = lambda - SOUTH_CENTRAL_LON;
         x = -r * Math.sin(deltaLambda);
         y = -r * Math.cos(deltaLambda);
     }
@@ -383,9 +390,6 @@ function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
     return geometry;
 }
 
-/**
- * 🌟 Build Native 2D Path2D Objects for 60fps Razor-Sharp Rendering
- */
 function buildPath2D(features, isNorth) {
     const path = new Path2D();
 
@@ -429,16 +433,24 @@ function buildPath2D(features, isNorth) {
 function buildGraticulePath(isNorth) {
     const path = new Path2D();
 
-    for (let lat = 10; lat <= 80; lat += 10) {
-        const c = (90 - lat) * (Math.PI / 180.0);
+    // Concentric latitude circles extending into the tropics (-20° to 80°)
+    const minLat = isNorth ? -20 : -80;
+    const maxLat = isNorth ? 80 : 20;
+
+    for (let lat = minLat; lat <= maxLat; lat += 10) {
+        const phi = lat * (Math.PI / 180.0);
+        const c = isNorth ? (Math.PI * 0.5 - phi) : (Math.PI * 0.5 + phi);
         const r = Math.tan(c * 0.5);
-        path.moveTo(r, 0);
-        path.arc(0, 0, r, 0, Math.PI * 2);
+        if (r > 0 && r < 1.8) {
+            path.moveTo(r, 0);
+            path.arc(0, 0, r, 0, Math.PI * 2);
+        }
     }
 
+    // Longitude rays
     for (let deg = 0; deg < 360; deg += 30) {
         const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
-        const pEnd = lngLatToPolarPlanar(deg, isNorth ? 5 : -5, isNorth);
+        const pEnd = lngLatToPolarPlanar(deg, isNorth ? -20 : 20, isNorth);
         if (pStart && pEnd) {
             path.moveTo(pStart.x, pStart.y);
             path.lineTo(pEnd.x, pEnd.y);
@@ -483,7 +495,7 @@ function rebuildAllPaths() {
 }
 
 /**
- * 🌟 RENDER HIGH-DPI 2D OVERLAY CANVAS (Crisp, Bold Boundaries & Smooth Antialiasing)
+ * 🌟 RENDER HIGH-DPI 2D OVERLAY CANVAS
  */
 function render2DOverlay() {
     if (!overlayCanvas || !overlayCtx || !camera) return;
@@ -503,12 +515,12 @@ function render2DOverlay() {
     overlayCtx.save();
     overlayCtx.translate(screenCenterX, screenCenterY);
     overlayCtx.rotate(-mapRotation);
-    overlayCtx.scale(scale, -scale); // Flip Y to match Cartesian polar plane
+    overlayCtx.scale(scale, -scale);
 
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. Soft Graticules (Subtle & Clean)
+    // 1. Soft Graticules
     if (pathGraticule) {
         overlayCtx.lineWidth = (0.8 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.graticule;
@@ -517,7 +529,7 @@ function render2DOverlay() {
         overlayCtx.setLineDash([]);
     }
 
-    // 2. County Lines (When zoomed in)
+    // 2. County Lines (When zoomed in deep)
     if (pathCounties && camera.zoom > 2.6) {
         overlayCtx.lineWidth = (0.75 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.countyBorders;
@@ -538,7 +550,7 @@ function render2DOverlay() {
         overlayCtx.stroke(pathCountries);
     }
 
-    // 5. Bold Coastlines (High-Definition Primary Boundary)
+    // 5. Bold Coastlines
     if (pathCoastlines) {
         overlayCtx.lineWidth = (2.2 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.coastline;
