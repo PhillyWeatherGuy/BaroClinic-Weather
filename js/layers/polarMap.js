@@ -8,15 +8,23 @@ const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-v
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
 
-let scene, camera, renderer, controls, polarMesh, material, paletteTex;
+let scene, camera, renderer, polarMesh, material, paletteTex;
 let polarChunkTextures = {};
 let isPolarActive = false;
 let vectorLinesMesh = null;
 let graticuleMesh = null;
 let rawGeoJsonFeatures = [];
 
-// 🌟 Central meridian (-95°W aligns North America straight up like Tropical Tidbits)
-const CENTRAL_LON_RAD = -95.0 * (Math.PI / 180.0);
+// Map State: Position, Zoom, and 2D Planar Rotation
+let currentPole = 'north'; // 'north' | 'south'
+let mapRotation = 0.0;     // Radians
+let mapTargetY = -0.45;
+let mapTargetX = 0.0;
+let mapZoom = 1.0;
+
+// Central meridians
+const NORTH_CENTRAL_LON = -95.0 * (Math.PI / 180.0);
+const SOUTH_CENTRAL_LON = 0.0 * (Math.PI / 180.0);
 
 const style = document.createElement('style');
 style.textContent = `
@@ -40,6 +48,68 @@ style.textContent = `
         user-select: none !important;
         -webkit-user-select: none !important;
     }
+    .polar-top-controls {
+        position: absolute;
+        top: 62px;
+        right: 16px;
+        z-index: 28;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .polar-compass-btn {
+        background: rgba(11, 15, 25, 0.88);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #38bdf8;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        transition: all 0.2s ease;
+    }
+    .polar-compass-btn svg {
+        transition: transform 0.1s linear;
+    }
+    .polar-pole-switcher {
+        display: flex;
+        align-items: center;
+        background: rgba(11, 15, 25, 0.88);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 20px;
+        padding: 3px;
+        gap: 3px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+    .pole-btn {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-family: 'Rajdhani', sans-serif;
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        padding: 5px 12px;
+        border-radius: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .pole-btn:hover {
+        color: #ffffff;
+    }
+    .pole-btn.active {
+        background: rgba(56, 189, 248, 0.25);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.6);
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+    }
 `;
 document.head.appendChild(style);
 
@@ -59,29 +129,33 @@ const fsPolar = `
     uniform vec2 u_uvScale;
     uniform float u_opacity;
     uniform float u_centralLon;
+    uniform float u_poleSign;
     varying vec2 v_pos;
 
     const float PI = 3.141592653589793;
 
     void main() {
-        // Position relative to North Pole at (0.0, 0.0)
         float r = length(v_pos);
 
-        // Discard far deep into Southern Hemisphere where projection diverges
         if (r > 1.8) {
             discard;
         }
 
-        // 🌟 Exact Conformal Inverse Polar Stereographic Formula
-        float c = 2.0 * atan(r); // Angular distance from North Pole
-        float lat = (PI * 0.5) - c;
-        float lon = u_centralLon + atan(v_pos.x, -v_pos.y);
+        // Exact Inverse Polar Stereographic Conformal Formula
+        float c = 2.0 * atan(r);
+        float lat = u_poleSign * ((PI * 0.5) - c);
+        
+        float lon;
+        if (u_poleSign > 0.0) {
+            lon = u_centralLon + atan(v_pos.x, -v_pos.y);
+        } else {
+            lon = u_centralLon - atan(v_pos.x, v_pos.y);
+        }
 
-        // Normalize longitude into [-PI, PI]
         lon = mod(lon + PI, 2.0 * PI) - PI;
 
         float u = (lon + PI) / (2.0 * PI);
-        float v = c / PI; // 0.0 at 90N (Pole), 0.5 at 0N (Equator)
+        float v = (PI * 0.5 - lat) / PI;
 
         vec2 sprite_uv = u_uvOffset + vec2(fract(u), clamp(v, 0.0, 1.0)) * u_uvScale;
 
@@ -117,37 +191,39 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     return texture;
 }
 
-/**
- * 🌟 Forward Polar Stereographic Coordinate Projection
- */
-function lngLatToPolarPlanar(lng, lat) {
-    if (lat < -15.0) return null; // Cover down past the equator
+function lngLatToPolarPlanar(lng, lat, isNorth = true) {
+    if (isNorth && lat < -15.0) return null;
+    if (!isNorth && lat > 15.0) return null;
 
-    const phi = lat * (Math.PI / 180.0);
+    const phi = Math.abs(lat) * (Math.PI / 180.0);
     const lambda = lng * (Math.PI / 180.0);
 
     const c = (Math.PI * 0.5) - phi;
-    const r = Math.tan(c * 0.5); // Conformal stereographic radius
+    const r = Math.tan(c * 0.5);
 
-    const deltaLambda = lambda - CENTRAL_LON_RAD;
-    const x = r * Math.sin(deltaLambda);
-    const y = -r * Math.cos(deltaLambda);
+    let x, y;
+    if (isNorth) {
+        const deltaLambda = lambda - NORTH_CENTRAL_LON;
+        x = r * Math.sin(deltaLambda);
+        y = -r * Math.cos(deltaLambda);
+    } else {
+        const deltaLambda = lambda - SOUTH_CENTRAL_LON;
+        x = -r * Math.sin(deltaLambda);
+        y = -r * Math.cos(deltaLambda);
+    }
 
     return new THREE.Vector3(x, y, 0.002);
 }
 
-/**
- * 🌟 Synoptic Graticule (Curved Latitude Arcs & Converging Meridians)
- */
-function buildSynopticGraticule(parentMesh) {
+function rebuildPolarGraticule(parentMesh) {
     if (graticuleMesh) {
         parentMesh.remove(graticuleMesh);
         if (graticuleMesh.geometry) graticuleMesh.geometry.dispose();
     }
 
     const lines = [];
+    const isNorth = (currentPole === 'north');
 
-    // 1. Concentric Latitude Arcs (10°N to 80°N every 10°)
     for (let lat = 10; lat <= 80; lat += 10) {
         const c = (90 - lat) * (Math.PI / 180.0);
         const r = Math.tan(c * 0.5);
@@ -162,10 +238,9 @@ function buildSynopticGraticule(parentMesh) {
         }
     }
 
-    // 2. Converging Longitude Lines (every 20°)
     for (let deg = 0; deg < 360; deg += 20) {
-        const pStart = lngLatToPolarPlanar(deg, 85);
-        const pEnd = lngLatToPolarPlanar(deg, 5);
+        const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
+        const pEnd = lngLatToPolarPlanar(deg, isNorth ? 5 : -5, isNorth);
         if (pStart && pEnd) {
             lines.push(pStart.x, pStart.y, 0.003, pEnd.x, pEnd.y, 0.003);
         }
@@ -191,6 +266,7 @@ function rebuildVectorBorders(parentMesh) {
     }
 
     const linePoints = [];
+    const isNorth = (currentPole === 'north');
 
     rawGeoJsonFeatures.forEach(feature => {
         const geom = feature.geometry;
@@ -207,11 +283,12 @@ function rebuildVectorBorders(parentMesh) {
                 const p1Base = coords[i];
                 const p2Base = coords[i + 1];
 
-                if (p1Base[1] < -10 || p2Base[1] < -10) continue;
+                if (isNorth && (p1Base[1] < -10 || p2Base[1] < -10)) continue;
+                if (!isNorth && (p1Base[1] > 10 || p2Base[1] > 10)) continue;
                 if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
 
-                const pt1 = lngLatToPolarPlanar(p1Base[0], p1Base[1]);
-                const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1]);
+                const pt1 = lngLatToPolarPlanar(p1Base[0], p1Base[1], isNorth);
+                const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
 
                 if (pt1 && pt2) {
                     linePoints.push(pt1.x, pt1.y, pt1.z);
@@ -257,32 +334,256 @@ async function loadPolarVectorData(parentMesh) {
     rebuildVectorBorders(parentMesh);
 }
 
-/**
- * 🌟 TROPICAL TIDBITS SECTOR FRAMING (CONUS & North American Synoptic View)
- */
+function initPolarUI(container) {
+    let topControls = container.querySelector('.polar-top-controls');
+    if (topControls) return;
+
+    topControls = document.createElement('div');
+    topControls.className = 'polar-top-controls';
+    topControls.innerHTML = `
+        <button id="btn-polar-compass" class="polar-compass-btn" title="Reset North Up">
+            <svg id="polar-compass-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="12 2 15 11 12 9 9 11 12 2" fill="#ef4444"/>
+                <polygon points="12 22 15 13 12 15 9 13 12 22" fill="#94a3b8"/>
+            </svg>
+        </button>
+        <div class="polar-pole-switcher">
+            <button class="pole-btn active" data-pole="north">❄️ North</button>
+            <button class="pole-btn" data-pole="south">🧊 South</button>
+        </div>
+    `;
+
+    const compassBtn = topControls.querySelector('#btn-polar-compass');
+    if (compassBtn) {
+        compassBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            resetRotation();
+        });
+    }
+
+    const poleButtons = topControls.querySelectorAll('.pole-btn');
+    poleButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            poleButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const targetPole = btn.getAttribute('data-pole');
+            setHemisphere(targetPole);
+        });
+    });
+
+    container.appendChild(topControls);
+}
+
+function updateCompassUI() {
+    const icon = document.getElementById('polar-compass-icon');
+    if (icon) {
+        icon.style.transform = `rotate(${-mapRotation}rad)`;
+    }
+}
+
+export function resetRotation() {
+    mapRotation = 0.0;
+    if (camera) camera.rotation.z = 0;
+    updateCompassUI();
+}
+
+export function setHemisphere(pole) {
+    currentPole = pole;
+    const isNorth = (pole === 'north');
+
+    if (material) {
+        material.uniforms.u_poleSign.value = isNorth ? 1.0 : -1.0;
+        material.uniforms.u_centralLon.value = isNorth ? NORTH_CENTRAL_LON : SOUTH_CENTRAL_LON;
+        material.needsUpdate = true;
+    }
+
+    if (polarMesh) {
+        rebuildPolarGraticule(polarMesh);
+        rebuildVectorBorders(polarMesh);
+    }
+
+    fitSynopticSector();
+}
+
 export function fitSynopticSector() {
     if (!camera || !renderer) return;
     const w = window.innerWidth;
     const h = window.innerHeight;
     const aspect = w / h;
 
-    // Synoptic Sector Bounds: North America centered with Pole toward top
-    const sectorHeight = 1.35;
+    const sectorHeight = (w < 768) ? 1.45 : 1.35;
     const sectorWidth = sectorHeight * aspect;
 
     camera.left = -sectorWidth / 2;
     camera.right = sectorWidth / 2;
     camera.top = sectorHeight / 2;
     camera.bottom = -sectorHeight / 2;
-    camera.updateProjectionMatrix();
+    camera.zoom = 1.0;
+    mapZoom = 1.0;
 
-    // Center on North America (y ~ -0.45 places CONUS in the middle)
-    const targetY = -0.45;
-    camera.position.set(0, targetY, 10);
-    if (controls) {
-        controls.target.set(0, targetY, 0);
-        controls.update();
-    }
+    mapTargetX = 0.0;
+    mapTargetY = (currentPole === 'north') ? -0.45 : -0.20;
+    mapRotation = 0.0;
+
+    camera.position.set(mapTargetX, mapTargetY, 10);
+    camera.rotation.z = 0;
+    camera.updateProjectionMatrix();
+    updateCompassUI();
+}
+
+/**
+ * 🌟 2D PLANAR GESTURE CONTROLLER (Free North/South Pan + Zoom + Central Axis Rotation)
+ */
+function init2DMapControls(canvas) {
+    let isDragging = false;
+    let isRotating = false;
+    let startX = 0, startY = 0;
+    let activeTouches = new Map();
+    let initialTouchDistance = 0;
+    let initialTouchAngle = 0;
+    let initialRotationOnTouch = 0;
+
+    // Desktop Mouse Handlers
+    canvas.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        startX = e.clientX;
+        startY = e.clientY;
+
+        // Right-click or Shift+Left-click triggers rotation; Normal Left-click triggers pan
+        if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
+            isRotating = true;
+        } else if (e.button === 0) {
+            isDragging = true;
+        }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging && !isRotating) return;
+
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        startX = e.clientX;
+        startY = e.clientY;
+
+        const h = window.innerHeight;
+        const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
+        const unitsPerPixel = visibleHeight / h;
+
+        if (isRotating) {
+            // Smooth Rotation around the central axis
+            mapRotation += dx * 0.007;
+            camera.rotation.z = mapRotation;
+            updateCompassUI();
+        } else if (isDragging) {
+            // Rotation-aware panning (moving mouse up always pans north/screen-up)
+            const worldDx = (-dx * unitsPerPixel) * Math.cos(mapRotation) - (dy * unitsPerPixel) * Math.sin(mapRotation);
+            const worldDy = (-dx * unitsPerPixel) * Math.sin(mapRotation) + (dy * unitsPerPixel) * Math.cos(mapRotation);
+
+            mapTargetX += worldDx;
+            mapTargetY += worldDy;
+
+            camera.position.x = mapTargetX;
+            camera.position.y = mapTargetY;
+        }
+    });
+
+    window.addEventListener('mouseup', () => {
+        isDragging = false;
+        isRotating = false;
+    });
+
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Mouse Wheel Zoom
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+        const newZoom = Math.max(0.4, Math.min(8.0, camera.zoom * zoomFactor));
+        camera.zoom = newZoom;
+        camera.updateProjectionMatrix();
+    }, { passive: false });
+
+    // Touch / Mobile Multi-Gesture Handlers (1-finger pan, 2-finger pinch & rotate)
+    canvas.addEventListener('touchstart', (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+        }
+
+        if (activeTouches.size === 1) {
+            const t = e.touches[0];
+            startX = t.clientX;
+            startY = t.clientY;
+            isDragging = true;
+        } else if (activeTouches.size === 2) {
+            isDragging = false;
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+            initialTouchDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            initialTouchAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
+            initialRotationOnTouch = mapRotation;
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+
+        if (e.touches.length === 1 && isDragging) {
+            const t = e.touches[0];
+            const dx = t.clientX - startX;
+            const dy = t.clientY - startY;
+            startX = t.clientX;
+            startY = t.clientY;
+
+            const h = window.innerHeight;
+            const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
+            const unitsPerPixel = visibleHeight / h;
+
+            const worldDx = (-dx * unitsPerPixel) * Math.cos(mapRotation) - (dy * unitsPerPixel) * Math.sin(mapRotation);
+            const worldDy = (-dx * unitsPerPixel) * Math.sin(mapRotation) + (dy * unitsPerPixel) * Math.cos(mapRotation);
+
+            mapTargetX += worldDx;
+            mapTargetY += worldDy;
+
+            camera.position.x = mapTargetX;
+            camera.position.y = mapTargetY;
+        } else if (e.touches.length === 2) {
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+
+            // 1. Pinch Zoom
+            const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            if (initialTouchDistance > 0) {
+                const pinchRatio = currentDist / initialTouchDistance;
+                camera.zoom = Math.max(0.4, Math.min(8.0, mapZoom * pinchRatio));
+                camera.updateProjectionMatrix();
+            }
+
+            // 2. 2-Finger Twist Rotation
+            const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
+            const angleDelta = currentAngle - initialTouchAngle;
+            mapRotation = initialRotationOnTouch - angleDelta;
+            camera.rotation.z = mapRotation;
+            updateCompassUI();
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            activeTouches.delete(e.changedTouches[i].identifier);
+        }
+        if (e.touches.length === 1) {
+            const t = e.touches[0];
+            startX = t.clientX;
+            startY = t.clientY;
+            isDragging = true;
+        } else {
+            isDragging = false;
+            mapZoom = camera.zoom;
+        }
+    });
 }
 
 export function initPolarMap() {
@@ -294,39 +595,19 @@ export function initPolarMap() {
         document.body.appendChild(container);
     }
 
+    initPolarUI(container);
+
     if (scene) return;
 
     scene = new THREE.Scene();
-    
-    // 🌟 Flat 2D Orthographic Camera
     camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
-    camera.position.set(0, -0.45, 10);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.06;
-    
-    // Free 2D Pan & Zoom (No 3D tilt, exactly like Tropical Tidbits)
-    controls.enableRotate = false;
-    controls.enablePan = true;
-    controls.panSpeed = 1.0;
-    controls.screenSpacePanning = true;
-    controls.enableZoom = true;
-    controls.zoomSpeed = 0.9;
-    controls.minZoom = 0.5;
-    controls.maxZoom = 6.0;
-
-    if (THREE.TOUCH) {
-        controls.touches = {
-            ONE: THREE.TOUCH.PAN,
-            TWO: THREE.TOUCH.DOLLY_PAN
-        };
-    }
+    init2DMapControls(renderer.domElement);
 
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
@@ -341,17 +622,17 @@ export function initPolarMap() {
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
             u_opacity: { value: 0.88 },
-            u_centralLon: { value: CENTRAL_LON_RAD }
+            u_centralLon: { value: NORTH_CENTRAL_LON },
+            u_poleSign: { value: 1.0 }
         },
         transparent: true
     });
 
-    // Full 4x4 Plane Quad covering the entire synoptic hemisphere
     const geometry = new THREE.PlaneGeometry(4.0, 4.0, 1, 1);
     polarMesh = new THREE.Mesh(geometry, material);
     scene.add(polarMesh);
 
-    buildSynopticGraticule(polarMesh);
+    rebuildPolarGraticule(polarMesh);
     loadPolarVectorData(polarMesh);
 
     fitSynopticSector();
@@ -364,8 +645,7 @@ export function initPolarMap() {
 
     function animate() {
         requestAnimationFrame(animate);
-        if (isPolarActive && controls && renderer && scene) {
-            controls.update();
+        if (isPolarActive && renderer && scene && camera) {
             renderer.render(scene, camera);
         }
     }
