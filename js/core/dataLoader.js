@@ -1,6 +1,7 @@
 // js/core/dataLoader.js
 import { stateManager } from './stateManager.js';
 import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
+import { clearPolarTextures } from '../layers/polarMap.js'; // 🌟 2D Polar VRAM Disposer
 import { clearVectorContours } from '../layers/vectorContours.js'; // 🌟 Vector Contour Disposer
 
 export async function fetchManifest(run = null, model = null, param = null) {
@@ -154,13 +155,14 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 }
 
 /**
- * 🌟 UNIFIED APP MEMORY PURGER: Wipes 2D & 3D GPU VRAM + CPU RAM + Vector Contours
+ * 🌟 UNIFIED APP MEMORY PURGER: Wipes 2D, 3D & Polar GPU VRAM + CPU RAM + Vector Contours
  */
 export function purgeAllAppMemory(shaderLayerRef = null) {
     stateManager.loadGeneration++;
 
-    // 🌟 Disposes 3D Globe GPU VRAM textures & vector contour features
+    // 🌟 Disposes 3D Globe & 2D Polar GPU VRAM textures & vector contour features
     clearThreeGlobeTextures();
+    clearPolarTextures();
     clearVectorContours();
 
     // 1. Close CPU ImageBitmap handles
