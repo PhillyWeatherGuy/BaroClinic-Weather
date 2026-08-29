@@ -3,17 +3,29 @@ import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
-// 🌐 10m High-Definition Vector Datasets
+// 🌐 High-Definition Vector Datasets
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
-let scene, camera, renderer, controls, globeMesh, material, paletteTex;
-let globeChunkTextures = {}; // Texture cache per chunk index
-let countyMesh = null;
+let scene, camera, renderer, controls, globeGroup, globeMesh, baseGlobeMesh, material, paletteTex;
+let linesMesh = null, countyMesh = null;
+let globeChunkTextures = {};
 let isGlobeActive = false;
-let currentViewMode = '3d'; // '3d' | 'polar'
+
+const THEME_COLORS = {
+    dark: {
+        ocean: 0x161920,
+        borders: 0xffffff,
+        counties: 0x64748b
+    },
+    light: {
+        ocean: 0xebf2f7,
+        borders: 0x2b2d31,
+        counties: 0x94a3b8
+    }
+};
 
 const style = document.createElement('style');
 style.textContent = `
@@ -66,7 +78,7 @@ const fsThreeGlobe = `
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // 🌟 Discard transparent pixels (e.g. dry land for precip)
+        // 🌟 Discard transparent pixels (dry land for precip)
         if (color.a == 0.0) {
             discard;
         }
@@ -87,7 +99,6 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeShader === 'precip');
 
     paletteHexArray.forEach((hex, i) => {
-        // Only discard index 0 for precipitation (keep 2t and PWAT continuous)
         if (isPrecip && i === 0) {
             ctx.clearRect(i, 0, 1, 1);
         } else {
@@ -116,14 +127,6 @@ async function load3DVectorBorders(parentMesh) {
     const linePoints = [];
     const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
 
-    const lineOffsets = [
-        [0, 0],
-        [0.005, 0],
-        [-0.005, 0],
-        [0, 0.005],
-        [0, -0.005]
-    ];
-
     for (const url of urls) {
         try {
             const resp = await fetch(url);
@@ -143,17 +146,15 @@ async function load3DVectorBorders(parentMesh) {
                 lineStrings.forEach(coords => {
                     for (let i = 0; i < coords.length - 1; i++) {
                         const p1Base = coords[i];
-                        const p2Base = coords[i+1];
+                        const p2Base = coords[i + 1];
 
                         if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
 
-                        lineOffsets.forEach(([dLng, dLat]) => {
-                            const p1 = lngLatToVector3(p1Base[0] + dLng, p1Base[1] + dLat, 2.003);
-                            const p2 = lngLatToVector3(p2Base[0] + dLng, p2Base[1] + dLat, 2.003);
+                        const p1 = lngLatToVector3(p1Base[0], p1Base[1], 2.003);
+                        const p2 = lngLatToVector3(p2Base[0], p2Base[1], 2.003);
 
-                            linePoints.push(p1.x, p1.y, p1.z);
-                            linePoints.push(p2.x, p2.y, p2.z);
-                        });
+                        linePoints.push(p1.x, p1.y, p1.z);
+                        linePoints.push(p2.x, p2.y, p2.z);
                     }
                 });
             });
@@ -166,13 +167,14 @@ async function load3DVectorBorders(parentMesh) {
         const lineGeometry = new THREE.BufferGeometry();
         lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
 
+        const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
         const lineMaterial = new THREE.LineBasicMaterial({
-            color: 0x000000,
+            color: THEME_COLORS[themeKey].borders,
             opacity: 0.95,
             transparent: true
         });
 
-        const linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
+        linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
         parentMesh.add(linesMesh);
     }
 
@@ -200,7 +202,7 @@ async function load3DCountyBorders(parentMesh) {
             lineStrings.forEach(coords => {
                 for (let i = 0; i < coords.length - 1; i++) {
                     const p1Base = coords[i];
-                    const p2Base = coords[i+1];
+                    const p2Base = coords[i + 1];
 
                     if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
 
@@ -217,8 +219,9 @@ async function load3DCountyBorders(parentMesh) {
             const lineGeometry = new THREE.BufferGeometry();
             lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
 
+            const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
             const lineMaterial = new THREE.LineBasicMaterial({
-                color: 0x000000,
+                color: THEME_COLORS[themeKey].counties,
                 opacity: 0.55,
                 transparent: true
             });
@@ -263,7 +266,20 @@ export function initThreeGlobe() {
         };
     }
 
-    // 🌟 Theme & parameter-aware initial palette
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    globeGroup = new THREE.Group();
+    globeGroup.rotation.y = -Math.PI / 2;
+    scene.add(globeGroup);
+
+    // 🌟 Layer 0: Styled Ocean Base Underlay Sphere (Radius 1.998)
+    const baseGeometry = new THREE.SphereGeometry(1.998, 64, 64);
+    const baseMaterial = new THREE.MeshBasicMaterial({ color: cfg.ocean });
+    baseGlobeMesh = new THREE.Mesh(baseGeometry, baseMaterial);
+    globeGroup.add(baseGlobeMesh);
+
+    // 🌟 Layer 1: Weather Heatmap Sphere (Radius 2.000, Opacity 0.85)
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
@@ -276,19 +292,18 @@ export function initThreeGlobe() {
             u_paletteTexture: { value: paletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
-            u_opacity: { value: 0.85 }
+            u_opacity: { value: 0.85 } // Matches 2D MapLibre exact 0.85 opacity
         },
-        transparent: true
+        transparent: true,
+        depthWrite: false
     });
 
-    const geometry = new THREE.SphereGeometry(2, 64, 64);
+    const geometry = new THREE.SphereGeometry(2.0, 64, 64);
     globeMesh = new THREE.Mesh(geometry, material);
-    
-    // Rotate globe -90° on load so North America faces front
-    globeMesh.rotation.y = -Math.PI / 2;
-    scene.add(globeMesh);
+    globeGroup.add(globeMesh);
 
-    load3DVectorBorders(globeMesh);
+    // 🌟 Layer 2: Vector Coastlines & Admin Borders (Radius 2.003)
+    load3DVectorBorders(globeGroup);
 
     window.addEventListener('resize', () => {
         if (!renderer || !camera) return;
@@ -299,8 +314,8 @@ export function initThreeGlobe() {
 
     function animate() {
         requestAnimationFrame(animate);
-        if (isGlobeActive && controls && renderer && scene && globeMesh) {
-            const dist = camera.position.distanceTo(globeMesh.position);
+        if (isGlobeActive && controls && renderer && scene && globeGroup) {
+            const dist = camera.position.distanceTo(globeGroup.position);
 
             const zoomRatio = Math.max(0, Math.min(1, (dist - controls.minDistance) / (controls.maxDistance - controls.minDistance)));
             controls.rotateSpeed = 0.12 + zoomRatio * 0.53;
@@ -308,7 +323,7 @@ export function initThreeGlobe() {
             controls.update();
 
             if (countyMesh) {
-                countyMesh.visible = (dist < 4.2 && currentViewMode === '3d');
+                countyMesh.visible = (dist < 4.2);
             }
 
             renderer.render(scene, camera);
@@ -318,41 +333,7 @@ export function initThreeGlobe() {
 }
 
 /**
- * 🌟 NORTH POLAR STEREOGRAPHIC VIEW ORIENTATION
- */
-export function setPolarView() {
-    if (!camera || !controls) return;
-    currentViewMode = 'polar';
-    camera.up.set(0, 0, -1);
-    camera.position.set(0, 5.2, 0.01);
-    controls.target.set(0, 0, 0);
-    controls.minPolarAngle = 0;
-    controls.maxPolarAngle = Math.PI * 0.42; // Locks camera to Northern Hemisphere
-    controls.minDistance = 2.6;
-    controls.maxDistance = 8.0;
-    controls.update();
-    console.log("❄️ [3D Engine] North Polar Stereographic Mode Activated");
-}
-
-/**
- * 🌟 STANDARD 3D GLOBE VIEW ORIENTATION
- */
-export function setGlobeView() {
-    if (!camera || !controls) return;
-    currentViewMode = '3d';
-    camera.up.set(0, 1, 0);
-    camera.position.set(0, 0.8, 6.0);
-    controls.target.set(0, 0, 0);
-    controls.minPolarAngle = Math.PI * 0.08;
-    controls.maxPolarAngle = Math.PI * 0.92;
-    controls.minDistance = 2.8;
-    controls.maxDistance = 12.0;
-    controls.update();
-    console.log("🌐 [3D Engine] Standard 3D Globe Mode Activated");
-}
-
-/**
- * 🌟 DYNAMIC PALETTE SWAP FOR 3D GLOBE (Precip, Scalar, PWAT, Temp)
+ * 🌟 DYNAMIC PALETTE & THEME SWAP FOR 3D GLOBE
  */
 export function updateThreeGlobePalette(paramIdOrHexArray) {
     if (!material) return;
@@ -370,6 +351,20 @@ export function updateThreeGlobePalette(paramIdOrHexArray) {
     paletteTex = createPaletteTexture(hexArray);
     material.uniforms.u_paletteTexture.value = paletteTex;
     material.needsUpdate = true;
+
+    // Update Basemap Theme Colors
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    if (baseGlobeMesh && baseGlobeMesh.material) {
+        baseGlobeMesh.material.color.setHex(cfg.ocean);
+    }
+    if (linesMesh && linesMesh.material) {
+        linesMesh.material.color.setHex(cfg.borders);
+    }
+    if (countyMesh && countyMesh.material) {
+        countyMesh.material.color.setHex(cfg.counties);
+    }
 }
 
 export function updateThreeGlobeFrame(frameState) {
@@ -412,24 +407,20 @@ export function clearThreeGlobeTextures() {
     globeChunkTextures = {};
 }
 
-export function showThreeGlobe(viewMode = '3d') {
+export function showThreeGlobe() {
     const container = document.getElementById('globe-container');
+    const polarContainer = document.getElementById('polar-container');
     const mapDiv = document.getElementById('map');
-    if (container) container.style.display = 'block';
-    if (mapDiv) mapDiv.style.display = 'none';
-    isGlobeActive = true;
 
-    if (viewMode === 'polar') {
-        setPolarView();
-    } else {
-        setGlobeView();
-    }
+    if (container) container.style.display = 'block';
+    if (polarContainer) polarContainer.style.display = 'none';
+    if (mapDiv) mapDiv.style.display = 'none';
+
+    isGlobeActive = true;
 }
 
 export function hideThreeGlobe() {
     const container = document.getElementById('globe-container');
-    const mapDiv = document.getElementById('map');
     if (container) container.style.display = 'none';
-    if (mapDiv) mapDiv.style.display = 'block';
     isGlobeActive = false;
 }
