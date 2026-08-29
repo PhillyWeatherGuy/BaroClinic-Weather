@@ -1,6 +1,6 @@
 // js/app.js
 import { stateManager } from './core/stateManager.js';
-import { fetchManifest, loadChunkBitmap } from './core/dataLoader.js';
+import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { initHubTransition } from './components/homeScreen.js'; 
@@ -16,11 +16,11 @@ import {
 
 // 🌟 Universal overlays & 3D Globe
 import { initCityOverlay, updateCityCallouts, decodePixelValue, formatParameterValue } from './layers/cityOverlay.js'; 
-import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe } from './layers/threeGlobe.js';
+import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe, clearThreeGlobeTextures } from './layers/threeGlobe.js';
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 
 // 🌟 Dedicated 2D North Polar Stereographic Engine
-import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap } from './layers/polarMap.js';
+import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures } from './layers/polarMap.js';
 
 // 🌟 Import Light and Dark Palette Resolvers
 import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
@@ -72,7 +72,7 @@ export function updateBasemapStyle(styleUrl) {
 }
 
 /**
- * 🌟 DYNAMIC 3-WAY PROJECTION / VIEW SWITCHER
+ * 🌟 DYNAMIC 3-WAY PROJECTION / VIEW SWITCHER (With VRAM Unloading)
  */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
@@ -80,18 +80,44 @@ export function applyView(targetView) {
     if (targetView === '2d') {
         hideThreeGlobe();
         hidePolarMap();
+        
+        // 🌟 Free inactive 3D & Polar VRAM immediately
+        clearThreeGlobeTextures();
+        clearPolarTextures();
+
         const mapDiv = document.getElementById('map');
         if (mapDiv) mapDiv.style.display = 'block';
         if (map) map.resize();
-        console.log("🗺️ [App Engine] 2D MapLibre Mercator Activated");
+
+        // Render current active frame to 2D
+        if (stateManager.activeFrameState && customShaderLayer) {
+            customShaderLayer.updateFrame(stateManager.activeFrameState);
+            try { updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest); } catch (e) {}
+            if (stateManager.globalSteps && stateManager.globalSteps[stateManager.currentStepIndex]) {
+                updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
+            }
+        }
+        console.log("🗺️ [App Engine] 2D MapLibre Mercator Activated (3D VRAM Cleared)");
     } else if (targetView === '3d') {
         hidePolarMap();
+        clearPolarTextures(); // 🌟 Free inactive Polar VRAM
+
         showThreeGlobe('3d');
-        console.log("🌐 [App Engine] 3D Earth Globe Activated");
+
+        if (stateManager.activeFrameState) {
+            updateThreeGlobeFrame(stateManager.activeFrameState);
+        }
+        console.log("🌐 [App Engine] 3D Earth Globe Activated (Polar VRAM Cleared)");
     } else if (targetView === 'polar') {
         hideThreeGlobe();
+        clearThreeGlobeTextures(); // 🌟 Free inactive 3D Globe VRAM
+
         showPolarMap();
-        console.log("❄️ [App Engine] 2D Polar Stereographic Conformal Map Activated");
+
+        if (stateManager.activeFrameState) {
+            updatePolarFrame(stateManager.activeFrameState);
+        }
+        console.log("❄️ [App Engine] 2D Polar Stereographic Activated (3D VRAM Cleared)");
     }
 }
 
@@ -209,21 +235,22 @@ async function renderFrame(globalIdx) {
         uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
     };
     
-    if (customShaderLayer) {
-        customShaderLayer.updateFrame(stateManager.activeFrameState);
+    // 🌟 MEMORY OPTIMIZATION: Only push GPU textures to the ACTIVE view engine!
+    const activeView = stateManager.activeView || '2d';
+
+    if (activeView === '2d') {
+        if (customShaderLayer) {
+            customShaderLayer.updateFrame(stateManager.activeFrameState);
+        }
+        try {
+            updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
+        } catch (e) {}
+        updateVectorContours(frameInfo.step);
+    } else if (activeView === '3d') {
+        updateThreeGlobeFrame(stateManager.activeFrameState);
+    } else if (activeView === 'polar') {
+        updatePolarFrame(stateManager.activeFrameState);
     }
-
-    // 🌟 Update 3D Globe & 2D Polar Stereographic Frames
-    updateThreeGlobeFrame(stateManager.activeFrameState);
-    updatePolarFrame(stateManager.activeFrameState);
-
-    // 🌟 Update City Callouts
-    try {
-        updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
-    } catch (e) {}
-
-    // 🌟 Fetch Static Vector Contours
-    updateVectorContours(frameInfo.step);
 }
 
 /**
@@ -272,40 +299,40 @@ map.on('load', async () => {
     stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
     initHubTransition();
 
-    // 🌟 1. Initialize 3D Globe Engine
+    // 🌟 Initialize 3D Globe Engine
     try {
         initThreeGlobe();
     } catch (err) {
         console.error("Three.js globe init error:", err);
     }
 
-    // 🌟 2. Initialize 2D Polar Stereographic Engine
+    // 🌟 Initialize 2D Polar Stereographic Engine
     try {
         initPolarMap();
     } catch (err) {
         console.error("Polar map init error:", err);
     }
 
-    // 🌟 3. Explicitly fetch ECMWF 2m Temperature on initial startup
+    // 🌟 Explicitly fetch ECMWF 2m Temperature on initial startup
     try {
         await fetchManifest(null, 'ecmwf', '2t');
     } catch (err) {
         showToast('❌ ' + err.message);
     }
 
-    // 4. Initialize Base Weather Heatmap Layer
+    // Initialize Base Weather Heatmap Layer
     try {
         initLayer();
     } catch (err) {}
 
-    // 5. Initialize Master Vector Contour Layer
+    // Initialize Master Vector Contour Layer
     try {
         initVectorContours(map);
     } catch (err) {
         console.error("Vector contours init error:", err);
     }
 
-    // 6. Initialize Master City Overlay
+    // Initialize Master City Overlay
     try {
         initCityOverlay(map);
     } catch (err) {}
