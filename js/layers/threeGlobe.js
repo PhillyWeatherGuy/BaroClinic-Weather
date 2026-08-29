@@ -11,10 +11,18 @@ const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vec
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
-let scene, camera, renderer, controls, globeGroup, globeMesh, baseGlobeMesh, landGlobeMesh, lakesGlobeMesh, material, paletteTex;
+let scene, camera, renderer, controls, globeGroup, globeMesh, baseGlobeMesh, material, paletteTex;
 let linesMesh = null, countyMesh = null;
 let globeChunkTextures = {};
 let isGlobeActive = false;
+
+// 2D Equirectangular Basemap Texture Generator for 3D Globe
+let baseMapCanvas = null;
+let baseMapCtx = null;
+let baseMapTexture = null;
+
+let rawLandFeatures = [];
+let rawLakesFeatures = [];
 
 // 🌟 Custom Color Matrix Matching 2D MapLibre & Polar Map 1:1
 const THEME_COLORS = {
@@ -131,99 +139,92 @@ function lngLatToVector3(lng, lat, radius = 2.003) {
 }
 
 /**
- * 🌟 Triangulate Land & Lake GeoJSON Polygons directly onto the 3D Sphere
+ * 🌟 Render High-Def 2D Equirectangular Basemap Texture for the Underlay Sphere
  */
-function triangulateGeoJsonToSphere(features, radius) {
-    const vertices = [];
+function renderBaseMapTexture() {
+    if (!baseMapCanvas || !baseMapCtx) {
+        baseMapCanvas = document.createElement('canvas');
+        baseMapCanvas.width = 2048;
+        baseMapCanvas.height = 1024;
+        baseMapCtx = baseMapCanvas.getContext('2d');
+        baseMapTexture = new THREE.CanvasTexture(baseMapCanvas);
+        baseMapTexture.minFilter = THREE.LinearFilter;
+        baseMapTexture.magFilter = THREE.LinearFilter;
+    }
 
-    features.forEach(feat => {
-        const geom = feat.geometry;
-        if (!geom) return;
+    const w = baseMapCanvas.width;
+    const h = baseMapCanvas.height;
 
-        let polygonList = [];
-        if (geom.type === 'Polygon') {
-            polygonList = [geom.coordinates];
-        } else if (geom.type === 'MultiPolygon') {
-            polygonList = geom.coordinates;
-        }
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
 
-        polygonList.forEach(polyCoords => {
-            if (!polyCoords || polyCoords.length === 0) return;
+    // 1. Fill Ocean
+    baseMapCtx.fillStyle = '#' + cfg.ocean.toString(16).padStart(6, '0');
+    baseMapCtx.fillRect(0, 0, w, h);
 
-            const outerRing = polyCoords[0].map(c => new THREE.Vector2(c[0], c[1]));
-            if (outerRing.length < 3) return;
+    function lngLatToCanvas(lng, lat) {
+        const x = ((lng + 180.0) / 360.0) * w;
+        const y = ((90.0 - lat) / 180.0) * h;
+        return [x, y];
+    }
 
-            const holes = [];
-            for (let h = 1; h < polyCoords.length; h++) {
-                const holeRing = polyCoords[h].map(c => new THREE.Vector2(c[0], c[1]));
-                if (holeRing.length >= 3) holes.push(holeRing);
-            }
+    function drawGeoJsonPolygons(features, fillHex) {
+        baseMapCtx.fillStyle = '#' + fillHex.toString(16).padStart(6, '0');
 
-            try {
-                if (THREE.ShapeUtils.area(outerRing) < 0) outerRing.reverse();
-                holes.forEach(hRing => {
-                    if (THREE.ShapeUtils.area(hRing) > 0) hRing.reverse();
+        features.forEach(feat => {
+            const geom = feat.geometry;
+            if (!geom) return;
+
+            let polyList = [];
+            if (geom.type === 'Polygon') polyList = [geom.coordinates];
+            else if (geom.type === 'MultiPolygon') polyList = geom.coordinates;
+
+            polyList.forEach(polyCoords => {
+                if (!polyCoords || polyCoords.length === 0) return;
+                baseMapCtx.beginPath();
+                
+                polyCoords.forEach(ring => {
+                    for (let i = 0; i < ring.length; i++) {
+                        const [x, y] = lngLatToCanvas(ring[i][0], ring[i][1]);
+                        if (i === 0) baseMapCtx.moveTo(x, y);
+                        else baseMapCtx.lineTo(x, y);
+                    }
+                    baseMapCtx.closePath();
                 });
 
-                const faces = THREE.ShapeUtils.triangulateShape(outerRing, holes);
-                const all2DPoints = outerRing.concat(...holes);
-
-                for (let f = 0; f < faces.length; f++) {
-                    const idxs = faces[f];
-                    const pA2D = all2DPoints[idxs[0]];
-                    const pB2D = all2DPoints[idxs[1]];
-                    const pC2D = all2DPoints[idxs[2]];
-
-                    if (pA2D && pB2D && pC2D) {
-                        const vA = lngLatToVector3(pA2D.x, pA2D.y, radius);
-                        const vB = lngLatToVector3(pB2D.x, pB2D.y, radius);
-                        const vC = lngLatToVector3(pC2D.x, pC2D.y, radius);
-
-                        vertices.push(vA.x, vA.y, vA.z);
-                        vertices.push(vB.x, vB.y, vB.z);
-                        vertices.push(vC.x, vC.y, vC.z);
-                    }
-                }
-            } catch (e) {}
+                baseMapCtx.fill('evenodd');
+            });
         });
-    });
-
-    const geometry = new THREE.BufferGeometry();
-    if (vertices.length > 0) {
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     }
-    return geometry;
+
+    // 2. Fill Continents / Land
+    drawGeoJsonPolygons(rawLandFeatures, cfg.land);
+
+    // 3. Fill Lakes
+    drawGeoJsonPolygons(rawLakesFeatures, cfg.lakes);
+
+    if (baseMapTexture) {
+        baseMapTexture.needsUpdate = true;
+    }
 }
 
-async function load3DBasemapFills(parentGroup) {
+async function load3DBasemapFills() {
     try {
         const [landResp, lakesResp] = await Promise.all([
             fetch(LAND_POLYGONS_URL).catch(() => null),
             fetch(LAKES_POLYGONS_URL).catch(() => null)
         ]);
 
-        const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
-        const cfg = THEME_COLORS[themeKey];
-
         if (landResp && landResp.ok) {
             const data = await landResp.json();
-            if (data && data.features) {
-                const landGeom = triangulateGeoJsonToSphere(data.features, 1.998);
-                const landMat = new THREE.MeshBasicMaterial({ color: cfg.land, side: THREE.DoubleSide });
-                landGlobeMesh = new THREE.Mesh(landGeom, landMat);
-                parentGroup.add(landGlobeMesh);
-            }
+            if (data && data.features) rawLandFeatures = data.features;
         }
-
         if (lakesResp && lakesResp.ok) {
             const data = await lakesResp.json();
-            if (data && data.features) {
-                const lakesGeom = triangulateGeoJsonToSphere(data.features, 1.999);
-                const lakesMat = new THREE.MeshBasicMaterial({ color: cfg.lakes, side: THREE.DoubleSide });
-                lakesGlobeMesh = new THREE.Mesh(lakesGeom, lakesMat);
-                parentGroup.add(lakesGlobeMesh);
-            }
+            if (data && data.features) rawLakesFeatures = data.features;
         }
+
+        renderBaseMapTexture();
     } catch (err) {
         console.warn("3D land fill load error:", err);
     }
@@ -372,23 +373,20 @@ export function initThreeGlobe() {
         };
     }
 
-    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
-    const cfg = THEME_COLORS[themeKey];
-
     globeGroup = new THREE.Group();
     globeGroup.rotation.y = -Math.PI / 2;
     scene.add(globeGroup);
 
-    // 🌟 Layer 0: Styled Ocean Base Underlay Sphere (Radius 1.996)
+    // 🌟 Layer 0: Styled Ocean & Land Basemap Sphere (Radius 1.996)
+    renderBaseMapTexture();
     const baseGeometry = new THREE.SphereGeometry(1.996, 64, 64);
-    const baseMaterial = new THREE.MeshBasicMaterial({ color: cfg.ocean });
+    const baseMaterial = new THREE.MeshBasicMaterial({ map: baseMapTexture });
     baseGlobeMesh = new THREE.Mesh(baseGeometry, baseMaterial);
     globeGroup.add(baseGlobeMesh);
 
-    // 🌟 Layer 1: Styled Continents & Lakes (Radius 1.998)
-    load3DBasemapFills(globeGroup);
+    load3DBasemapFills();
 
-    // 🌟 Layer 2: Weather Heatmap Sphere (Radius 2.000, Opacity 0.85)
+    // 🌟 Layer 1: Weather Heatmap Sphere (Radius 2.000, Opacity 0.85)
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
@@ -411,7 +409,7 @@ export function initThreeGlobe() {
     globeMesh = new THREE.Mesh(geometry, material);
     globeGroup.add(globeMesh);
 
-    // 🌟 Layer 3: Vector Coastlines & Admin Borders (Radius 2.003)
+    // 🌟 Layer 2: Vector Coastlines & Admin Borders (Radius 2.003)
     load3DVectorBorders(globeGroup);
 
     window.addEventListener('resize', () => {
@@ -461,19 +459,12 @@ export function updateThreeGlobePalette(paramIdOrHexArray) {
     material.uniforms.u_paletteTexture.value = paletteTex;
     material.needsUpdate = true;
 
-    // Update Basemap Theme Colors
+    // Redraw 3D Basemap Texture with updated theme colors
+    renderBaseMapTexture();
+
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    if (baseGlobeMesh && baseGlobeMesh.material) {
-        baseGlobeMesh.material.color.setHex(cfg.ocean);
-    }
-    if (landGlobeMesh && landGlobeMesh.material) {
-        landGlobeMesh.material.color.setHex(cfg.land);
-    }
-    if (lakesGlobeMesh && lakesGlobeMesh.material) {
-        lakesGlobeMesh.material.color.setHex(cfg.lakes);
-    }
     if (linesMesh && linesMesh.material) {
         linesMesh.material.color.setHex(cfg.borders);
     }
