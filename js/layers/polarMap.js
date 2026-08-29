@@ -3,27 +3,34 @@ import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
-// 🌐 Natural Earth Vector Datasets
-const LAND_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_land.geojson';
-const LAKES_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_lakes.geojson';
-const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
+// 🌐 High-Definition 50m & 10m Natural Earth Datasets
+const LAND_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_land.geojson';
+const LAKES_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_lakes.geojson';
+const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_coastline.geojson';
+const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
-const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
+const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, polarGroup, polarMesh, material, paletteTex;
 let oceanMesh = null, landMesh = null, lakesMesh = null;
 let polarChunkTextures = {};
 let isPolarActive = false;
-let vectorLinesMesh = null;
+let coastlineLinesMesh = null;
+let countryLinesMesh = null;
+let stateLinesMesh = null;
+let countyLinesMesh = null;
 let graticuleMesh = null;
 
 let rawLandFeatures = [];
 let rawLakesFeatures = [];
-let rawLineFeatures = [];
+let rawCoastlineFeatures = [];
+let rawCountryFeatures = [];
+let rawStateFeatures = [];
+let rawCountyFeatures = [];
 
 // Map State
-let currentPole = 'north'; // 'north' | 'south'
-let mapRotation = 0.0;     // Radians (around Pole at 0,0)
+let currentPole = 'north';
+let mapRotation = 0.0;
 let mapTargetY = -0.45;
 let mapTargetX = 0.0;
 let mapZoom = 1.0;
@@ -38,7 +45,10 @@ const THEME_COLORS = {
         ocean: 0x161920,
         land: 0x1a1a1a,
         lakes: 0x161920,
-        borders: 0xffffff,
+        coastline: 0xffffff,
+        countryBorders: 0xffffff,
+        stateBorders: 0xcbd5e1,
+        countyBorders: 0x475569,
         graticule: 0x334155
     },
     light: {
@@ -46,7 +56,10 @@ const THEME_COLORS = {
         ocean: 0xebf2f7,
         land: 0xf4f6f8,
         lakes: 0xebf2f7,
-        borders: 0x2b2d31,
+        coastline: 0x2b2d31,
+        countryBorders: 0x2b2d31,
+        stateBorders: 0x5c6370,
+        countyBorders: 0xa0aab8,
         graticule: 0xcbd5e1
     }
 };
@@ -298,9 +311,6 @@ function lngLatToPolarPlanar(lng, lat, isNorth = true) {
     return new THREE.Vector2(x, y);
 }
 
-/**
- * 🌟 Triangulate GeoJSON Polygons onto Polar Stereographic Plane
- */
 function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
     const vertices = [];
 
@@ -366,12 +376,52 @@ function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
     return geometry;
 }
 
+function buildLineSegmentsGeometry(features, isNorth, zHeight) {
+    const linePoints = [];
+
+    features.forEach(feature => {
+        const geom = feature.geometry;
+        if (!geom) return;
+
+        let lineStrings = [];
+        if (geom.type === 'LineString') lineStrings = [geom.coordinates];
+        else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
+        else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
+        else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
+
+        lineStrings.forEach(coords => {
+            for (let i = 0; i < coords.length - 1; i++) {
+                const p1Base = coords[i];
+                const p2Base = coords[i + 1];
+
+                if (isNorth && (p1Base[1] < -10 || p2Base[1] < -10)) continue;
+                if (!isNorth && (p1Base[1] > 10 || p2Base[1] > 10)) continue;
+                if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
+
+                const pt1 = lngLatToPolarPlanar(p1Base[0], p1Base[1], isNorth);
+                const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
+
+                if (pt1 && pt2) {
+                    linePoints.push(pt1.x, pt1.y, zHeight);
+                    linePoints.push(pt2.x, pt2.y, zHeight);
+                }
+            }
+        });
+    });
+
+    const geometry = new THREE.BufferGeometry();
+    if (linePoints.length > 0) {
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
+    }
+    return geometry;
+}
+
 function rebuildPolygonFills() {
     const isNorth = (currentPole === 'north');
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. Rebuild Land Mesh (z = 0.0003)
+    // 1. High-Def 50m Land Mesh (z = 0.0003)
     if (landMesh) {
         polarGroup.remove(landMesh);
         if (landMesh.geometry) landMesh.geometry.dispose();
@@ -381,7 +431,7 @@ function rebuildPolygonFills() {
     landMesh = new THREE.Mesh(landGeom, landMat);
     polarGroup.add(landMesh);
 
-    // 2. Rebuild Lakes Mesh (z = 0.0006)
+    // 2. High-Def 50m Lakes Mesh (z = 0.0006)
     if (lakesMesh) {
         polarGroup.remove(lakesMesh);
         if (lakesMesh.geometry) lakesMesh.geometry.dispose();
@@ -437,69 +487,78 @@ function rebuildPolarGraticule() {
     polarGroup.add(graticuleMesh);
 }
 
-function rebuildVectorBorders() {
-    if (vectorLinesMesh) {
-        polarGroup.remove(vectorLinesMesh);
-        if (vectorLinesMesh.geometry) vectorLinesMesh.geometry.dispose();
-    }
-
-    const linePoints = [];
+function rebuildVectorLines() {
     const isNorth = (currentPole === 'north');
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
 
-    rawLineFeatures.forEach(feature => {
-        const geom = feature.geometry;
-        if (!geom) return;
-
-        let lineStrings = [];
-        if (geom.type === 'LineString') lineStrings = [geom.coordinates];
-        else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
-        else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
-        else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
-
-        lineStrings.forEach(coords => {
-            for (let i = 0; i < coords.length - 1; i++) {
-                const p1Base = coords[i];
-                const p2Base = coords[i + 1];
-
-                if (isNorth && (p1Base[1] < -10 || p2Base[1] < -10)) continue;
-                if (!isNorth && (p1Base[1] > 10 || p2Base[1] > 10)) continue;
-                if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
-
-                const pt1 = lngLatToPolarPlanar(p1Base[0], p1Base[1], isNorth);
-                const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
-
-                if (pt1 && pt2) {
-                    linePoints.push(pt1.x, pt1.y, 0.002);
-                    linePoints.push(pt2.x, pt2.y, 0.002);
-                }
-            }
-        });
-    });
-
-    if (linePoints.length > 0) {
-        const lineGeometry = new THREE.BufferGeometry();
-        lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
-
-        const lineMaterial = new THREE.LineBasicMaterial({
-            color: THEME_COLORS[themeKey].borders,
-            opacity: (themeKey === 'dark') ? 0.95 : 0.85,
-            transparent: true
-        });
-
-        vectorLinesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
-        polarGroup.add(vectorLinesMesh);
+    // 1. High-Definition 50m Coastlines (z = 0.0025, solid primary boundary)
+    if (coastlineLinesMesh) {
+        polarGroup.remove(coastlineLinesMesh);
+        if (coastlineLinesMesh.geometry) coastlineLinesMesh.geometry.dispose();
     }
+    const coastGeom = buildLineSegmentsGeometry(rawCoastlineFeatures, isNorth, 0.0025);
+    const coastMat = new THREE.LineBasicMaterial({
+        color: cfg.coastline,
+        opacity: 0.95,
+        transparent: true
+    });
+    coastlineLinesMesh = new THREE.LineSegments(coastGeom, coastMat);
+    polarGroup.add(coastlineLinesMesh);
+
+    // 2. Country Borders (z = 0.0022)
+    if (countryLinesMesh) {
+        polarGroup.remove(countryLinesMesh);
+        if (countryLinesMesh.geometry) countryLinesMesh.geometry.dispose();
+    }
+    const countryGeom = buildLineSegmentsGeometry(rawCountryFeatures, isNorth, 0.0022);
+    const countryMat = new THREE.LineBasicMaterial({
+        color: cfg.countryBorders,
+        opacity: 0.9,
+        transparent: true
+    });
+    countryLinesMesh = new THREE.LineSegments(countryGeom, countryMat);
+    polarGroup.add(countryLinesMesh);
+
+    // 3. State & Province Borders (z = 0.0020, subtle secondary boundary)
+    if (stateLinesMesh) {
+        polarGroup.remove(stateLinesMesh);
+        if (stateLinesMesh.geometry) stateLinesMesh.geometry.dispose();
+    }
+    const stateGeom = buildLineSegmentsGeometry(rawStateFeatures, isNorth, 0.0020);
+    const stateMat = new THREE.LineBasicMaterial({
+        color: cfg.stateBorders,
+        opacity: 0.75,
+        transparent: true
+    });
+    stateLinesMesh = new THREE.LineSegments(stateGeom, stateMat);
+    polarGroup.add(stateLinesMesh);
+
+    // 4. Detailed County Borders (z = 0.0018, visible upon zooming)
+    if (countyLinesMesh) {
+        polarGroup.remove(countyLinesMesh);
+        if (countyLinesMesh.geometry) countyLinesMesh.geometry.dispose();
+    }
+    const countyGeom = buildLineSegmentsGeometry(rawCountyFeatures, isNorth, 0.0018);
+    const countyMat = new THREE.LineBasicMaterial({
+        color: cfg.countyBorders,
+        opacity: 0.55,
+        transparent: true
+    });
+    countyLinesMesh = new THREE.LineSegments(countyGeom, countyMat);
+    countyLinesMesh.visible = (camera && camera.zoom > 1.4);
+    polarGroup.add(countyLinesMesh);
 }
 
 async function loadAllBasemapGeoJson() {
     try {
-        const [landResp, lakesResp, cResp, sResp, coastResp] = await Promise.all([
+        const [landResp, lakesResp, coastResp, countryResp, stateResp, countyResp] = await Promise.all([
             fetch(LAND_POLYGONS_URL).catch(() => null),
             fetch(LAKES_POLYGONS_URL).catch(() => null),
+            fetch(COASTLINES_URL).catch(() => null),
             fetch(COUNTRY_BORDERS_URL).catch(() => null),
             fetch(STATE_BORDERS_URL).catch(() => null),
-            fetch(COASTLINES_URL).catch(() => null)
+            fetch(COUNTY_BORDERS_URL).catch(() => null)
         ]);
 
         if (landResp && landResp.ok) {
@@ -510,18 +569,26 @@ async function loadAllBasemapGeoJson() {
             const data = await lakesResp.json();
             if (data && data.features) rawLakesFeatures = data.features;
         }
-
-        rawLineFeatures = [];
-        for (const resp of [cResp, sResp, coastResp]) {
-            if (resp && resp.ok) {
-                const data = await resp.json();
-                if (data && data.features) rawLineFeatures.push(...data.features);
-            }
+        if (coastResp && coastResp.ok) {
+            const data = await coastResp.json();
+            if (data && data.features) rawCoastlineFeatures = data.features;
+        }
+        if (countryResp && countryResp.ok) {
+            const data = await countryResp.json();
+            if (data && data.features) rawCountryFeatures = data.features;
+        }
+        if (stateResp && stateResp.ok) {
+            const data = await stateResp.json();
+            if (data && data.features) rawStateFeatures = data.features;
+        }
+        if (countyResp && countyResp.ok) {
+            const data = await countyResp.json();
+            if (data && data.features) rawCountyFeatures = data.features;
         }
 
         rebuildPolygonFills();
         rebuildPolarGraticule();
-        rebuildVectorBorders();
+        rebuildVectorLines();
     } catch (err) {
         console.warn("Basemap GeoJSON load error:", err);
     }
@@ -639,7 +706,7 @@ export function setHemisphere(pole) {
 
     rebuildPolygonFills();
     rebuildPolarGraticule();
-    rebuildVectorBorders();
+    rebuildVectorLines();
 
     fitSynopticSector();
 }
@@ -672,18 +739,23 @@ export function fitSynopticSector() {
     updateCompassUI();
 }
 
+function updateZoomVisibility() {
+    if (countyLinesMesh && camera) {
+        countyLinesMesh.visible = (camera.zoom > 1.4);
+    }
+}
+
 /**
  * 🌟 DIRECTIONALLY-LOCKED GESTURE CONTROLLER
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
-    let dragMode = 'none'; // 'none' | 'rotate' | 'pan'
+    let dragMode = 'none';
     let startX = 0, startY = 0;
     let accumDx = 0, accumDy = 0;
     const DRAG_LOCK_THRESHOLD = 5;
     let initialTouchDist = 0;
 
-    // Desktop Mouse Handlers
     canvas.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         isDragging = true;
@@ -736,7 +808,6 @@ function init2DMapControls(canvas) {
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Desktop Wheel Zoom
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const zoomSensitivity = 0.0012;
@@ -746,9 +817,9 @@ function init2DMapControls(canvas) {
         const newZoom = Math.max(0.4, Math.min(6.0, camera.zoom * clampedFactor));
         camera.zoom = newZoom;
         camera.updateProjectionMatrix();
+        updateZoomVisibility();
     }, { passive: false });
 
-    // Mobile Touch Handlers
     canvas.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
             isDragging = true;
@@ -809,6 +880,7 @@ function init2DMapControls(canvas) {
             const pinchRatio = currentDist / initialTouchDist;
             camera.zoom = Math.max(0.4, Math.min(6.0, mapZoom * pinchRatio));
             camera.updateProjectionMatrix();
+            updateZoomVisibility();
         }
     }, { passive: false });
 
@@ -856,12 +928,11 @@ export function initPolarMap() {
     const cfg = THEME_COLORS[themeKey];
     container.style.background = cfg.bg;
 
-    // 🌟 Unified Polar Group (Rotates everything around (0,0) in sync)
     polarGroup = new THREE.Group();
     scene.add(polarGroup);
 
     // Layer 0: Styled Ocean Base Quad (z = 0.0)
-    const oceanGeom = new THREE.PlaneGeometry(4.0, 4.0);
+    const oceanGeom = new THREE.PlaneGeometry(6.0, 6.0);
     const oceanMat = new THREE.MeshBasicMaterial({ color: cfg.ocean });
     oceanMesh = new THREE.Mesh(oceanGeom, oceanMat);
     polarGroup.add(oceanMesh);
@@ -887,12 +958,12 @@ export function initPolarMap() {
         depthWrite: false
     });
 
-    const weatherGeom = new THREE.PlaneGeometry(4.0, 4.0);
+    const weatherGeom = new THREE.PlaneGeometry(6.0, 6.0);
     polarMesh = new THREE.Mesh(weatherGeom, material);
     polarMesh.position.z = 0.001;
     polarGroup.add(polarMesh);
 
-    // Load Vector Land, Lakes, and Borders
+    // Load High-Def 50m Vector Land, Lakes, and Borders
     loadAllBasemapGeoJson();
 
     fitSynopticSector();
@@ -929,7 +1000,6 @@ export function updatePolarPalette(paramIdOrHexArray) {
     material.uniforms.u_paletteTexture.value = paletteTex;
     material.needsUpdate = true;
 
-    // Update Basemap Theme Colors
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
@@ -939,7 +1009,10 @@ export function updatePolarPalette(paramIdOrHexArray) {
     if (oceanMesh && oceanMesh.material) oceanMesh.material.color.setHex(cfg.ocean);
     if (landMesh && landMesh.material) landMesh.material.color.setHex(cfg.land);
     if (lakesMesh && lakesMesh.material) lakesMesh.material.color.setHex(cfg.lakes);
-    if (vectorLinesMesh && vectorLinesMesh.material) vectorLinesMesh.material.color.setHex(cfg.borders);
+    if (coastlineLinesMesh && coastlineLinesMesh.material) coastlineLinesMesh.material.color.setHex(cfg.coastline);
+    if (countryLinesMesh && countryLinesMesh.material) countryLinesMesh.material.color.setHex(cfg.countryBorders);
+    if (stateLinesMesh && stateLinesMesh.material) stateLinesMesh.material.color.setHex(cfg.stateBorders);
+    if (countyLinesMesh && countyLinesMesh.material) countyLinesMesh.material.color.setHex(cfg.countyBorders);
     if (graticuleMesh && graticuleMesh.material) graticuleMesh.material.color.setHex(cfg.graticule);
 }
 
