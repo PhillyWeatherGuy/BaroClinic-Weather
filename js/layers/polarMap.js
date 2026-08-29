@@ -15,9 +15,9 @@ let vectorLinesMesh = null;
 let graticuleMesh = null;
 let rawGeoJsonFeatures = [];
 
-// Map State: Position, Zoom, and Pole-Anchored 2D Rotation
+// Map State
 let currentPole = 'north'; // 'north' | 'south'
-let mapRotation = 0.0;     // Radians (around the Pole at 0,0)
+let mapRotation = 0.0;     // Radians (around Pole at 0,0)
 let mapTargetY = -0.45;
 let mapTargetX = 0.0;
 let mapZoom = 1.0;
@@ -47,6 +47,10 @@ style.textContent = `
         touch-action: none !important;
         user-select: none !important;
         -webkit-user-select: none !important;
+        cursor: grab;
+    }
+    #polar-container canvas:active {
+        cursor: grabbing;
     }
     .polar-top-controls {
         position: absolute;
@@ -56,6 +60,7 @@ style.textContent = `
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-wrap: nowrap;
     }
     .polar-compass-btn {
         background: rgba(11, 15, 25, 0.88);
@@ -72,9 +77,56 @@ style.textContent = `
         justify-content: center;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
         transition: all 0.2s ease;
+        flex-shrink: 0;
     }
     .polar-compass-btn svg {
         transition: transform 0.1s linear;
+    }
+    .polar-rot-capsule {
+        display: flex;
+        align-items: center;
+        background: rgba(11, 15, 25, 0.88);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 20px;
+        padding: 4px 8px;
+        gap: 6px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+    .rot-nudge-btn {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-size: 13px;
+        cursor: pointer;
+        padding: 0 2px;
+        line-height: 1;
+        transition: color 0.15s ease;
+    }
+    .rot-nudge-btn:hover {
+        color: #38bdf8;
+    }
+    #polar-rot-slider {
+        width: 70px;
+        accent-color: #38bdf8;
+        cursor: pointer;
+        height: 4px;
+        appearance: none;
+        -webkit-appearance: none;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 2px;
+        outline: none;
+    }
+    #polar-rot-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #38bdf8;
+        cursor: pointer;
+        box-shadow: 0 0 6px rgba(56, 189, 248, 0.8);
     }
     .polar-pole-switcher {
         display: flex;
@@ -87,6 +139,7 @@ style.textContent = `
         padding: 3px;
         gap: 3px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        flex-shrink: 0;
     }
     .pole-btn {
         background: transparent;
@@ -341,12 +394,20 @@ function initPolarUI(container) {
     topControls = document.createElement('div');
     topControls.className = 'polar-top-controls';
     topControls.innerHTML = `
-        <button id="btn-polar-compass" class="polar-compass-btn" title="Reset Orientation (North Up)">
+        <button id="btn-polar-compass" class="polar-compass-btn" title="Reset North Up">
             <svg id="polar-compass-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="12 2 15 11 12 9 9 11 12 2" fill="#ef4444"/>
                 <polygon points="12 22 15 13 12 15 9 13 12 22" fill="#94a3b8"/>
             </svg>
         </button>
+
+        <!-- 🌟 Integrated Polar Rotation Capsule -->
+        <div class="polar-rot-capsule" title="Rotate Map Around Pole">
+            <button class="rot-nudge-btn" id="btn-rot-left" title="Rotate Left">⟲</button>
+            <input id="polar-rot-slider" type="range" min="0" max="360" value="0" step="1">
+            <button class="rot-nudge-btn" id="btn-rot-right" title="Rotate Right">⟳</button>
+        </div>
+
         <div class="polar-pole-switcher">
             <button class="pole-btn active" data-pole="north">❄️ North</button>
             <button class="pole-btn" data-pole="south">🧊 South</button>
@@ -358,6 +419,32 @@ function initPolarUI(container) {
         compassBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             resetRotation();
+        });
+    }
+
+    // Rotation Slider & Nudge Buttons
+    const rotSlider = topControls.querySelector('#polar-rot-slider');
+    if (rotSlider) {
+        rotSlider.addEventListener('input', (e) => {
+            setRotationDegrees(parseFloat(e.target.value));
+        });
+    }
+
+    const btnRotLeft = topControls.querySelector('#btn-rot-left');
+    if (btnRotLeft) {
+        btnRotLeft.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const currentDeg = (THREE.MathUtils.radToDeg(mapRotation) % 360 + 360) % 360;
+            setRotationDegrees(currentDeg - 15);
+        });
+    }
+
+    const btnRotRight = topControls.querySelector('#btn-rot-right');
+    if (btnRotRight) {
+        btnRotRight.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const currentDeg = (THREE.MathUtils.radToDeg(mapRotation) % 360 + 360) % 360;
+            setRotationDegrees(currentDeg + 15);
         });
     }
 
@@ -381,12 +468,25 @@ function updateCompassUI() {
     if (icon) {
         icon.style.transform = `rotate(${-mapRotation}rad)`;
     }
+
+    const slider = document.getElementById('polar-rot-slider');
+    if (slider) {
+        const deg = (THREE.MathUtils.radToDeg(mapRotation) % 360 + 360) % 360;
+        slider.value = Math.round(deg);
+    }
+}
+
+export function setRotationDegrees(deg) {
+    const normalizedDeg = (deg % 360 + 360) % 360;
+    mapRotation = THREE.MathUtils.degToRad(normalizedDeg);
+    if (polarMesh) {
+        polarMesh.rotation.z = mapRotation;
+    }
+    updateCompassUI();
 }
 
 export function resetRotation() {
-    mapRotation = 0.0;
-    if (polarMesh) polarMesh.rotation.z = 0.0;
-    updateCompassUI();
+    setRotationDegrees(0);
 }
 
 export function setHemisphere(pole) {
@@ -436,60 +536,37 @@ export function fitSynopticSector() {
 }
 
 /**
- * 🌟 NATURAL 1-POINTER POLAR DRAG CONTROLLER (Unified 1-Click / 1-Touch Pan & Rotation)
+ * 🌟 BUTTERY-SMOOTH 2D MAP CONTROLS (Pure 1-Touch Pan & Smooth Zoom)
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
-    let prevClientX = 0, prevClientY = 0;
+    let startX = 0, startY = 0;
     let initialTouchDist = 0;
 
-    function getScreenPoint(clientX, clientY) {
-        const rect = canvas.getBoundingClientRect();
-        return {
-            x: clientX - rect.left - (rect.width / 2),
-            y: clientY - rect.top - (rect.height / 2)
-        };
-    }
-
-    // 1. Mouse Drag Handler
+    // Desktop Mouse Drag (1-Click Pure Pan)
     canvas.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return; // Left-click only
+        if (e.button !== 0) return;
         isDragging = true;
-        prevClientX = e.clientX;
-        prevClientY = e.clientY;
+        startX = e.clientX;
+        startY = e.clientY;
     });
 
     window.addEventListener('mousemove', (e) => {
         if (!isDragging) return;
 
-        const dx = e.clientX - prevClientX;
-        const dy = e.clientY - prevClientY;
-        
-        const ptPrev = getScreenPoint(prevClientX, prevClientY);
-        const ptCurr = getScreenPoint(e.clientX, e.clientY);
-        
-        prevClientX = e.clientX;
-        prevClientY = e.clientY;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        startX = e.clientX;
+        startY = e.clientY;
 
         const h = window.innerHeight;
         const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
         const unitsPerPixel = visibleHeight / h;
 
-        // A. Natural Pole-Anchored Rotation: angular sweep around screen center/pole
-        const anglePrev = Math.atan2(ptPrev.y, ptPrev.x);
-        const angleCurr = Math.atan2(ptCurr.y, ptCurr.x);
-        let dTheta = angleCurr - anglePrev;
-        while (dTheta > Math.PI) dTheta -= Math.PI * 2;
-        while (dTheta < -Math.PI) dTheta += Math.PI * 2;
+        mapTargetX -= dx * unitsPerPixel;
+        mapTargetY += dy * unitsPerPixel;
 
-        mapRotation -= dTheta;
-        if (polarMesh) {
-            polarMesh.rotation.z = mapRotation;
-        }
-        updateCompassUI();
-
-        // B. Vertical North/South Panning
-        mapTargetY += dy * unitsPerPixel * 0.75;
+        camera.position.x = mapTargetX;
         camera.position.y = mapTargetY;
     });
 
@@ -499,7 +576,7 @@ function init2DMapControls(canvas) {
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // 2. Smooth, Non-Sensitive Desktop Wheel Zoom
+    // Desktop Mouse Wheel Zoom (Gentle & Smooth)
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const zoomSensitivity = 0.0012;
@@ -511,12 +588,12 @@ function init2DMapControls(canvas) {
         camera.updateProjectionMatrix();
     }, { passive: false });
 
-    // 3. Mobile Touch Gestures (1-finger pan & rotate naturally, 2-finger pinch zoom)
+    // Mobile Touch Gestures (1-Finger Silky Pan, 2-Finger Pinch Zoom)
     canvas.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
             isDragging = true;
-            prevClientX = e.touches[0].clientX;
-            prevClientY = e.touches[0].clientY;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
         } else if (e.touches.length === 2) {
             isDragging = false;
             const t1 = e.touches[0];
@@ -533,34 +610,19 @@ function init2DMapControls(canvas) {
             const clientX = e.touches[0].clientX;
             const clientY = e.touches[0].clientY;
 
-            const dx = clientX - prevClientX;
-            const dy = clientY - prevClientY;
-
-            const ptPrev = getScreenPoint(prevClientX, prevClientY);
-            const ptCurr = getScreenPoint(clientX, clientY);
-
-            prevClientX = clientX;
-            prevClientY = clientY;
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+            startX = clientX;
+            startY = clientY;
 
             const h = window.innerHeight;
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
             const unitsPerPixel = visibleHeight / h;
 
-            // A. Natural 1-Finger Pole-Anchored Rotation
-            const anglePrev = Math.atan2(ptPrev.y, ptPrev.x);
-            const angleCurr = Math.atan2(ptCurr.y, ptCurr.x);
-            let dTheta = angleCurr - anglePrev;
-            while (dTheta > Math.PI) dTheta -= Math.PI * 2;
-            while (dTheta < -Math.PI) dTheta += Math.PI * 2;
+            mapTargetX -= dx * unitsPerPixel;
+            mapTargetY += dy * unitsPerPixel;
 
-            mapRotation -= dTheta;
-            if (polarMesh) {
-                polarMesh.rotation.z = mapRotation;
-            }
-            updateCompassUI();
-
-            // B. Natural 1-Finger North/South Panning
-            mapTargetY += dy * unitsPerPixel * 0.75;
+            camera.position.x = mapTargetX;
             camera.position.y = mapTargetY;
         } else if (e.touches.length === 2 && initialTouchDist > 0) {
             const t1 = e.touches[0];
@@ -574,8 +636,8 @@ function init2DMapControls(canvas) {
 
     canvas.addEventListener('touchend', (e) => {
         if (e.touches.length === 1) {
-            prevClientX = e.touches[0].clientX;
-            prevClientY = e.touches[0].clientY;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
             isDragging = true;
         } else {
             isDragging = false;
