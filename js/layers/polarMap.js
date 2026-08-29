@@ -376,8 +376,29 @@ function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
     return geometry;
 }
 
-function buildLineSegmentsGeometry(features, isNorth, zHeight) {
+/**
+ * 🌟 Thick Multi-Pass Vector Line Builder
+ */
+function buildLineSegmentsGeometry(features, isNorth, zHeight, thicknessMode = 'thick') {
     const linePoints = [];
+
+    // 🌟 Multi-offset passes produce bold, prominent, thick lines across WebGL
+    let offsets = [[0, 0]];
+    if (thicknessMode === 'extra-thick') { // Coastlines
+        const d = 0.0011;
+        offsets = [
+            [0, 0],
+            [d, 0], [-d, 0], [0, d], [0, -d],
+            [d * 0.7, d * 0.7], [-d * 0.7, d * 0.7],
+            [d * 0.7, -d * 0.7], [-d * 0.7, -d * 0.7]
+        ];
+    } else if (thicknessMode === 'thick') { // Country & State boundaries
+        const d = 0.00075;
+        offsets = [
+            [0, 0],
+            [d, 0], [-d, 0], [0, d], [0, -d]
+        ];
+    }
 
     features.forEach(feature => {
         const geom = feature.geometry;
@@ -402,8 +423,12 @@ function buildLineSegmentsGeometry(features, isNorth, zHeight) {
                 const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
 
                 if (pt1 && pt2) {
-                    linePoints.push(pt1.x, pt1.y, zHeight);
-                    linePoints.push(pt2.x, pt2.y, zHeight);
+                    for (let o = 0; o < offsets.length; o++) {
+                        const ox = offsets[o][0];
+                        const oy = offsets[o][1];
+                        linePoints.push(pt1.x + ox, pt1.y + oy, zHeight);
+                        linePoints.push(pt2.x + ox, pt2.y + oy, zHeight);
+                    }
                 }
             }
         });
@@ -492,12 +517,12 @@ function rebuildVectorLines() {
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. High-Definition 50m Coastlines (z = 0.0025, solid primary boundary)
+    // 1. Extra-Thick 50m Coastlines (z = 0.0025)
     if (coastlineLinesMesh) {
         polarGroup.remove(coastlineLinesMesh);
         if (coastlineLinesMesh.geometry) coastlineLinesMesh.geometry.dispose();
     }
-    const coastGeom = buildLineSegmentsGeometry(rawCoastlineFeatures, isNorth, 0.0025);
+    const coastGeom = buildLineSegmentsGeometry(rawCoastlineFeatures, isNorth, 0.0025, 'extra-thick');
     const coastMat = new THREE.LineBasicMaterial({
         color: cfg.coastline,
         opacity: 0.95,
@@ -506,47 +531,47 @@ function rebuildVectorLines() {
     coastlineLinesMesh = new THREE.LineSegments(coastGeom, coastMat);
     polarGroup.add(coastlineLinesMesh);
 
-    // 2. Country Borders (z = 0.0022)
+    // 2. Thick Country Borders (z = 0.0022)
     if (countryLinesMesh) {
         polarGroup.remove(countryLinesMesh);
         if (countryLinesMesh.geometry) countryLinesMesh.geometry.dispose();
     }
-    const countryGeom = buildLineSegmentsGeometry(rawCountryFeatures, isNorth, 0.0022);
+    const countryGeom = buildLineSegmentsGeometry(rawCountryFeatures, isNorth, 0.0022, 'thick');
     const countryMat = new THREE.LineBasicMaterial({
         color: cfg.countryBorders,
-        opacity: 0.9,
+        opacity: 0.92,
         transparent: true
     });
     countryLinesMesh = new THREE.LineSegments(countryGeom, countryMat);
     polarGroup.add(countryLinesMesh);
 
-    // 3. State & Province Borders (z = 0.0020, subtle secondary boundary)
+    // 3. Thick State & Province Borders (z = 0.0020)
     if (stateLinesMesh) {
         polarGroup.remove(stateLinesMesh);
         if (stateLinesMesh.geometry) stateLinesMesh.geometry.dispose();
     }
-    const stateGeom = buildLineSegmentsGeometry(rawStateFeatures, isNorth, 0.0020);
+    const stateGeom = buildLineSegmentsGeometry(rawStateFeatures, isNorth, 0.0020, 'thick');
     const stateMat = new THREE.LineBasicMaterial({
         color: cfg.stateBorders,
-        opacity: 0.75,
+        opacity: 0.85,
         transparent: true
     });
     stateLinesMesh = new THREE.LineSegments(stateGeom, stateMat);
     polarGroup.add(stateLinesMesh);
 
-    // 4. Detailed County Borders (z = 0.0018, visible upon zooming)
+    // 4. Detailed County Borders (z = 0.0018, only appears when zoomed in to zoom > 2.6)
     if (countyLinesMesh) {
         polarGroup.remove(countyLinesMesh);
         if (countyLinesMesh.geometry) countyLinesMesh.geometry.dispose();
     }
-    const countyGeom = buildLineSegmentsGeometry(rawCountyFeatures, isNorth, 0.0018);
+    const countyGeom = buildLineSegmentsGeometry(rawCountyFeatures, isNorth, 0.0018, 'thin');
     const countyMat = new THREE.LineBasicMaterial({
         color: cfg.countyBorders,
-        opacity: 0.55,
+        opacity: 0.6,
         transparent: true
     });
     countyLinesMesh = new THREE.LineSegments(countyGeom, countyMat);
-    countyLinesMesh.visible = (camera && camera.zoom > 1.4);
+    countyLinesMesh.visible = (camera && camera.zoom > 2.6);
     polarGroup.add(countyLinesMesh);
 }
 
@@ -739,9 +764,10 @@ export function fitSynopticSector() {
     updateCompassUI();
 }
 
+// 🌟 County visibility trigger at deeper zoom level (> 2.6)
 function updateZoomVisibility() {
     if (countyLinesMesh && camera) {
-        countyLinesMesh.visible = (camera.zoom > 1.4);
+        countyLinesMesh.visible = (camera.zoom > 2.6);
     }
 }
 
