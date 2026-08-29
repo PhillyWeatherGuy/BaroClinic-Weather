@@ -3,7 +3,7 @@ import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js';
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
-import { updatePolarPalette } from '../layers/polarMap.js'; // 🌟 Polar Palette Switcher
+import { updatePolarPalette } from '../layers/polarMap.js';
 
 let onStepChangeCallback = null;
 let onThemeChangeCallback = null;
@@ -15,6 +15,77 @@ let shaderLayerRef = null;
 
 export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
+}
+
+/**
+ * 🌟 KEYBOARD SHORTCUTS & FAST-SCRUBBING ENGINE
+ */
+function initKeyboardControls() {
+    let keyHoldTimeout = null;
+    let keyHoldInterval = null;
+    let activeKey = null;
+
+    const FAST_SCRUB_INTERVAL_MS = 80; // Speed when holding down arrow key
+    const HOLD_DELAY_MS = 250;          // Time before rapid "zoom" scrub starts
+
+    function handleStep(delta) {
+        if (isPlaying) pausePlayback();
+        stepRelative(delta);
+    }
+
+    window.addEventListener('keydown', (e) => {
+        // Don't intercept if focused on text input fields
+        if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+        if (e.target.tagName === 'TEXTAREA') return;
+
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault();
+
+            // If already holding this key, let the interval handle it
+            if (activeKey === e.key) return;
+
+            // Clear any active timers
+            if (keyHoldTimeout) clearTimeout(keyHoldTimeout);
+            if (keyHoldInterval) clearInterval(keyHoldInterval);
+
+            activeKey = e.key;
+            const delta = (e.key === 'ArrowRight') ? 1 : -1;
+
+            // 1. Immediate step on first press
+            handleStep(delta);
+
+            // 2. Start rapid "zoom" scrub after hold delay
+            keyHoldTimeout = setTimeout(() => {
+                keyHoldInterval = setInterval(() => {
+                    handleStep(delta);
+                }, FAST_SCRUB_INTERVAL_MS);
+            }, HOLD_DELAY_MS);
+        } else if (e.key === ' ' || e.code === 'Space') {
+            // Spacebar: Play/Pause toggle
+            e.preventDefault();
+            togglePlayback();
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            if (activeKey === e.key) {
+                activeKey = null;
+                if (keyHoldTimeout) clearTimeout(keyHoldTimeout);
+                if (keyHoldInterval) clearInterval(keyHoldInterval);
+                keyHoldTimeout = null;
+                keyHoldInterval = null;
+            }
+        }
+    });
+
+    window.addEventListener('blur', () => {
+        activeKey = null;
+        if (keyHoldTimeout) clearTimeout(keyHoldTimeout);
+        if (keyHoldInterval) clearInterval(keyHoldInterval);
+        keyHoldTimeout = null;
+        keyHoldInterval = null;
+    });
 }
 
 /**
@@ -279,7 +350,7 @@ export function initModelCategoryBar() {
         });
     });
 
-    // 3. 🌟 Mouse Drag-to-Scroll Logic for Desktop Users
+    // 3. Mouse Drag-to-Scroll Logic for Desktop Users
     if (scrollContainer) {
         let isDown = false;
         let startX;
@@ -355,7 +426,6 @@ export function initParameterCategoryBar() {
             if (!p.category) return false;
             const pCatLower = p.category.toLowerCase();
             if (pCatLower === targetCatLower) return true;
-            // Matches "Surface" or "Precipitation" for the "Surface and Precipitation" pill
             if (targetCatLower.includes('surface') && targetCatLower.includes('precipitation')) {
                 return pCatLower.includes('surface') || pCatLower.includes('precipitation');
             }
@@ -535,6 +605,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
     initParameterCategoryBar();
     initThemeToggle();
     initViewSelector(viewCallback);
+    initKeyboardControls(); // 🌟 Keyboard Navigation & Fast Scrubbing
 
     if (slider) {
         slider.addEventListener('input', (e) => {
