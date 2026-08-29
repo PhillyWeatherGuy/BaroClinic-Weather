@@ -3,6 +3,7 @@ import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js';
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
+import { updatePolarPalette } from '../layers/polarMap.js'; // 🌟 Polar Palette Switcher
 
 let onStepChangeCallback = null;
 let onThemeChangeCallback = null;
@@ -197,15 +198,49 @@ export function initModelCategoryBar() {
             btn.setAttribute('data-model-id', model.id);
             btn.textContent = model.name;
 
-            btn.addEventListener('click', () => {
+            // 🌟 MODEL SWITCH EVENT LISTENER
+            btn.addEventListener('click', async () => {
                 document.querySelectorAll('#model-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
 
                 const labelSpan = modelBtn.querySelector('span');
                 if (labelSpan) labelSpan.textContent = model.name;
 
+                if (stateManager.activeModel === model.id) return;
+
+                if (isPlaying) pausePlayback();
+
+                showToast(`Loading model ${model.name}...`);
                 stateManager.activeModel = model.id;
-                console.log(`[UI] Active model selected: ${model.id}`);
+                
+                purgeAllAppMemory(shaderLayerRef);
+                const thisGen = stateManager.loadGeneration;
+
+                try {
+                    await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
+
+                    const bitmap0 = await loadChunkBitmap(0, thisGen);
+                    if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
+                        shaderLayerRef.preloadChunkTexture(0, bitmap0);
+                    }
+
+                    if (thisGen !== stateManager.loadGeneration) return;
+
+                    syncTimelineWithManifest();
+                    setStepIndex(0);
+
+                    if (typeof onStepChangeCallback === 'function') {
+                        onStepChangeCallback(0, stateManager.globalSteps[0]);
+                    }
+
+                    hideToast();
+                    preloadRemainingChunks(thisGen);
+                } catch (err) {
+                    if (err.message !== "Load cancelled") {
+                        console.error(err);
+                        showToast(`❌ Failed to load model ${model.name}`);
+                    }
+                }
             });
 
             modelListContainer.appendChild(btn);
@@ -301,7 +336,7 @@ export function initParameterCategoryBar() {
                 if (labelSpan && modelsData.parameters?.[stateManager.activeParam]) {
                     labelSpan.textContent = modelsData.parameters[stateManager.activeParam].name;
                 }
-                // 🌟 Defaults to Thermodynamics category (where 2m Temperature lives)
+                // Defaults to Thermodynamics category (where 2m Temperature lives)
                 renderCategoryParameters('Thermodynamics');
             }
         })
@@ -373,12 +408,15 @@ export function initParameterCategoryBar() {
                     initLayer(param.shader || 'scalar');
                 }
 
-                // 🌟 4. Swap GPU Palettes for the NEW Shader Layer & 3D Globe
+                // 🌟 4. Swap GPU Palettes for 2D Shader, 3D Globe & Polar Map
                 if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
                     shaderLayerRef.updatePalette(param.palette || param.id);
                 }
                 try {
                     updateThreeGlobePalette(param.palette || param.id);
+                } catch (e) {}
+                try {
+                    updatePolarPalette(param.palette || param.id);
                 } catch (e) {}
 
                 try {
