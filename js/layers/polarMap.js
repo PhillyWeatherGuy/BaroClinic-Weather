@@ -619,8 +619,8 @@ function initPolarUI(container) {
         </div>
 
         <div class="polar-pole-switcher">
-            <button class="pole-btn active" data-pole="north">❄️ North</button>
-            <button class="pole-btn" data-pole="south">🧊 South</button>
+            <button class="pole-btn active" data-pole="north">North</button>
+            <button class="pole-btn" data-pole="south">South</button>
         </div>
     `;
 
