@@ -4,16 +4,22 @@ import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes
 import { stateManager } from '../core/stateManager.js';
 
 // 🌐 Natural Earth Vector Datasets
+const LAND_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_land.geojson';
+const LAKES_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_lakes.geojson';
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
 const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
 
-let scene, camera, renderer, polarMesh, material, paletteTex;
+let scene, camera, renderer, polarGroup, polarMesh, material, paletteTex;
+let oceanMesh = null, landMesh = null, lakesMesh = null;
 let polarChunkTextures = {};
 let isPolarActive = false;
 let vectorLinesMesh = null;
 let graticuleMesh = null;
-let rawGeoJsonFeatures = [];
+
+let rawLandFeatures = [];
+let rawLakesFeatures = [];
+let rawLineFeatures = [];
 
 // Map State
 let currentPole = 'north'; // 'north' | 'south'
@@ -25,6 +31,25 @@ let mapZoom = 1.0;
 // Central meridians
 const NORTH_CENTRAL_LON = -95.0 * (Math.PI / 180.0);
 const SOUTH_CENTRAL_LON = 0.0 * (Math.PI / 180.0);
+
+const THEME_COLORS = {
+    dark: {
+        bg: '#121212',
+        ocean: 0x161920,
+        land: 0x1a1a1a,
+        lakes: 0x161920,
+        borders: 0xffffff,
+        graticule: 0x334155
+    },
+    light: {
+        bg: '#FFFFFF',
+        ocean: 0xebf2f7,
+        land: 0xf4f6f8,
+        lakes: 0xebf2f7,
+        borders: 0x2b2d31,
+        graticule: 0xcbd5e1
+    }
+};
 
 const style = document.createElement('style');
 style.textContent = `
@@ -270,17 +295,112 @@ function lngLatToPolarPlanar(lng, lat, isNorth = true) {
         y = -r * Math.cos(deltaLambda);
     }
 
-    return new THREE.Vector3(x, y, 0.002);
+    return new THREE.Vector2(x, y);
 }
 
-function rebuildPolarGraticule(parentMesh) {
+/**
+ * 🌟 Triangulate GeoJSON Polygons onto Polar Stereographic Plane
+ */
+function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
+    const vertices = [];
+
+    features.forEach(feat => {
+        const geom = feat.geometry;
+        if (!geom) return;
+
+        let polygonList = [];
+        if (geom.type === 'Polygon') {
+            polygonList = [geom.coordinates];
+        } else if (geom.type === 'MultiPolygon') {
+            polygonList = geom.coordinates;
+        }
+
+        polygonList.forEach(polyCoords => {
+            if (!polyCoords || polyCoords.length === 0) return;
+
+            const outerRing = [];
+            for (let i = 0; i < polyCoords[0].length; i++) {
+                const pt = lngLatToPolarPlanar(polyCoords[0][i][0], polyCoords[0][i][1], isNorth);
+                if (pt) outerRing.push(pt);
+            }
+            if (outerRing.length < 3) return;
+
+            const holes = [];
+            for (let h = 1; h < polyCoords.length; h++) {
+                const holeRing = [];
+                for (let i = 0; i < polyCoords[h].length; i++) {
+                    const pt = lngLatToPolarPlanar(polyCoords[h][i][0], polyCoords[h][i][1], isNorth);
+                    if (pt) holeRing.push(pt);
+                }
+                if (holeRing.length >= 3) holes.push(holeRing);
+            }
+
+            try {
+                if (THREE.ShapeUtils.area(outerRing) < 0) outerRing.reverse();
+                holes.forEach(hRing => {
+                    if (THREE.ShapeUtils.area(hRing) > 0) hRing.reverse();
+                });
+
+                const faces = THREE.ShapeUtils.triangulateShape(outerRing, holes);
+                const allPoints = outerRing.concat(...holes);
+
+                for (let f = 0; f < faces.length; f++) {
+                    const idxs = faces[f];
+                    const pA = allPoints[idxs[0]];
+                    const pB = allPoints[idxs[1]];
+                    const pC = allPoints[idxs[2]];
+                    if (pA && pB && pC) {
+                        vertices.push(pA.x, pA.y, zHeight);
+                        vertices.push(pB.x, pB.y, zHeight);
+                        vertices.push(pC.x, pC.y, zHeight);
+                    }
+                }
+            } catch (e) {}
+        });
+    });
+
+    const geometry = new THREE.BufferGeometry();
+    if (vertices.length > 0) {
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    }
+    return geometry;
+}
+
+function rebuildPolygonFills() {
+    const isNorth = (currentPole === 'north');
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    // 1. Rebuild Land Mesh (z = 0.0003)
+    if (landMesh) {
+        polarGroup.remove(landMesh);
+        if (landMesh.geometry) landMesh.geometry.dispose();
+    }
+    const landGeom = triangulateGeoJsonFeatures(rawLandFeatures, isNorth, 0.0003);
+    const landMat = new THREE.MeshBasicMaterial({ color: cfg.land, side: THREE.DoubleSide });
+    landMesh = new THREE.Mesh(landGeom, landMat);
+    polarGroup.add(landMesh);
+
+    // 2. Rebuild Lakes Mesh (z = 0.0006)
+    if (lakesMesh) {
+        polarGroup.remove(lakesMesh);
+        if (lakesMesh.geometry) lakesMesh.geometry.dispose();
+    }
+    const lakesGeom = triangulateGeoJsonFeatures(rawLakesFeatures, isNorth, 0.0006);
+    const lakesMat = new THREE.MeshBasicMaterial({ color: cfg.lakes, side: THREE.DoubleSide });
+    lakesMesh = new THREE.Mesh(lakesGeom, lakesMat);
+    polarGroup.add(lakesMesh);
+}
+
+function rebuildPolarGraticule() {
     if (graticuleMesh) {
-        parentMesh.remove(graticuleMesh);
+        polarGroup.remove(graticuleMesh);
         if (graticuleMesh.geometry) graticuleMesh.geometry.dispose();
     }
 
     const lines = [];
     const isNorth = (currentPole === 'north');
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
 
     for (let lat = 10; lat <= 80; lat += 10) {
         const c = (90 - lat) * (Math.PI / 180.0);
@@ -290,8 +410,8 @@ function rebuildPolarGraticule(parentMesh) {
             const theta1 = (i / segments) * Math.PI * 2;
             const theta2 = ((i + 1) / segments) * Math.PI * 2;
             lines.push(
-                r * Math.cos(theta1), r * Math.sin(theta1), 0.003,
-                r * Math.cos(theta2), r * Math.sin(theta2), 0.003
+                r * Math.cos(theta1), r * Math.sin(theta1), 0.0015,
+                r * Math.cos(theta2), r * Math.sin(theta2), 0.0015
             );
         }
     }
@@ -300,7 +420,7 @@ function rebuildPolarGraticule(parentMesh) {
         const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
         const pEnd = lngLatToPolarPlanar(deg, isNorth ? 5 : -5, isNorth);
         if (pStart && pEnd) {
-            lines.push(pStart.x, pStart.y, 0.003, pEnd.x, pEnd.y, 0.003);
+            lines.push(pStart.x, pStart.y, 0.0015, pEnd.x, pEnd.y, 0.0015);
         }
     }
 
@@ -308,25 +428,26 @@ function rebuildPolarGraticule(parentMesh) {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
 
     const material = new THREE.LineBasicMaterial({
-        color: 0x475569,
+        color: THEME_COLORS[themeKey].graticule,
         opacity: 0.45,
         transparent: true
     });
 
     graticuleMesh = new THREE.LineSegments(geometry, material);
-    parentMesh.add(graticuleMesh);
+    polarGroup.add(graticuleMesh);
 }
 
-function rebuildVectorBorders(parentMesh) {
+function rebuildVectorBorders() {
     if (vectorLinesMesh) {
-        parentMesh.remove(vectorLinesMesh);
+        polarGroup.remove(vectorLinesMesh);
         if (vectorLinesMesh.geometry) vectorLinesMesh.geometry.dispose();
     }
 
     const linePoints = [];
     const isNorth = (currentPole === 'north');
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
 
-    rawGeoJsonFeatures.forEach(feature => {
+    rawLineFeatures.forEach(feature => {
         const geom = feature.geometry;
         if (!geom) return;
 
@@ -349,8 +470,8 @@ function rebuildVectorBorders(parentMesh) {
                 const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
 
                 if (pt1 && pt2) {
-                    linePoints.push(pt1.x, pt1.y, pt1.z);
-                    linePoints.push(pt2.x, pt2.y, pt2.z);
+                    linePoints.push(pt1.x, pt1.y, 0.002);
+                    linePoints.push(pt2.x, pt2.y, 0.002);
                 }
             }
         });
@@ -360,36 +481,50 @@ function rebuildVectorBorders(parentMesh) {
         const lineGeometry = new THREE.BufferGeometry();
         lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
 
-        const isDark = (stateManager.currentTheme === 'dark');
         const lineMaterial = new THREE.LineBasicMaterial({
-            color: isDark ? 0xffffff : 0x000000,
-            opacity: isDark ? 0.95 : 0.85,
+            color: THEME_COLORS[themeKey].borders,
+            opacity: (themeKey === 'dark') ? 0.95 : 0.85,
             transparent: true
         });
 
         vectorLinesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
-        parentMesh.add(vectorLinesMesh);
+        polarGroup.add(vectorLinesMesh);
     }
 }
 
-async function loadPolarVectorData(parentMesh) {
-    const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
-    rawGeoJsonFeatures = [];
+async function loadAllBasemapGeoJson() {
+    try {
+        const [landResp, lakesResp, cResp, sResp, coastResp] = await Promise.all([
+            fetch(LAND_POLYGONS_URL).catch(() => null),
+            fetch(LAKES_POLYGONS_URL).catch(() => null),
+            fetch(COUNTRY_BORDERS_URL).catch(() => null),
+            fetch(STATE_BORDERS_URL).catch(() => null),
+            fetch(COASTLINES_URL).catch(() => null)
+        ]);
 
-    for (const url of urls) {
-        try {
-            const resp = await fetch(url);
-            if (!resp.ok) continue;
-            const data = await resp.json();
-            if (data && data.features) {
-                rawGeoJsonFeatures.push(...data.features);
-            }
-        } catch (err) {
-            console.warn("Polar vector line load error:", err);
+        if (landResp && landResp.ok) {
+            const data = await landResp.json();
+            if (data && data.features) rawLandFeatures = data.features;
         }
-    }
+        if (lakesResp && lakesResp.ok) {
+            const data = await lakesResp.json();
+            if (data && data.features) rawLakesFeatures = data.features;
+        }
 
-    rebuildVectorBorders(parentMesh);
+        rawLineFeatures = [];
+        for (const resp of [cResp, sResp, coastResp]) {
+            if (resp && resp.ok) {
+                const data = await resp.json();
+                if (data && data.features) rawLineFeatures.push(...data.features);
+            }
+        }
+
+        rebuildPolygonFills();
+        rebuildPolarGraticule();
+        rebuildVectorBorders();
+    } catch (err) {
+        console.warn("Basemap GeoJSON load error:", err);
+    }
 }
 
 function initPolarUI(container) {
@@ -406,7 +541,6 @@ function initPolarUI(container) {
             </svg>
         </button>
 
-        <!-- 🌟 Desktop Rotation Capsule -->
         <div class="polar-rot-capsule" title="Rotate Map Around Pole">
             <button class="rot-nudge-btn" id="btn-rot-left" title="Rotate Left">⟲</button>
             <input id="polar-rot-slider" type="range" min="0" max="360" value="0" step="1">
@@ -483,8 +617,8 @@ function updateCompassUI() {
 export function setRotationDegrees(deg) {
     const normalizedDeg = (deg % 360 + 360) % 360;
     mapRotation = THREE.MathUtils.degToRad(normalizedDeg);
-    if (polarMesh) {
-        polarMesh.rotation.z = mapRotation;
+    if (polarGroup) {
+        polarGroup.rotation.z = mapRotation;
     }
     updateCompassUI();
 }
@@ -503,10 +637,9 @@ export function setHemisphere(pole) {
         material.needsUpdate = true;
     }
 
-    if (polarMesh) {
-        rebuildPolarGraticule(polarMesh);
-        rebuildVectorBorders(polarMesh);
-    }
+    rebuildPolygonFills();
+    rebuildPolarGraticule();
+    rebuildVectorBorders();
 
     fitSynopticSector();
 }
@@ -531,7 +664,7 @@ export function fitSynopticSector() {
     mapTargetY = (currentPole === 'north') ? -0.45 : -0.20;
     mapRotation = 0.0;
 
-    if (polarMesh) polarMesh.rotation.z = 0.0;
+    if (polarGroup) polarGroup.rotation.z = 0.0;
 
     camera.position.set(0.0, mapTargetY, 10);
     camera.rotation.z = 0;
@@ -540,14 +673,14 @@ export function fitSynopticSector() {
 }
 
 /**
- * 🌟 DIRECTIONALLY-LOCKED 2D MAP CONTROLS (Disambiguates Pan vs. Rotate)
+ * 🌟 DIRECTIONALLY-LOCKED GESTURE CONTROLLER
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
     let dragMode = 'none'; // 'none' | 'rotate' | 'pan'
     let startX = 0, startY = 0;
     let accumDx = 0, accumDy = 0;
-    const DRAG_LOCK_THRESHOLD = 5; // Pixels to determine intent
+    const DRAG_LOCK_THRESHOLD = 5;
     let initialTouchDist = 0;
 
     // Desktop Mouse Handlers
@@ -569,7 +702,6 @@ function init2DMapControls(canvas) {
         startX = e.clientX;
         startY = e.clientY;
 
-        // Determine intent if not locked yet
         if (dragMode === 'none') {
             accumDx += Math.abs(dx);
             accumDy += Math.abs(dy);
@@ -579,14 +711,12 @@ function init2DMapControls(canvas) {
         }
 
         if (dragMode === 'rotate') {
-            // 🌟 1. Rotation strictly active; vertical movement FORCED LOCKED
             mapRotation += dx * 0.004;
-            if (polarMesh) {
-                polarMesh.rotation.z = mapRotation;
+            if (polarGroup) {
+                polarGroup.rotation.z = mapRotation;
             }
             updateCompassUI();
         } else if (dragMode === 'pan') {
-            // 🌟 2. North/South Pan strictly active; rotation FORCED LOCKED
             const h = window.innerHeight;
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
             const unitsPerPixel = visibleHeight / h;
@@ -606,7 +736,7 @@ function init2DMapControls(canvas) {
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Desktop Mouse Wheel Zoom
+    // Desktop Wheel Zoom
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const zoomSensitivity = 0.0012;
@@ -649,7 +779,6 @@ function init2DMapControls(canvas) {
             startX = clientX;
             startY = clientY;
 
-            // Determine intent if not locked yet
             if (dragMode === 'none') {
                 accumDx += Math.abs(dx);
                 accumDy += Math.abs(dy);
@@ -659,14 +788,12 @@ function init2DMapControls(canvas) {
             }
 
             if (dragMode === 'rotate') {
-                // 🌟 1. Rotation strictly active; vertical movement FORCED LOCKED
                 mapRotation += dx * 0.005;
-                if (polarMesh) {
-                    polarMesh.rotation.z = mapRotation;
+                if (polarGroup) {
+                    polarGroup.rotation.z = mapRotation;
                 }
                 updateCompassUI();
             } else if (dragMode === 'pan') {
-                // 🌟 2. North/South Pan strictly active; rotation FORCED LOCKED
                 const h = window.innerHeight;
                 const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
                 const unitsPerPixel = visibleHeight / h;
@@ -676,7 +803,6 @@ function init2DMapControls(canvas) {
                 camera.position.y = mapTargetY;
             }
         } else if (e.touches.length === 2 && initialTouchDist > 0) {
-            // Pinch-to-zoom
             const t1 = e.touches[0];
             const t2 = e.touches[1];
             const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
@@ -726,6 +852,21 @@ export function initPolarMap() {
 
     init2DMapControls(renderer.domElement);
 
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+    container.style.background = cfg.bg;
+
+    // 🌟 Unified Polar Group (Rotates everything around (0,0) in sync)
+    polarGroup = new THREE.Group();
+    scene.add(polarGroup);
+
+    // Layer 0: Styled Ocean Base Quad (z = 0.0)
+    const oceanGeom = new THREE.PlaneGeometry(4.0, 4.0);
+    const oceanMat = new THREE.MeshBasicMaterial({ color: cfg.ocean });
+    oceanMesh = new THREE.Mesh(oceanGeom, oceanMat);
+    polarGroup.add(oceanMesh);
+
+    // Layer 3: Weather Shader Layer (z = 0.0010)
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
@@ -738,19 +879,21 @@ export function initPolarMap() {
             u_paletteTexture: { value: paletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
-            u_opacity: { value: 0.88 },
+            u_opacity: { value: 0.86 },
             u_centralLon: { value: NORTH_CENTRAL_LON },
             u_poleSign: { value: 1.0 }
         },
-        transparent: true
+        transparent: true,
+        depthWrite: false
     });
 
-    const geometry = new THREE.PlaneGeometry(4.0, 4.0, 1, 1);
-    polarMesh = new THREE.Mesh(geometry, material);
-    scene.add(polarMesh);
+    const weatherGeom = new THREE.PlaneGeometry(4.0, 4.0);
+    polarMesh = new THREE.Mesh(weatherGeom, material);
+    polarMesh.position.z = 0.001;
+    polarGroup.add(polarMesh);
 
-    rebuildPolarGraticule(polarMesh);
-    loadPolarVectorData(polarMesh);
+    // Load Vector Land, Lakes, and Borders
+    loadAllBasemapGeoJson();
 
     fitSynopticSector();
 
@@ -786,9 +929,18 @@ export function updatePolarPalette(paramIdOrHexArray) {
     material.uniforms.u_paletteTexture.value = paletteTex;
     material.needsUpdate = true;
 
-    if (polarMesh) {
-        rebuildVectorBorders(polarMesh);
-    }
+    // Update Basemap Theme Colors
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    const container = document.getElementById('polar-container');
+    if (container) container.style.background = cfg.bg;
+
+    if (oceanMesh && oceanMesh.material) oceanMesh.material.color.setHex(cfg.ocean);
+    if (landMesh && landMesh.material) landMesh.material.color.setHex(cfg.land);
+    if (lakesMesh && lakesMesh.material) lakesMesh.material.color.setHex(cfg.lakes);
+    if (vectorLinesMesh && vectorLinesMesh.material) vectorLinesMesh.material.color.setHex(cfg.borders);
+    if (graticuleMesh && graticuleMesh.material) graticuleMesh.material.color.setHex(cfg.graticule);
 }
 
 export function updatePolarFrame(frameState) {
