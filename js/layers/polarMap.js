@@ -82,8 +82,9 @@ style.textContent = `
     .polar-compass-btn svg {
         transition: transform 0.1s linear;
     }
+    /* Hidden on Mobile by default */
     .polar-rot-capsule {
-        display: flex;
+        display: none;
         align-items: center;
         background: rgba(11, 15, 25, 0.88);
         backdrop-filter: blur(12px);
@@ -93,6 +94,11 @@ style.textContent = `
         padding: 4px 8px;
         gap: 6px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+    @media (min-width: 1024px) {
+        .polar-rot-capsule {
+            display: flex;
+        }
     }
     .rot-nudge-btn {
         background: transparent;
@@ -394,14 +400,14 @@ function initPolarUI(container) {
     topControls = document.createElement('div');
     topControls.className = 'polar-top-controls';
     topControls.innerHTML = `
-        <button id="btn-polar-compass" class="polar-compass-btn" title="Reset North Up">
+        <button id="btn-polar-compass" class="polar-compass-btn" title="Reset Orientation (North Up)">
             <svg id="polar-compass-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="12 2 15 11 12 9 9 11 12 2" fill="#ef4444"/>
                 <polygon points="12 22 15 13 12 15 9 13 12 22" fill="#94a3b8"/>
             </svg>
         </button>
 
-        <!-- 🌟 Integrated Polar Rotation Capsule -->
+        <!-- 🌟 Desktop Rotation Capsule -->
         <div class="polar-rot-capsule" title="Rotate Map Around Pole">
             <button class="rot-nudge-btn" id="btn-rot-left" title="Rotate Left">⟲</button>
             <input id="polar-rot-slider" type="range" min="0" max="360" value="0" step="1">
@@ -422,7 +428,6 @@ function initPolarUI(container) {
         });
     }
 
-    // Rotation Slider & Nudge Buttons
     const rotSlider = topControls.querySelector('#polar-rot-slider');
     if (rotSlider) {
         rotSlider.addEventListener('input', (e) => {
@@ -529,21 +534,21 @@ export function fitSynopticSector() {
 
     if (polarMesh) polarMesh.rotation.z = 0.0;
 
-    camera.position.set(mapTargetX, mapTargetY, 10);
+    camera.position.set(0.0, mapTargetY, 10);
     camera.rotation.z = 0;
     camera.updateProjectionMatrix();
     updateCompassUI();
 }
 
 /**
- * 🌟 BUTTERY-SMOOTH 2D MAP CONTROLS (Pure 1-Touch Pan & Smooth Zoom)
+ * 🌟 2D PLANAR GESTURE CONTROLLER (Mobile: Swipe Left/Right = Rotate, Swipe Up/Down = North/South)
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
     let startX = 0, startY = 0;
     let initialTouchDist = 0;
 
-    // Desktop Mouse Drag (1-Click Pure Pan)
+    // Desktop Mouse Drag (Left-click full pan)
     canvas.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         isDragging = true;
@@ -576,7 +581,7 @@ function init2DMapControls(canvas) {
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Desktop Mouse Wheel Zoom (Gentle & Smooth)
+    // Desktop Wheel Zoom
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const zoomSensitivity = 0.0012;
@@ -588,7 +593,7 @@ function init2DMapControls(canvas) {
         camera.updateProjectionMatrix();
     }, { passive: false });
 
-    // Mobile Touch Gestures (1-Finger Silky Pan, 2-Finger Pinch Zoom)
+    // Mobile Touch Gestures
     canvas.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
             isDragging = true;
@@ -619,12 +624,23 @@ function init2DMapControls(canvas) {
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
             const unitsPerPixel = visibleHeight / h;
 
-            mapTargetX -= dx * unitsPerPixel;
-            mapTargetY += dy * unitsPerPixel;
+            // 🌟 1. Horizontal Motion (dx) strictly ROTATES around the Pole (0, 0)
+            mapRotation -= dx * 0.005;
+            if (polarMesh) {
+                polarMesh.rotation.z = mapRotation;
+            }
+            updateCompassUI();
 
-            camera.position.x = mapTargetX;
+            // 🌟 2. Vertical Motion (dy) strictly PANS North / South
+            mapTargetY += dy * unitsPerPixel * 0.9;
+            mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY)); // Keep within synoptic bounds
+
+            mapTargetX = 0.0; // Locked to center axis on mobile (no horizontal translation)
+
+            camera.position.x = 0.0;
             camera.position.y = mapTargetY;
         } else if (e.touches.length === 2 && initialTouchDist > 0) {
+            // Pinch-to-zoom
             const t1 = e.touches[0];
             const t2 = e.touches[1];
             const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
