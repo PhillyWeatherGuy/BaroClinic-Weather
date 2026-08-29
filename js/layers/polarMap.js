@@ -13,9 +13,12 @@ let polarChunkTextures = {};
 let isPolarActive = false;
 let vectorLinesMesh = null;
 let graticuleMesh = null;
+let currentPole = 'north'; // 'north' | 'south'
+let rawGeoJsonFeatures = [];
 
-// Central meridian (standard -80°W puts North America upright)
-const CENTRAL_LON_RAD = -80.0 * (Math.PI / 180.0);
+// Central meridians (North: -80°W puts North America upright; South: 0° standard)
+const NORTH_CENTRAL_LON = -80.0 * (Math.PI / 180.0);
+const SOUTH_CENTRAL_LON = 0.0 * (Math.PI / 180.0);
 
 const style = document.createElement('style');
 style.textContent = `
@@ -39,6 +42,44 @@ style.textContent = `
         user-select: none !important;
         -webkit-user-select: none !important;
     }
+    .polar-pole-switcher {
+        position: absolute;
+        top: 62px;
+        right: 16px;
+        z-index: 28;
+        display: flex;
+        align-items: center;
+        background: rgba(11, 15, 25, 0.88);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 20px;
+        padding: 3px;
+        gap: 3px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+    .pole-btn {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-family: 'Rajdhani', sans-serif;
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        padding: 5px 12px;
+        border-radius: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .pole-btn:hover {
+        color: #ffffff;
+    }
+    .pole-btn.active {
+        background: rgba(56, 189, 248, 0.25);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.6);
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+    }
 `;
 document.head.appendChild(style);
 
@@ -58,6 +99,7 @@ const fsPolar = `
     uniform vec2 u_uvScale;
     uniform float u_opacity;
     uniform float u_centralLon;
+    uniform float u_poleSign; // +1.0 for North, -1.0 for South
     varying vec2 v_pos;
 
     const float PI = 3.141592653589793;
@@ -65,33 +107,38 @@ const fsPolar = `
     void main() {
         float r = length(v_pos);
         
-        // Discard anything outside the Equator boundary ring
+        // Discard outside the Equator boundary ring
         if (r > 1.0) {
             discard;
         }
 
-        // Exact Inverse Polar Stereographic Conformal Mapping
-        float c = 2.0 * atan(r); // Angular distance from North Pole
-        float lat = (PI * 0.5) - c;
-        float lon = u_centralLon + atan(v_pos.x, -v_pos.y);
+        // Exact Inverse Polar Stereographic Conformal Mapping (North & South Hemispheres)
+        float c = 2.0 * atan(r); // Angular distance from active pole
+        float lat = u_poleSign * ((PI * 0.5) - c);
+        
+        float lon;
+        if (u_poleSign > 0.0) {
+            lon = u_centralLon + atan(v_pos.x, -v_pos.y);
+        } else {
+            lon = u_centralLon - atan(v_pos.x, v_pos.y);
+        }
 
         // Normalize longitude into [-PI, PI]
         lon = mod(lon + PI, 2.0 * PI) - PI;
 
         float u = (lon + PI) / (2.0 * PI);
-        float v = c / PI; // 0.0 at North Pole (90N), 0.5 at Equator (0N)
+        float v = (PI * 0.5 - lat) / PI; // 0.0 at 90N, 0.5 at Equator, 1.0 at 90S
 
         vec2 sprite_uv = u_uvOffset + vec2(fract(u), clamp(v, 0.0, 1.0)) * u_uvScale;
 
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
 
-        // Discard transparent values (e.g. 0.00" dry land in precip)
         if (color.a == 0.0) {
             discard;
         }
 
-        // Luminous outer boundary border ring
+        // Luminous outer boundary ring
         if (r > 0.993) {
             gl_FragColor = vec4(0.22, 0.74, 0.97, 0.95);
             return;
@@ -123,33 +170,48 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
 }
 
 /**
- * 🌟 Forward Polar Stereographic Coordinate Projection
+ * 🌟 Forward Polar Stereographic Coordinate Projection (Handles North & South Hemispheres)
  */
-function lngLatToPolarPlanar(lng, lat) {
-    if (lat < 0.0) return null; // Northern Hemisphere only
-    const phi = lat * (Math.PI / 180.0);
+function lngLatToPolarPlanar(lng, lat, isNorth = true) {
+    if (isNorth && lat < 0.0) return null;
+    if (!isNorth && lat > 0.0) return null;
+
+    const phi = Math.abs(lat) * (Math.PI / 180.0);
     const lambda = lng * (Math.PI / 180.0);
 
     const c = (Math.PI * 0.5) - phi;
-    const r = Math.tan(c * 0.5); // Conformal stereographic radial formula
-    const deltaLambda = lambda - CENTRAL_LON_RAD;
+    const r = Math.tan(c * 0.5);
 
-    const x = r * Math.sin(deltaLambda);
-    const y = -r * Math.cos(deltaLambda);
+    let x, y;
+    if (isNorth) {
+        const deltaLambda = lambda - NORTH_CENTRAL_LON;
+        x = r * Math.sin(deltaLambda);
+        y = -r * Math.cos(deltaLambda);
+    } else {
+        const deltaLambda = lambda - SOUTH_CENTRAL_LON;
+        x = -r * Math.sin(deltaLambda);
+        y = -r * Math.cos(deltaLambda);
+    }
 
-    return new THREE.Vector3(x, y, 0.002); // Slightly above data plane
+    return new THREE.Vector3(x, y, 0.002);
 }
 
 /**
  * 🌟 Polar Graticule (Concentric Latitude Rings & Radial Meridian Spokes)
  */
-function createPolarGraticule(parentMesh) {
-    const lines = [];
+function rebuildPolarGraticule(parentMesh) {
+    if (graticuleMesh) {
+        parentMesh.remove(graticuleMesh);
+        if (graticuleMesh.geometry) graticuleMesh.geometry.dispose();
+    }
 
-    // 1. Concentric Latitude Rings (80°N, 60°N, 40°N, 20°N)
+    const lines = [];
+    const isNorth = (currentPole === 'north');
+
+    // 1. Concentric Latitude Rings (80°, 60°, 40°, 20°)
     const latRings = [80, 60, 40, 20];
-    latRings.forEach(lat => {
-        const c = (90 - lat) * (Math.PI / 180.0);
+    latRings.forEach(latVal => {
+        const c = (90 - latVal) * (Math.PI / 180.0);
         const r = Math.tan(c * 0.5);
         const segments = 128;
         for (let i = 0; i < segments; i++) {
@@ -164,8 +226,8 @@ function createPolarGraticule(parentMesh) {
 
     // 2. Radial Longitude Spokes (every 30°)
     for (let deg = 0; deg < 360; deg += 30) {
-        const pStart = lngLatToPolarPlanar(deg, 85);
-        const pEnd = lngLatToPolarPlanar(deg, 0);
+        const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
+        const pEnd = lngLatToPolarPlanar(deg, 0, isNorth);
         if (pStart && pEnd) {
             lines.push(pStart.x, pStart.y, 0.003, pEnd.x, pEnd.y, 0.003);
         }
@@ -184,49 +246,44 @@ function createPolarGraticule(parentMesh) {
     parentMesh.add(graticuleMesh);
 }
 
-async function loadPolarVectorBorders(parentMesh) {
-    const linePoints = [];
-    const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
-
-    for (const url of urls) {
-        try {
-            const resp = await fetch(url);
-            if (!resp.ok) continue;
-            const data = await resp.json();
-
-            data.features.forEach(feature => {
-                const geom = feature.geometry;
-                if (!geom) return;
-
-                let lineStrings = [];
-                if (geom.type === 'LineString') lineStrings = [geom.coordinates];
-                else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
-                else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
-                else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
-
-                lineStrings.forEach(coords => {
-                    for (let i = 0; i < coords.length - 1; i++) {
-                        const p1Base = coords[i];
-                        const p2Base = coords[i + 1];
-
-                        // Skip Southern Hemisphere points
-                        if (p1Base[1] < 0 || p2Base[1] < 0) continue;
-                        if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
-
-                        const pt1 = lngLatToPolarPlanar(p1Base[0], p1Base[1]);
-                        const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1]);
-
-                        if (pt1 && pt2) {
-                            linePoints.push(pt1.x, pt1.y, pt1.z);
-                            linePoints.push(pt2.x, pt2.y, pt2.z);
-                        }
-                    }
-                });
-            });
-        } catch (err) {
-            console.warn("Polar vector line load error:", err);
-        }
+function rebuildVectorBorders(parentMesh) {
+    if (vectorLinesMesh) {
+        parentMesh.remove(vectorLinesMesh);
+        if (vectorLinesMesh.geometry) vectorLinesMesh.geometry.dispose();
     }
+
+    const linePoints = [];
+    const isNorth = (currentPole === 'north');
+
+    rawGeoJsonFeatures.forEach(feature => {
+        const geom = feature.geometry;
+        if (!geom) return;
+
+        let lineStrings = [];
+        if (geom.type === 'LineString') lineStrings = [geom.coordinates];
+        else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
+        else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
+        else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
+
+        lineStrings.forEach(coords => {
+            for (let i = 0; i < coords.length - 1; i++) {
+                const p1Base = coords[i];
+                const p2Base = coords[i + 1];
+
+                if (isNorth && (p1Base[1] < 0 || p2Base[1] < 0)) continue;
+                if (!isNorth && (p1Base[1] > 0 || p2Base[1] > 0)) continue;
+                if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
+
+                const pt1 = lngLatToPolarPlanar(p1Base[0], p1Base[1], isNorth);
+                const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
+
+                if (pt1 && pt2) {
+                    linePoints.push(pt1.x, pt1.y, pt1.z);
+                    linePoints.push(pt2.x, pt2.y, pt2.z);
+                }
+            }
+        });
+    });
 
     if (linePoints.length > 0) {
         const lineGeometry = new THREE.BufferGeometry();
@@ -244,6 +301,70 @@ async function loadPolarVectorBorders(parentMesh) {
     }
 }
 
+async function loadPolarVectorData(parentMesh) {
+    const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
+    rawGeoJsonFeatures = [];
+
+    for (const url of urls) {
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            if (data && data.features) {
+                rawGeoJsonFeatures.push(...data.features);
+            }
+        } catch (err) {
+            console.warn("Polar vector line load error:", err);
+        }
+    }
+
+    rebuildVectorBorders(parentMesh);
+}
+
+function initPoleSwitcherUI(container) {
+    let switcher = container.querySelector('.polar-pole-switcher');
+    if (switcher) return;
+
+    switcher = document.createElement('div');
+    switcher.className = 'polar-pole-switcher';
+    switcher.innerHTML = `
+        <button class="pole-btn active" data-pole="north">❄️ North</button>
+        <button class="pole-btn" data-pole="south">🧊 South</button>
+    `;
+
+    const buttons = switcher.querySelectorAll('.pole-btn');
+    buttons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            buttons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const targetPole = btn.getAttribute('data-pole');
+            setHemisphere(targetPole);
+        });
+    });
+
+    container.appendChild(switcher);
+}
+
+export function setHemisphere(pole) {
+    currentPole = pole;
+    const isNorth = (pole === 'north');
+
+    if (material) {
+        material.uniforms.u_poleSign.value = isNorth ? 1.0 : -1.0;
+        material.uniforms.u_centralLon.value = isNorth ? NORTH_CENTRAL_LON : SOUTH_CENTRAL_LON;
+        material.needsUpdate = true;
+    }
+
+    if (polarMesh) {
+        rebuildPolarGraticule(polarMesh);
+        rebuildVectorBorders(polarMesh);
+    }
+
+    console.log(`❄️ [Polar Map] Switched to ${isNorth ? 'North Pole (Arctic)' : 'South Pole (Antarctic)'}`);
+}
+
 export function initPolarMap() {
     let container = document.getElementById('polar-container');
     if (!container) {
@@ -252,6 +373,9 @@ export function initPolarMap() {
         container.style.display = 'none';
         document.body.appendChild(container);
     }
+
+    initPoleSwitcherUI(container);
+
     if (scene) return;
 
     scene = new THREE.Scene();
@@ -267,14 +391,24 @@ export function initPolarMap() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     
-    // 🌟 Pure 2D Planar Navigation (No 3D tilting)
-    controls.enableRotate = false;
+    // 🌟 Free 2D Pan, Zoom & Rotation Setup
+    controls.enableRotate = true;
+    controls.rotateSpeed = 0.7;
     controls.enablePan = true;
     controls.panSpeed = 1.0;
+    controls.screenSpacePanning = true;
     controls.enableZoom = true;
     controls.zoomSpeed = 0.8;
-    controls.minDistance = 0.8;
+    controls.minDistance = 0.6;
     controls.maxDistance = 5.5;
+
+    // Mobile gesture controls: 1-finger pan, 2-finger zoom & rotate!
+    if (THREE.TOUCH) {
+        controls.touches = {
+            ONE: THREE.TOUCH.PAN,
+            TWO: THREE.TOUCH.DOLLY_ROTATE
+        };
+    }
 
     // Theme-aware initial palette
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
@@ -290,18 +424,18 @@ export function initPolarMap() {
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
             u_opacity: { value: 0.88 },
-            u_centralLon: { value: CENTRAL_LON_RAD }
+            u_centralLon: { value: NORTH_CENTRAL_LON },
+            u_poleSign: { value: 1.0 }
         },
         transparent: true
     });
 
-    // Planar 2D Quad representing the Polar Stereographic disk
     const geometry = new THREE.PlaneGeometry(2.0, 2.0, 1, 1);
     polarMesh = new THREE.Mesh(geometry, material);
     scene.add(polarMesh);
 
-    createPolarGraticule(polarMesh);
-    loadPolarVectorBorders(polarMesh);
+    rebuildPolarGraticule(polarMesh);
+    loadPolarVectorData(polarMesh);
 
     window.addEventListener('resize', () => {
         if (!renderer || !camera) return;
@@ -340,10 +474,8 @@ export function updatePolarPalette(paramIdOrHexArray) {
     material.uniforms.u_paletteTexture.value = paletteTex;
     material.needsUpdate = true;
 
-    // Update vector borders line color
-    if (vectorLinesMesh && vectorLinesMesh.material) {
-        const isDark = (stateManager.currentTheme === 'dark');
-        vectorLinesMesh.material.color.setHex(isDark ? 0xffffff : 0x000000);
+    if (polarMesh) {
+        rebuildVectorBorders(polarMesh);
     }
 }
 
@@ -397,11 +529,6 @@ export function showPolarMap() {
     if (mapDiv) mapDiv.style.display = 'none';
 
     isPolarActive = true;
-    if (controls) {
-        controls.target.set(0, 0, 0);
-        camera.position.set(0, 0, 3.2);
-        controls.update();
-    }
 }
 
 export function hidePolarMap() {
