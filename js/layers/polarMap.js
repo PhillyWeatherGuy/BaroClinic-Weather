@@ -41,7 +41,7 @@ let mapTargetY = -0.45;
 let mapTargetX = 0.0;
 let mapZoom = 1.0;
 
-// Central meridians
+// Central meridians (North: -95°W aligns North America upright; South: 0° Prime Meridian upright)
 const NORTH_CENTRAL_LON = -95.0 * (Math.PI / 180.0);
 const SOUTH_CENTRAL_LON = 0.0 * (Math.PI / 180.0);
 
@@ -231,7 +231,7 @@ const fsPolar = `
     uniform vec2 u_uvScale;
     uniform float u_opacity;
     uniform float u_centralLon;
-    uniform float u_poleSign;
+    uniform float u_poleSign; // +1.0 for North, -1.0 for South
     varying vec2 v_pos;
 
     const float PI = 3.141592653589793;
@@ -243,21 +243,27 @@ const fsPolar = `
             discard;
         }
 
-        // Exact Inverse Polar Stereographic Conformal Formula
-        float c = 2.0 * atan(r);
-        float lat = u_poleSign * ((PI * 0.5) - c);
+        // 🌟 Exact Conformal Inverse Polar Stereographic Formulas (North & South Hemispheres)
+        float c = 2.0 * atan(r); // Angular distance from active pole
         
+        float lat;
         float lon;
+
         if (u_poleSign > 0.0) {
+            // North Pole: c = 90° - lat, central meridian points DOWN (-y)
+            lat = (PI * 0.5) - c;
             lon = u_centralLon + atan(v_pos.x, -v_pos.y);
         } else {
-            lon = u_centralLon - atan(v_pos.x, v_pos.y);
+            // South Pole: c = 90° + lat, central meridian points UP (+y)
+            lat = -(PI * 0.5 - c);
+            lon = u_centralLon + atan(v_pos.x, v_pos.y);
         }
 
+        // Normalize longitude into [-PI, PI]
         lon = mod(lon + PI, 2.0 * PI) - PI;
 
         float u = (lon + PI) / (2.0 * PI);
-        float v = (PI * 0.5 - lat) / PI;
+        float v = (PI * 0.5 - lat) / PI; // 0.0 at 90N, 0.5 at 0N, 1.0 at 90S
 
         vec2 sprite_uv = u_uvOffset + vec2(fract(u), clamp(v, 0.0, 1.0)) * u_uvScale;
 
@@ -294,7 +300,7 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
 }
 
 /**
- * 🌟 TRUE Forward Polar Stereographic Coordinate Projection (Matches Shader 1:1 Across Equator)
+ * 🌟 Exact Forward Polar Stereographic Coordinate Projection (Matches Shader 1:1)
  */
 function lngLatToPolarPlanar(lng, lat, isNorth = true) {
     // Cutoff where projection diverges far into opposite hemisphere
@@ -307,19 +313,17 @@ function lngLatToPolarPlanar(lng, lat, isNorth = true) {
     let c, r, deltaLambda, x, y;
 
     if (isNorth) {
-        // True signed angular distance from North Pole: c = 90° - lat
         c = (Math.PI * 0.5) - phi;
         r = Math.tan(c * 0.5);
         deltaLambda = lambda - NORTH_CENTRAL_LON;
         x = r * Math.sin(deltaLambda);
         y = -r * Math.cos(deltaLambda);
     } else {
-        // True signed angular distance from South Pole: c = 90° + lat
         c = (Math.PI * 0.5) + phi;
         r = Math.tan(c * 0.5);
         deltaLambda = lambda - SOUTH_CENTRAL_LON;
-        x = -r * Math.sin(deltaLambda);
-        y = -r * Math.cos(deltaLambda);
+        x = r * Math.sin(deltaLambda);
+        y = r * Math.cos(deltaLambda);
     }
 
     return new THREE.Vector2(x, y);
@@ -433,7 +437,6 @@ function buildPath2D(features, isNorth) {
 function buildGraticulePath(isNorth) {
     const path = new Path2D();
 
-    // Concentric latitude circles extending into the tropics (-20° to 80°)
     const minLat = isNorth ? -20 : -80;
     const maxLat = isNorth ? 80 : 20;
 
@@ -447,7 +450,6 @@ function buildGraticulePath(isNorth) {
         }
     }
 
-    // Longitude rays
     for (let deg = 0; deg < 360; deg += 30) {
         const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
         const pEnd = lngLatToPolarPlanar(deg, isNorth ? -20 : 20, isNorth);
@@ -529,7 +531,7 @@ function render2DOverlay() {
         overlayCtx.setLineDash([]);
     }
 
-    // 2. County Lines (When zoomed in deep)
+    // 2. County Lines (When zoomed in)
     if (pathCounties && camera.zoom > 2.6) {
         overlayCtx.lineWidth = (0.75 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.countyBorders;
@@ -736,7 +738,7 @@ export function fitSynopticSector() {
     mapZoom = 1.0;
 
     mapTargetX = 0.0;
-    mapTargetY = (currentPole === 'north') ? -0.45 : -0.20;
+    mapTargetY = (currentPole === 'north') ? -0.45 : 0.0;
     mapRotation = 0.0;
 
     if (polarGroup) polarGroup.rotation.z = 0.0;
@@ -798,7 +800,7 @@ function init2DMapControls(canvas) {
             const unitsPerPixel = visibleHeight / h;
 
             mapTargetY += dy * unitsPerPixel * 0.9;
-            mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
+            mapTargetY = Math.max(-1.5, Math.min(1.5, mapTargetY));
             camera.position.y = mapTargetY;
             render2DOverlay();
         }
@@ -876,7 +878,7 @@ function init2DMapControls(canvas) {
                 const unitsPerPixel = visibleHeight / h;
 
                 mapTargetY += dy * unitsPerPixel * 0.9;
-                mapTargetY = Math.max(-1.5, Math.min(0.6, mapTargetY));
+                mapTargetY = Math.max(-1.5, Math.min(1.5, mapTargetY));
                 camera.position.y = mapTargetY;
                 render2DOverlay();
             }
@@ -929,7 +931,6 @@ export function initPolarMap() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    // 🌟 High-DPI 2D Overlay Canvas Setup
     overlayCanvas = document.createElement('canvas');
     overlayCanvas.id = 'polar-overlay-canvas';
     const dpr = window.devicePixelRatio || 1;
@@ -979,7 +980,6 @@ export function initPolarMap() {
     polarMesh.position.z = 0.001;
     polarGroup.add(polarMesh);
 
-    // Load High-Def 50m Vector Land, Lakes, and Path2D Vectors
     loadAllBasemapGeoJson();
 
     fitSynopticSector();
