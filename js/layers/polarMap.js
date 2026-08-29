@@ -266,6 +266,40 @@ const fsPolar = `
     }
 `;
 
+// 🌟 SCREEN-SPACE THICK LINE SHADER (Guarantees exact pixel width at all zoom levels)
+const vsThickLine = `
+    uniform vec2 u_resolution;
+    uniform float u_lineWidth;
+    attribute vec3 a_pointOther;
+    attribute float a_side;
+
+    void main() {
+        vec4 currentClip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec4 otherClip   = projectionMatrix * modelViewMatrix * vec4(a_pointOther, 1.0);
+
+        vec2 currentScreen = (currentClip.xy / currentClip.w) * u_resolution * 0.5;
+        vec2 otherScreen   = (otherClip.xy / otherClip.w) * u_resolution * 0.5;
+
+        vec2 dir = normalize(otherScreen - currentScreen);
+        vec2 normal = vec2(-dir.y, dir.x);
+
+        vec2 offsetScreen = normal * (u_lineWidth * 0.5 * a_side);
+        vec2 offsetClip = (offsetScreen / (u_resolution * 0.5)) * currentClip.w;
+
+        gl_Position = vec4(currentClip.xy + offsetClip, currentClip.z, currentClip.w);
+    }
+`;
+
+const fsThickLine = `
+    precision highp float;
+    uniform vec3 u_color;
+    uniform float u_opacity;
+
+    void main() {
+        gl_FragColor = vec4(u_color, u_opacity);
+    }
+`;
+
 function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     const canvas = document.createElement('canvas');
     canvas.width = paletteHexArray.length;
@@ -377,10 +411,14 @@ function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
 }
 
 /**
- * 🌟 Clean Single-Stroke Vector Line Builder (No ghost lines / railroad tracks)
+ * 🌟 Screen-Space Extruded Thick Line Mesh Generator
  */
-function buildCleanLineGeometry(features, isNorth, zHeight) {
-    const linePoints = [];
+function buildThickLineMesh(features, isNorth, zHeight, lineWidthPx, colorHex, opacity) {
+    const positions = [];
+    const otherPoints = [];
+    const sides = [];
+    const indices = [];
+    let vertCount = 0;
 
     features.forEach(feature => {
         const geom = feature.geometry;
@@ -405,18 +443,65 @@ function buildCleanLineGeometry(features, isNorth, zHeight) {
                 const pt2 = lngLatToPolarPlanar(p2Base[0], p2Base[1], isNorth);
 
                 if (pt1 && pt2) {
-                    linePoints.push(pt1.x, pt1.y, zHeight);
-                    linePoints.push(pt2.x, pt2.y, zHeight);
+                    const x1 = pt1.x, y1 = pt1.y;
+                    const x2 = pt2.x, y2 = pt2.y;
+
+                    // Quad vertex 0
+                    positions.push(x1, y1, zHeight);
+                    otherPoints.push(x2, y2, zHeight);
+                    sides.push(1.0);
+
+                    // Quad vertex 1
+                    positions.push(x1, y1, zHeight);
+                    otherPoints.push(x2, y2, zHeight);
+                    sides.push(-1.0);
+
+                    // Quad vertex 2
+                    positions.push(x2, y2, zHeight);
+                    otherPoints.push(x1, y1, zHeight);
+                    sides.push(1.0);
+
+                    // Quad vertex 3
+                    positions.push(x2, y2, zHeight);
+                    otherPoints.push(x1, y1, zHeight);
+                    sides.push(-1.0);
+
+                    indices.push(
+                        vertCount, vertCount + 1, vertCount + 2,
+                        vertCount + 2, vertCount + 1, vertCount + 3
+                    );
+                    vertCount += 4;
                 }
             }
         });
     });
 
     const geometry = new THREE.BufferGeometry();
-    if (linePoints.length > 0) {
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
+    if (positions.length > 0) {
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('a_pointOther', new THREE.Float32BufferAttribute(otherPoints, 3));
+        geometry.setAttribute('a_side', new THREE.Float32BufferAttribute(sides, 1));
+        geometry.setIndex(indices);
     }
-    return geometry;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    const mat = new THREE.ShaderMaterial({
+        vertexShader: vsThickLine,
+        fragmentShader: fsThickLine,
+        uniforms: {
+            u_resolution: { value: new THREE.Vector2(w * dpr, h * dpr) },
+            u_lineWidth: { value: lineWidthPx * dpr },
+            u_color: { value: new THREE.Color(colorHex) },
+            u_opacity: { value: opacity }
+        },
+        transparent: true,
+        depthWrite: false
+    });
+
+    return new THREE.Mesh(geometry, mat);
 }
 
 function rebuildPolygonFills() {
@@ -495,60 +580,36 @@ function rebuildVectorLines() {
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. Coastlines (z = 0.0025, crisp solid primary boundary)
+    // 1. Coastlines: Solid 2.8px thick ribbon (z = 0.0025)
     if (coastlineLinesMesh) {
         polarGroup.remove(coastlineLinesMesh);
         if (coastlineLinesMesh.geometry) coastlineLinesMesh.geometry.dispose();
     }
-    const coastGeom = buildCleanLineGeometry(rawCoastlineFeatures, isNorth, 0.0025);
-    const coastMat = new THREE.LineBasicMaterial({
-        color: cfg.coastline,
-        opacity: 1.0,
-        transparent: true
-    });
-    coastlineLinesMesh = new THREE.LineSegments(coastGeom, coastMat);
+    coastlineLinesMesh = buildThickLineMesh(rawCoastlineFeatures, isNorth, 0.0025, 2.8, cfg.coastline, 1.0);
     polarGroup.add(coastlineLinesMesh);
 
-    // 2. Country Borders (z = 0.0022)
+    // 2. Country Borders: Solid 2.2px thick ribbon (z = 0.0022)
     if (countryLinesMesh) {
         polarGroup.remove(countryLinesMesh);
         if (countryLinesMesh.geometry) countryLinesMesh.geometry.dispose();
     }
-    const countryGeom = buildCleanLineGeometry(rawCountryFeatures, isNorth, 0.0022);
-    const countryMat = new THREE.LineBasicMaterial({
-        color: cfg.countryBorders,
-        opacity: 0.95,
-        transparent: true
-    });
-    countryLinesMesh = new THREE.LineSegments(countryGeom, countryMat);
+    countryLinesMesh = buildThickLineMesh(rawCountryFeatures, isNorth, 0.0022, 2.2, cfg.countryBorders, 0.95);
     polarGroup.add(countryLinesMesh);
 
-    // 3. State & Province Borders (z = 0.0020)
+    // 3. State & Province Borders: Solid 1.6px thick ribbon (z = 0.0020)
     if (stateLinesMesh) {
         polarGroup.remove(stateLinesMesh);
         if (stateLinesMesh.geometry) stateLinesMesh.geometry.dispose();
     }
-    const stateGeom = buildCleanLineGeometry(rawStateFeatures, isNorth, 0.0020);
-    const stateMat = new THREE.LineBasicMaterial({
-        color: cfg.stateBorders,
-        opacity: 0.8,
-        transparent: true
-    });
-    stateLinesMesh = new THREE.LineSegments(stateGeom, stateMat);
+    stateLinesMesh = buildThickLineMesh(rawStateFeatures, isNorth, 0.0020, 1.6, cfg.stateBorders, 0.85);
     polarGroup.add(stateLinesMesh);
 
-    // 4. Detailed County Borders (z = 0.0018, only appears when zoomed in deep: zoom > 2.6)
+    // 4. Detailed County Borders: 1.0px ribbon (z = 0.0018, pops in at zoom > 2.6)
     if (countyLinesMesh) {
         polarGroup.remove(countyLinesMesh);
         if (countyLinesMesh.geometry) countyLinesMesh.geometry.dispose();
     }
-    const countyGeom = buildCleanLineGeometry(rawCountyFeatures, isNorth, 0.0018);
-    const countyMat = new THREE.LineBasicMaterial({
-        color: cfg.countyBorders,
-        opacity: 0.45,
-        transparent: true
-    });
-    countyLinesMesh = new THREE.LineSegments(countyGeom, countyMat);
+    countyLinesMesh = buildThickLineMesh(rawCountyFeatures, isNorth, 0.0018, 1.0, cfg.countyBorders, 0.5);
     countyLinesMesh.visible = (camera && camera.zoom > 2.6);
     polarGroup.add(countyLinesMesh);
 }
@@ -746,6 +807,19 @@ function updateZoomVisibility() {
     if (countyLinesMesh && camera) {
         countyLinesMesh.visible = (camera.zoom > 2.6);
     }
+}
+
+function updateShaderResolutions() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const res = new THREE.Vector2(w * dpr, h * dpr);
+
+    [coastlineLinesMesh, countryLinesMesh, stateLinesMesh, countyLinesMesh].forEach(mesh => {
+        if (mesh && mesh.material && mesh.material.uniforms && mesh.material.uniforms.u_resolution) {
+            mesh.material.uniforms.u_resolution.value.copy(res);
+        }
+    });
 }
 
 /**
@@ -974,6 +1048,7 @@ export function initPolarMap() {
     window.addEventListener('resize', () => {
         if (!renderer || !camera) return;
         renderer.setSize(window.innerWidth, window.innerHeight);
+        updateShaderResolutions();
         fitSynopticSector();
     });
 
@@ -1012,10 +1087,19 @@ export function updatePolarPalette(paramIdOrHexArray) {
     if (oceanMesh && oceanMesh.material) oceanMesh.material.color.setHex(cfg.ocean);
     if (landMesh && landMesh.material) landMesh.material.color.setHex(cfg.land);
     if (lakesMesh && lakesMesh.material) lakesMesh.material.color.setHex(cfg.lakes);
-    if (coastlineLinesMesh && coastlineLinesMesh.material) coastlineLinesMesh.material.color.setHex(cfg.coastline);
-    if (countryLinesMesh && countryLinesMesh.material) countryLinesMesh.material.color.setHex(cfg.countryBorders);
-    if (stateLinesMesh && stateLinesMesh.material) stateLinesMesh.material.color.setHex(cfg.stateBorders);
-    if (countyLinesMesh && countyLinesMesh.material) countyLinesMesh.material.color.setHex(cfg.countyBorders);
+
+    if (coastlineLinesMesh && coastlineLinesMesh.material && coastlineLinesMesh.material.uniforms) {
+        coastlineLinesMesh.material.uniforms.u_color.value.setHex(cfg.coastline);
+    }
+    if (countryLinesMesh && countryLinesMesh.material && countryLinesMesh.material.uniforms) {
+        countryLinesMesh.material.uniforms.u_color.value.setHex(cfg.countryBorders);
+    }
+    if (stateLinesMesh && stateLinesMesh.material && stateLinesMesh.material.uniforms) {
+        stateLinesMesh.material.uniforms.u_color.value.setHex(cfg.stateBorders);
+    }
+    if (countyLinesMesh && countyLinesMesh.material && countyLinesMesh.material.uniforms) {
+        countyLinesMesh.material.uniforms.u_color.value.setHex(cfg.countyBorders);
+    }
     if (graticuleMesh && graticuleMesh.material) graticuleMesh.material.color.setHex(cfg.graticule);
 }
 
@@ -1069,6 +1153,7 @@ export function showPolarMap() {
     if (mapDiv) mapDiv.style.display = 'none';
 
     isPolarActive = true;
+    updateShaderResolutions();
     fitSynopticSector();
 }
 
