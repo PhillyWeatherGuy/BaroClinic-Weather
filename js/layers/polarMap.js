@@ -341,7 +341,7 @@ function initPolarUI(container) {
     topControls = document.createElement('div');
     topControls.className = 'polar-top-controls';
     topControls.innerHTML = `
-        <button id="btn-polar-compass" class="polar-compass-btn" title="Reset North Up">
+        <button id="btn-polar-compass" class="polar-compass-btn" title="Reset Orientation (North Up)">
             <svg id="polar-compass-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="12 2 15 11 12 9 9 11 12 2" fill="#ef4444"/>
                 <polygon points="12 22 15 13 12 15 9 13 12 22" fill="#94a3b8"/>
@@ -436,98 +436,93 @@ export function fitSynopticSector() {
 }
 
 /**
- * 🌟 2D PLANAR GESTURE CONTROLLER (Pole-Anchored Rotation & Smooth Non-Sensitive Zoom)
+ * 🌟 NATURAL 1-POINTER POLAR DRAG CONTROLLER (Unified 1-Click / 1-Touch Pan & Rotation)
  */
 function init2DMapControls(canvas) {
     let isDragging = false;
-    let isRotating = false;
-    let startX = 0, startY = 0;
-    let activeTouches = new Map();
-    let initialTouchDistance = 0;
-    let initialTouchAngle = 0;
-    let initialRotationOnTouch = 0;
+    let prevClientX = 0, prevClientY = 0;
+    let initialTouchDist = 0;
 
-    // Desktop Mouse Handlers
+    function getScreenPoint(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: clientX - rect.left - (rect.width / 2),
+            y: clientY - rect.top - (rect.height / 2)
+        };
+    }
+
+    // 1. Mouse Drag Handler
     canvas.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        startX = e.clientX;
-        startY = e.clientY;
-
-        // Right-click or Shift+Left-click triggers Pole-Anchored Rotation; Normal Left-click triggers Pan
-        if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
-            isRotating = true;
-        } else if (e.button === 0) {
-            isDragging = true;
-        }
+        if (e.button !== 0) return; // Left-click only
+        isDragging = true;
+        prevClientX = e.clientX;
+        prevClientY = e.clientY;
     });
 
     window.addEventListener('mousemove', (e) => {
-        if (!isDragging && !isRotating) return;
+        if (!isDragging) return;
 
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        startX = e.clientX;
-        startY = e.clientY;
+        const dx = e.clientX - prevClientX;
+        const dy = e.clientY - prevClientY;
+        
+        const ptPrev = getScreenPoint(prevClientX, prevClientY);
+        const ptCurr = getScreenPoint(e.clientX, e.clientY);
+        
+        prevClientX = e.clientX;
+        prevClientY = e.clientY;
 
         const h = window.innerHeight;
         const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
         const unitsPerPixel = visibleHeight / h;
 
-        if (isRotating) {
-            // 🌟 Smooth Rotation locked specifically around the geographic pole (0, 0)
-            mapRotation -= dx * 0.004;
-            if (polarMesh) {
-                polarMesh.rotation.z = mapRotation;
-            }
-            updateCompassUI();
-        } else if (isDragging) {
-            // Free North/South/East/West Panning
-            mapTargetX -= dx * unitsPerPixel;
-            mapTargetY += dy * unitsPerPixel;
+        // A. Natural Pole-Anchored Rotation: angular sweep around screen center/pole
+        const anglePrev = Math.atan2(ptPrev.y, ptPrev.x);
+        const angleCurr = Math.atan2(ptCurr.y, ptCurr.x);
+        let dTheta = angleCurr - anglePrev;
+        while (dTheta > Math.PI) dTheta -= Math.PI * 2;
+        while (dTheta < -Math.PI) dTheta += Math.PI * 2;
 
-            camera.position.x = mapTargetX;
-            camera.position.y = mapTargetY;
+        mapRotation -= dTheta;
+        if (polarMesh) {
+            polarMesh.rotation.z = mapRotation;
         }
+        updateCompassUI();
+
+        // B. Vertical North/South Panning
+        mapTargetY += dy * unitsPerPixel * 0.75;
+        camera.position.y = mapTargetY;
     });
 
     window.addEventListener('mouseup', () => {
         isDragging = false;
-        isRotating = false;
     });
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // 🌟 Smooth, Non-Sensitive Mouse Wheel Zoom
+    // 2. Smooth, Non-Sensitive Desktop Wheel Zoom
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
-        const zoomSensitivity = 0.0012; // Gentle, smooth rate
+        const zoomSensitivity = 0.0012;
         const factor = Math.exp(-e.deltaY * zoomSensitivity);
-        const clampedFactor = Math.max(0.93, Math.min(1.07, factor)); // Prevents sudden jumps
+        const clampedFactor = Math.max(0.93, Math.min(1.07, factor));
 
         const newZoom = Math.max(0.4, Math.min(6.0, camera.zoom * clampedFactor));
         camera.zoom = newZoom;
         camera.updateProjectionMatrix();
     }, { passive: false });
 
-    // Touch / Mobile Multi-Gesture Handlers (1-finger pan, 2-finger pinch & rotate around pole)
+    // 3. Mobile Touch Gestures (1-finger pan & rotate naturally, 2-finger pinch zoom)
     canvas.addEventListener('touchstart', (e) => {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const t = e.changedTouches[i];
-            activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
-        }
-
-        if (activeTouches.size === 1) {
-            const t = e.touches[0];
-            startX = t.clientX;
-            startY = t.clientY;
+        if (e.touches.length === 1) {
             isDragging = true;
-        } else if (activeTouches.size === 2) {
+            prevClientX = e.touches[0].clientX;
+            prevClientY = e.touches[0].clientY;
+        } else if (e.touches.length === 2) {
             isDragging = false;
             const t1 = e.touches[0];
             const t2 = e.touches[1];
-            initialTouchDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-            initialTouchAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
-            initialRotationOnTouch = mapRotation;
+            initialTouchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            mapZoom = camera.zoom;
         }
     }, { passive: false });
 
@@ -535,56 +530,55 @@ function init2DMapControls(canvas) {
         e.preventDefault();
 
         if (e.touches.length === 1 && isDragging) {
-            const t = e.touches[0];
-            const dx = t.clientX - startX;
-            const dy = t.clientY - startY;
-            startX = t.clientX;
-            startY = t.clientY;
+            const clientX = e.touches[0].clientX;
+            const clientY = e.touches[0].clientY;
+
+            const dx = clientX - prevClientX;
+            const dy = clientY - prevClientY;
+
+            const ptPrev = getScreenPoint(prevClientX, prevClientY);
+            const ptCurr = getScreenPoint(clientX, clientY);
+
+            prevClientX = clientX;
+            prevClientY = clientY;
 
             const h = window.innerHeight;
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
             const unitsPerPixel = visibleHeight / h;
 
-            mapTargetX -= dx * unitsPerPixel;
-            mapTargetY += dy * unitsPerPixel;
+            // A. Natural 1-Finger Pole-Anchored Rotation
+            const anglePrev = Math.atan2(ptPrev.y, ptPrev.x);
+            const angleCurr = Math.atan2(ptCurr.y, ptCurr.x);
+            let dTheta = angleCurr - anglePrev;
+            while (dTheta > Math.PI) dTheta -= Math.PI * 2;
+            while (dTheta < -Math.PI) dTheta += Math.PI * 2;
 
-            camera.position.x = mapTargetX;
-            camera.position.y = mapTargetY;
-        } else if (e.touches.length === 2) {
-            const t1 = e.touches[0];
-            const t2 = e.touches[1];
-
-            // 1. Smooth Pinch Zoom
-            const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-            if (initialTouchDistance > 0) {
-                const pinchRatio = currentDist / initialTouchDistance;
-                camera.zoom = Math.max(0.4, Math.min(6.0, mapZoom * pinchRatio));
-                camera.updateProjectionMatrix();
-            }
-
-            // 2. 2-Finger Twist Rotation around the Pole
-            const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
-            const angleDelta = currentAngle - initialTouchAngle;
-            mapRotation = initialRotationOnTouch + angleDelta;
+            mapRotation -= dTheta;
             if (polarMesh) {
                 polarMesh.rotation.z = mapRotation;
             }
             updateCompassUI();
+
+            // B. Natural 1-Finger North/South Panning
+            mapTargetY += dy * unitsPerPixel * 0.75;
+            camera.position.y = mapTargetY;
+        } else if (e.touches.length === 2 && initialTouchDist > 0) {
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+            const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+            const pinchRatio = currentDist / initialTouchDist;
+            camera.zoom = Math.max(0.4, Math.min(6.0, mapZoom * pinchRatio));
+            camera.updateProjectionMatrix();
         }
     }, { passive: false });
 
     canvas.addEventListener('touchend', (e) => {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            activeTouches.delete(e.changedTouches[i].identifier);
-        }
         if (e.touches.length === 1) {
-            const t = e.touches[0];
-            startX = t.clientX;
-            startY = t.clientY;
+            prevClientX = e.touches[0].clientX;
+            prevClientY = e.touches[0].clientY;
             isDragging = true;
         } else {
             isDragging = false;
-            mapZoom = camera.zoom;
         }
     });
 }
