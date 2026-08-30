@@ -28,8 +28,6 @@ import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.
 
 let customShaderLayer = null;
 let renderDebounceId = null;
-let threeGlobeInitialized = false;
-let polarMapInitialized = false;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -38,7 +36,7 @@ const map = new maplibregl.Map({
     style: 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG',
     center: [-74.4, 39.3], 
     zoom: 7,
-    keyboard: false
+    keyboard: false // 🌟 Disables default arrow key map panning so arrows strictly control forecast steps
 });
 
 /**
@@ -54,9 +52,15 @@ export function updateBasemapStyle(styleUrl) {
         if (map.isStyleLoaded()) {
             map.off('styledata', onStyleLoaded);
             console.log("✅ New basemap style loaded. Re-attaching weather layers...");
-            try { initLayer(); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
+            try {
+                initLayer();
+            } catch (e) {}
+            try {
+                initVectorContours(map);
+            } catch (e) {}
+            try {
+                initCityOverlay(map);
+            } catch (e) {}
 
             if (stateManager.currentStepIndex !== undefined) {
                 renderFrame(stateManager.currentStepIndex);
@@ -69,7 +73,7 @@ export function updateBasemapStyle(styleUrl) {
 }
 
 /**
- * 🌟 DYNAMIC 3-WAY PROJECTION / VIEW SWITCHER (With Lazy Loading)
+ * 🌟 DYNAMIC 3-WAY PROJECTION / VIEW SWITCHER (With VRAM Unloading)
  */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
@@ -78,6 +82,7 @@ export function applyView(targetView) {
         hideThreeGlobe();
         hidePolarMap();
         
+        // 🌟 Free inactive 3D & Polar VRAM immediately
         clearThreeGlobeTextures();
         clearPolarTextures();
 
@@ -85,6 +90,7 @@ export function applyView(targetView) {
         if (mapDiv) mapDiv.style.display = 'block';
         if (map) map.resize();
 
+        // Render current active frame to 2D
         if (stateManager.activeFrameState && customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
             try { updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest); } catch (e) {}
@@ -92,52 +98,32 @@ export function applyView(targetView) {
                 updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
             }
         }
-        console.log("🗺️ [App Engine] 2D MapLibre Mercator Activated");
+        console.log("🗺️ [App Engine] 2D MapLibre Mercator Activated (3D VRAM Cleared)");
     } else if (targetView === '3d') {
         hidePolarMap();
-        clearPolarTextures();
-
-        // 🌟 Lazy-initialize Three.js only when 3D Globe is opened
-        if (!threeGlobeInitialized) {
-            try {
-                initThreeGlobe();
-                threeGlobeInitialized = true;
-            } catch (err) {
-                console.error("Three.js globe init error:", err);
-            }
-        }
+        clearPolarTextures(); // 🌟 Free inactive Polar VRAM
 
         showThreeGlobe('3d');
 
         if (stateManager.activeFrameState) {
             updateThreeGlobeFrame(stateManager.activeFrameState);
         }
-        console.log("🌐 [App Engine] 3D Earth Globe Activated");
+        console.log("🌐 [App Engine] 3D Earth Globe Activated (Polar VRAM Cleared)");
     } else if (targetView === 'polar') {
         hideThreeGlobe();
-        clearThreeGlobeTextures();
-
-        // 🌟 Lazy-initialize Polar Engine only when Polar view is opened
-        if (!polarMapInitialized) {
-            try {
-                initPolarMap();
-                polarMapInitialized = true;
-            } catch (err) {
-                console.error("Polar map init error:", err);
-            }
-        }
+        clearThreeGlobeTextures(); // 🌟 Free inactive 3D Globe VRAM
 
         showPolarMap();
 
         if (stateManager.activeFrameState) {
             updatePolarFrame(stateManager.activeFrameState);
         }
-        console.log("❄️ [App Engine] 2D Polar Stereographic Activated");
+        console.log("❄️ [App Engine] 2D Polar Stereographic Activated (3D VRAM Cleared)");
     }
 }
 
 /**
- * 🌟 CURSOR-CENTERED KEYBOARD ZOOM HANDLER
+ * 🌟 CURSOR-CENTERED KEYBOARD ZOOM HANDLER (+ / - Keys)
  */
 export function handleKeyboardZoom(direction, x, y) {
     const activeView = stateManager.activeView || '2d';
@@ -158,7 +144,7 @@ export function handleKeyboardZoom(direction, x, y) {
 }
 
 /**
- * 🌟 DYNAMIC THEME APPLIER
+ * 🌟 DYNAMIC THEME APPLIER (DARK / LIGHT MODE)
  */
 export async function applyTheme(theme) {
     try {
@@ -185,12 +171,12 @@ export async function applyTheme(theme) {
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
         customShaderLayer.updatePalette(newPalette);
     }
-    if (threeGlobeInitialized) {
-        try { updateThreeGlobePalette(newPalette); } catch (e) {}
-    }
-    if (polarMapInitialized) {
-        try { updatePolarPalette(newPalette); } catch (e) {}
-    }
+    try {
+        updateThreeGlobePalette(newPalette);
+    } catch (e) {}
+    try {
+        updatePolarPalette(newPalette);
+    } catch (e) {}
 }
 
 export function initLayer(shaderType = null) {
@@ -211,6 +197,7 @@ export function initLayer(shaderType = null) {
     }
     setShaderLayerReference(customShaderLayer);
     
+    // Apply theme-aware palette immediately on creation
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
         customShaderLayer.updatePalette(paletteFunc(stateManager.activeParam));
@@ -276,6 +263,7 @@ async function renderFrame(globalIdx) {
         uvScale: [1.0, 1.0]
     };
     
+    // 🌟 MEMORY OPTIMIZATION: Only push GPU textures to the ACTIVE view engine!
     const activeView = stateManager.activeView || '2d';
 
     if (activeView === '2d') {
@@ -286,13 +274,16 @@ async function renderFrame(globalIdx) {
             updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
         } catch (e) {}
         updateVectorContours(frameInfo.step);
-    } else if (activeView === '3d' && threeGlobeInitialized) {
+    } else if (activeView === '3d') {
         updateThreeGlobeFrame(stateManager.activeFrameState);
-    } else if (activeView === 'polar' && polarMapInitialized) {
+    } else if (activeView === 'polar') {
         updatePolarFrame(stateManager.activeFrameState);
     }
 }
 
+/**
+ * 🌟 SEQUENTIAL PRELOADER
+ */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
     const totalChunks = stateManager.manifest.chunks.length;
@@ -302,9 +293,6 @@ export async function preloadRemainingChunks(currentGen) {
 
         if (!stateManager.loadedChunkBitmaps[i]) {
             try {
-                await new Promise(r => setTimeout(r, 100)); // Gentle 100ms yield on mobile
-                if (currentGen !== stateManager.loadGeneration) break;
-
                 const bitmap = await loadChunkBitmap(i, currentGen);
                 if (currentGen === stateManager.loadGeneration) {
                     if (customShaderLayer) {
@@ -327,25 +315,62 @@ initViewerUI(
         if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
         renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
     },
-    (newTheme) => { applyTheme(newTheme); },
-    (newView) => { applyView(newView); },
-    (direction, x, y) => { handleKeyboardZoom(direction, x, y); }
+    (newTheme) => {
+        applyTheme(newTheme);
+    },
+    (newView) => {
+        applyView(newView);
+    },
+    (direction, x, y) => {
+        handleKeyboardZoom(direction, x, y);
+    }
 );
 
 map.on('load', async () => {
     stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
     initHubTransition();
 
+    // 🌟 Initialize 3D Globe Engine
+    try {
+        initThreeGlobe();
+    } catch (err) {
+        console.error("Three.js globe init error:", err);
+    }
+
+    // 🌟 Initialize 2D Polar Stereographic Engine
+    try {
+        initPolarMap();
+    } catch (err) {
+        console.error("Polar map init error:", err);
+    }
+
+    // 🌟 Explicitly fetch ECMWF 2m Temperature on initial startup
     try {
         await fetchManifest(null, 'ecmwf', '2t');
     } catch (err) {
         showToast('❌ ' + err.message);
     }
 
-    try { initLayer(); } catch (err) {}
-    try { initVectorContours(map); } catch (err) {}
-    try { initCityOverlay(map); } catch (err) {}
-    try { syncModelRunDropdown(); } catch (err) {}
+    // Initialize Base Weather Heatmap Layer
+    try {
+        initLayer();
+    } catch (err) {}
+
+    // Initialize Master Vector Contour Layer
+    try {
+        initVectorContours(map);
+    } catch (err) {
+        console.error("Vector contours init error:", err);
+    }
+
+    // Initialize Master City Overlay
+    try {
+        initCityOverlay(map);
+    } catch (err) {}
+
+    try {
+        syncModelRunDropdown();
+    } catch (err) {}
 
     if (stateManager.manifest && stateManager.manifest.chunks) {
         try {
