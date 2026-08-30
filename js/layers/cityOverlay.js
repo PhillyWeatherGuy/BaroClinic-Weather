@@ -72,7 +72,7 @@ export function decodePixelValue(rawVal, manifest) {
 }
 
 /**
- * 🌟 SHARED BILINEAR SAMPLER (High-Precision GPS Sampling)
+ * 🌟 SHARED BILINEAR SAMPLER (Time-Volume Compatible)
  */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     if (!activeFrameState || !manifest) return 0.0;
@@ -89,10 +89,10 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 
     if (normY < 0 || normY > 1) return 0.0;
 
-    const frameW = manifest.frame_width;
-    const frameH = manifest.frame_height;
-    const chunkInfo = manifest.chunks[chunkIdx];
-    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
+    const frameW = manifest.frame_width || 1440;
+    const frameH = manifest.frame_height || 721;
+    const frameSize = frameW * frameH;
+    const frameIdx = activeFrameState.frameIndex !== undefined ? activeFrameState.frameIndex : (activeFrameState.col || 0);
 
     const contX = (((normX % 1) + 1) % 1) * frameW;
     const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
@@ -105,13 +105,12 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const fracX = contX - Math.floor(contX);
     const fracY = contY - y0;
 
-    const colOffset = activeFrameState.col * frameW;
-    const rowOffset = activeFrameState.row * frameH;
+    const frameOffset = frameIdx * frameSize;
 
-    const idx00 = (rowOffset + y0) * sheetW + (colOffset + x0);
-    const idx10 = (rowOffset + y0) * sheetW + (colOffset + x1);
-    const idx01 = (rowOffset + y1) * sheetW + (colOffset + x0);
-    const idx11 = (rowOffset + y1) * sheetW + (colOffset + x1);
+    const idx00 = frameOffset + y0 * frameW + x0;
+    const idx10 = frameOffset + y0 * frameW + x1;
+    const idx01 = frameOffset + y1 * frameW + x0;
+    const idx11 = frameOffset + y1 * frameW + x1;
 
     const v00 = pixelData[idx00];
     const v10 = pixelData[idx10];
@@ -240,6 +239,15 @@ function updateCityPositions() {
 
     hideBasemapCityLabels(mapInstance);
 
+    // 🌟 Do not show city callouts for 500mb PVA
+    const isPva = (stateManager.activeParam === 'pva' || stateManager.manifest?.parameter === 'pva');
+    if (isPva) {
+        for (const name in cityMarkers) {
+            cityMarkers[name].getElement().style.display = 'none';
+        }
+        return;
+    }
+
     const bounds = mapInstance.getBounds();
     const zoom = mapInstance.getZoom();
 
@@ -316,6 +324,15 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
 
     hideBasemapCityLabels(map);
 
+    // 🌟 Do not show city callouts for 500mb PVA
+    const isPva = (stateManager.activeParam === 'pva' || manifest.parameter === 'pva');
+    if (isPva) {
+        for (const name in cityMarkers) {
+            cityMarkers[name].getElement().style.display = 'none';
+        }
+        return;
+    }
+
     window.lastActiveFrameState = activeFrameState;
     window.lastManifest = manifest;
 
@@ -324,14 +341,13 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
         const marker = cityMarkers[city.name];
         if (!marker) continue;
 
-        // 🌟 Exact same high-precision bilinear interpolation as the clicker!
         const decodedVal = sampleBilinearValue(city.lng, city.lat, activeFrameState, manifest);
         const formattedText = formatParameterValue(decodedVal, manifest);
 
         const valEl = marker.getElement().querySelector('.city-callout-val');
         marker.getElement().style.display = 'flex';
         if (valEl) {
-            valEl.className = (manifest.unit === 'in' || manifest.parameter === 'tp') 
+            valEl.className = (manifest.unit === 'in' || manifest.parameter === 'tp' || manifest.parameter === 'pwat') 
                 ? 'city-callout-val precip-val' 
                 : 'city-callout-val';
             valEl.textContent = formattedText;
