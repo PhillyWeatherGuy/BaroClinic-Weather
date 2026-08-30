@@ -61,14 +61,21 @@ export async function fetchManifest(run = null, model = null, param = null) {
     
     stateManager.globalSteps = [];
     const chunks = stateManager.manifest.chunks || [];
+    const frameW = stateManager.manifest.frame_width || 1440;
+    const frameH = stateManager.manifest.frame_height || 721;
+
     for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
         const chunk = chunks[cIdx];
+        const cols = chunk.columns || 1;
         for (let fIdx = 0; fIdx < chunk.forecast_steps.length; fIdx++) {
             stateManager.globalSteps.push({
                 step: chunk.forecast_steps[fIdx],
                 chunkIndex: cIdx,
-                col: fIdx % chunk.columns,
-                row: Math.floor(fIdx / chunk.columns)
+                frameOffset: fIdx,
+                col: fIdx % cols,
+                row: Math.floor(fIdx / cols),
+                frameWidth: frameW,
+                frameHeight: frameH
             });
         }
     }
@@ -91,7 +98,10 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    // 🌟 PATH A: Raw/Gzipped Binary Buffer (.bin)
+    const frameW = stateManager.manifest.frame_width || chunk.sheet_width || 1440;
+    const frameH = stateManager.manifest.frame_height || chunk.sheet_height || 721;
+
+    // 🌟 PATH A: Sequential Binary Time-Chunk (.bin)
     if (chunk.file.endsWith('.bin')) {
         let buffer;
         try {
@@ -111,8 +121,10 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
         const bufferObj = {
             data: singleChannel,
-            width: chunk.sheet_width,
-            height: chunk.sheet_height,
+            width: frameW,
+            height: frameH,
+            frameCount: chunk.frame_count || (chunk.forecast_steps ? chunk.forecast_steps.length : 10),
+            isBinaryChunk: true,
             isBinary: true
         };
 
@@ -120,7 +132,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         return bufferObj;
     }
 
-    // 🌟 PATH B: Image (.png / .webp) with 2x High-Resolution Upsampling Pass
+    // 🌟 PATH B: Image (.png / .webp fallback)
     const blob = await imgResp.blob();
     const bitmap = await createImageBitmap(blob);
 
@@ -129,21 +141,14 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    // 🌟 One-Time 2x Upscale in background memory (2880 x 1442 per frame)
-    const scaleFactor = 2;
-    const targetW = bitmap.width * scaleFactor;
-    const targetH = bitmap.height * scaleFactor;
-
     let offCanvas = document.createElement('canvas');
-    offCanvas.width = targetW;
-    offCanvas.height = targetH;
+    offCanvas.width = bitmap.width;
+    offCanvas.height = bitmap.height;
     let offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
-    offCtx.imageSmoothingEnabled = true;
-    offCtx.imageSmoothingQuality = 'high';
-    offCtx.drawImage(bitmap, 0, 0, targetW, targetH);
+    offCtx.drawImage(bitmap, 0, 0);
 
-    const rgba = offCtx.getImageData(0, 0, targetW, targetH).data;
-    const singleChannel = new Uint8Array(targetW * targetH);
+    const rgba = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const singleChannel = new Uint8Array(bitmap.width * bitmap.height);
 
     for (let i = 0; i < singleChannel.length; i++) {
         singleChannel[i] = rgba[i * 4];
@@ -153,8 +158,8 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
     const bufferObj = {
         data: singleChannel,
-        width: targetW,
-        height: targetH,
+        width: bitmap.width,
+        height: bitmap.height,
         isBinary: true
     };
 
