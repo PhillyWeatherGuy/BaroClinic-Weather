@@ -36,7 +36,7 @@ const map = new maplibregl.Map({
     style: 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG',
     center: [-74.4, 39.3], 
     zoom: 7,
-    keyboard: false // 🌟 Disables default arrow key map panning so arrows strictly control forecast steps
+    keyboard: false
 });
 
 /**
@@ -82,7 +82,6 @@ export function applyView(targetView) {
         hideThreeGlobe();
         hidePolarMap();
         
-        // 🌟 Free inactive 3D & Polar VRAM immediately
         clearThreeGlobeTextures();
         clearPolarTextures();
 
@@ -90,7 +89,6 @@ export function applyView(targetView) {
         if (mapDiv) mapDiv.style.display = 'block';
         if (map) map.resize();
 
-        // Render current active frame to 2D
         if (stateManager.activeFrameState && customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
             try { updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest); } catch (e) {}
@@ -101,7 +99,7 @@ export function applyView(targetView) {
         console.log("🗺️ [App Engine] 2D MapLibre Mercator Activated (3D VRAM Cleared)");
     } else if (targetView === '3d') {
         hidePolarMap();
-        clearPolarTextures(); // 🌟 Free inactive Polar VRAM
+        clearPolarTextures();
 
         showThreeGlobe('3d');
 
@@ -111,7 +109,7 @@ export function applyView(targetView) {
         console.log("🌐 [App Engine] 3D Earth Globe Activated (Polar VRAM Cleared)");
     } else if (targetView === 'polar') {
         hideThreeGlobe();
-        clearThreeGlobeTextures(); // 🌟 Free inactive 3D Globe VRAM
+        clearThreeGlobeTextures();
 
         showPolarMap();
 
@@ -197,17 +195,9 @@ export function initLayer(shaderType = null) {
     }
     setShaderLayerReference(customShaderLayer);
     
-    // Apply theme-aware palette immediately on creation
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
         customShaderLayer.updatePalette(paletteFunc(stateManager.activeParam));
-    }
-
-    for (const chunkIdx in stateManager.loadedChunkBitmaps) {
-        const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
-        if (bitmap && customShaderLayer) {
-            customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-        }
     }
 
     let firstOverlayId = null;
@@ -236,28 +226,63 @@ async function renderFrame(globalIdx) {
 
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
-            const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
-            if (customShaderLayer) {
-                customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-            }
+            await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
             updateSliderTrackAndBounds();
         } catch (err) {
             return;
         }
-    } else if (customShaderLayer && !customShaderLayer.chunkTextures[chunkIdx]) {
-        customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
+    }
+
+    const chunkObj = stateManager.loadedChunkBitmaps[chunkIdx];
+    if (!chunkObj) return;
+
+    const frameW = stateManager.manifest.frame_width || 1440;
+    const frameH = stateManager.manifest.frame_height || 721;
+    const frameSize = frameW * frameH;
+    const fOffset = frameInfo.frameOffset !== undefined ? frameInfo.frameOffset : frameInfo.col;
+
+    let activeFrameImg;
+    let uvOffset = [0.0, 0.0];
+    let uvScale = [1.0, 1.0];
+    let frameSlice = null;
+
+    // 🌟 Check if chunk is sequential binary time-buffer (.bin)
+    if (chunkObj.isBinaryChunk || chunkObj.isBinary) {
+        const byteStart = fOffset * frameSize;
+        const byteEnd = byteStart + frameSize;
+        frameSlice = chunkObj.data.subarray(byteStart, byteEnd);
+
+        activeFrameImg = {
+            data: frameSlice,
+            width: frameW,
+            height: frameH,
+            isSingleFrame: true
+        };
+        uvOffset = [0.0, 0.0];
+        uvScale = [1.0, 1.0];
+    } else {
+        // Fallback for legacy 2D spritesheet image
+        activeFrameImg = chunkObj;
+        const cols = chunkInfo.columns || 1;
+        const rows = chunkInfo.rows || 1;
+        uvOffset = [frameInfo.col / cols, frameInfo.row / rows];
+        uvScale = [1.0 / cols, 1.0 / rows];
     }
 
     stateManager.activeFrameState = {
         chunkIndex: chunkIdx,
+        frameOffset: fOffset,
+        frameSlice: frameSlice,
         col: frameInfo.col,
         row: frameInfo.row,
-        chunkImg: stateManager.loadedChunkBitmaps[chunkIdx],
-        uvOffset: [frameInfo.col / chunkInfo.columns, frameInfo.row / chunkInfo.rows],
-        uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
+        chunkImg: activeFrameImg,
+        uvOffset: uvOffset,
+        uvScale: uvScale,
+        frameWidth: frameW,
+        frameHeight: frameH
     };
     
-    // 🌟 MEMORY OPTIMIZATION: Only push GPU textures to the ACTIVE view engine!
+    // 🌟 Update only the currently ACTIVE view engine
     const activeView = stateManager.activeView || '2d';
 
     if (activeView === '2d') {
@@ -287,12 +312,7 @@ export async function preloadRemainingChunks(currentGen) {
 
         if (!stateManager.loadedChunkBitmaps[i]) {
             try {
-                const bitmap = await loadChunkBitmap(i, currentGen);
-                if (currentGen === stateManager.loadGeneration) {
-                    if (customShaderLayer) {
-                        customShaderLayer.preloadChunkTexture(i, bitmap);
-                    }
-                }
+                await loadChunkBitmap(i, currentGen);
                 updateSliderTrackAndBounds();
             } catch (err) {
                 if (err.message !== "Load cancelled") {
@@ -324,40 +344,40 @@ map.on('load', async () => {
     stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
     initHubTransition();
 
-    // 🌟 Initialize 3D Globe Engine
+    // 1. Initialize 3D Globe Engine
     try {
         initThreeGlobe();
     } catch (err) {
         console.error("Three.js globe init error:", err);
     }
 
-    // 🌟 Initialize 2D Polar Stereographic Engine
+    // 2. Initialize 2D Polar Stereographic Engine
     try {
         initPolarMap();
     } catch (err) {
         console.error("Polar map init error:", err);
     }
 
-    // 🌟 Explicitly fetch ECMWF 2m Temperature on initial startup
+    // 3. Explicitly fetch ECMWF 2m Temperature on initial startup
     try {
         await fetchManifest(null, 'ecmwf', '2t');
     } catch (err) {
         showToast('❌ ' + err.message);
     }
 
-    // Initialize Base Weather Heatmap Layer
+    // 4. Initialize Base Weather Heatmap Layer
     try {
         initLayer();
     } catch (err) {}
 
-    // Initialize Master Vector Contour Layer
+    // 5. Initialize Master Vector Contour Layer
     try {
         initVectorContours(map);
     } catch (err) {
         console.error("Vector contours init error:", err);
     }
 
-    // Initialize Master City Overlay
+    // 6. Initialize Master City Overlay
     try {
         initCityOverlay(map);
     } catch (err) {}
@@ -368,11 +388,7 @@ map.on('load', async () => {
 
     if (stateManager.manifest && stateManager.manifest.chunks) {
         try {
-            const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
-            if (customShaderLayer) {
-                customShaderLayer.preloadChunkTexture(0, bitmap0);
-            }
-
+            await loadChunkBitmap(0, stateManager.loadGeneration);
             syncTimelineWithManifest();
             await renderFrame(0);
             hideToast();
@@ -385,12 +401,19 @@ map.on('load', async () => {
     }
 });
 
-// 🌟 Bilinear Interpolation on Click
+// 🌟 Smooth Bilinear Interpolation on Click
 map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
-    const chunkIdx = stateManager.activeFrameState.chunkIndex;
-    const pixelData = stateManager.chunkPixelData[chunkIdx];
+    const frameState = stateManager.activeFrameState;
+    const frameW = frameState.frameWidth || stateManager.manifest.frame_width || 1440;
+    const frameH = frameState.frameHeight || stateManager.manifest.frame_height || 721;
+
+    let pixelData = frameState.frameSlice;
+    if (!pixelData) {
+        const chunkIdx = frameState.chunkIndex;
+        pixelData = stateManager.chunkPixelData[chunkIdx];
+    }
     if (!pixelData) return;
 
     let lng = ((e.lngLat.lng % 360) + 360) % 360;
@@ -400,11 +423,6 @@ map.on('click', (e) => {
     const normY = (90.0 - e.lngLat.lat) / 180.0;
 
     if (normY < 0 || normY > 1) return;
-
-    const frameW = stateManager.manifest.frame_width;
-    const frameH = stateManager.manifest.frame_height;
-    const chunkInfo = stateManager.manifest.chunks[chunkIdx];
-    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
 
     const contX = (((normX % 1) + 1) % 1) * frameW;
     const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
@@ -417,18 +435,25 @@ map.on('click', (e) => {
     const fracX = contX - Math.floor(contX);
     const fracY = contY - y0;
 
-    const colOffset = stateManager.activeFrameState.col * frameW;
-    const rowOffset = stateManager.activeFrameState.row * frameH;
+    let v00, v10, v01, v11;
 
-    const idx00 = (rowOffset + y0) * sheetW + (colOffset + x0);
-    const idx10 = (rowOffset + y0) * sheetW + (colOffset + x1);
-    const idx01 = (rowOffset + y1) * sheetW + (colOffset + x0);
-    const idx11 = (rowOffset + y1) * sheetW + (colOffset + x1);
-
-    const v00 = pixelData[idx00];
-    const v10 = pixelData[idx10];
-    const v01 = pixelData[idx01];
-    const v11 = pixelData[idx11];
+    if (frameState.frameSlice) {
+        // Clean single-frame buffer indexing
+        v00 = pixelData[y0 * frameW + x0];
+        v10 = pixelData[y0 * frameW + x1];
+        v01 = pixelData[y1 * frameW + x0];
+        v11 = pixelData[y1 * frameW + x1];
+    } else {
+        // Legacy spritesheet fallback
+        const chunkInfo = stateManager.manifest.chunks[frameState.chunkIndex];
+        const sheetW = chunkInfo.sheet_width || (frameW * (chunkInfo.columns || 1));
+        const colOffset = frameState.col * frameW;
+        const rowOffset = frameState.row * frameH;
+        v00 = pixelData[(rowOffset + y0) * sheetW + (colOffset + x0)];
+        v10 = pixelData[(rowOffset + y0) * sheetW + (colOffset + x1)];
+        v01 = pixelData[(rowOffset + y1) * sheetW + (colOffset + x0)];
+        v11 = pixelData[(rowOffset + y1) * sheetW + (colOffset + x1)];
+    }
 
     if (v00 === undefined) return;
 
