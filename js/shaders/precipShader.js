@@ -23,40 +23,6 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
-    // 🌟 Method 1: Fast GPU Catmull-Rom Bicubic Spline Data Sampler
-    float sampleBicubicCatmullRom(sampler2D tex, vec2 uv, vec2 uvOffset, vec2 uvScale, vec2 texSize) {
-        vec2 sampleCoord = uv * texSize - 0.5;
-        vec2 f = fract(sampleCoord);
-        vec2 i = floor(sampleCoord);
-
-        // 1D Catmull-Rom Spline Basis Polynomials
-        vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
-        vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
-        vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
-        vec2 w3 = f * f * (-0.5 + 0.5 * f);
-
-        vec2 w12 = w1 + w2;
-        vec2 offset12 = w2 / max(w12, 0.0001);
-
-        vec2 texPos0  = (i - 0.5) / texSize;
-        vec2 texPos12 = (i + 0.5 + offset12) / texSize;
-        vec2 texPos3  = (i + 2.5) / texSize;
-
-        vec2 uv0  = uvOffset + clamp(texPos0,  0.0, 1.0) * uvScale;
-        vec2 uv12 = uvOffset + clamp(texPos12, 0.0, 1.0) * uvScale;
-        vec2 uv3  = uvOffset + clamp(texPos3,  0.0, 1.0) * uvScale;
-
-        float val = 0.0;
-        val += texture2D(tex, vec2(uv12.x, uv12.y)).r * w12.x * w12.y;
-        val += texture2D(tex, vec2(uv0.x,  uv12.y)).r * w0.x  * w12.y;
-        val += texture2D(tex, vec2(uv3.x,  uv12.y)).r * w3.x  * w12.y;
-        val += texture2D(tex, vec2(uv12.x, uv0.y)).r  * w12.x * w0.y;
-        val += texture2D(tex, vec2(uv12.x, uv3.y)).r  * w12.x * w3.y;
-
-        float sumWeights = (w0.x + w12.x + w3.x) * (w0.y + w12.y + w3.y);
-        return clamp(val / max(sumWeights, 0.0001), 0.0, 1.0);
-    }
-
     void main() {
         // 1. Mercator UV coordinate transform
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
@@ -64,9 +30,10 @@ const fsSource = `
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
         vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
+        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
 
-        // 2. 🌟 Sample 2x dense grid (2880 x 1442) using Catmull-Rom Bicubic Spline
-        float rawVal = sampleBicubicCatmullRom(u_dataTexture, tile_uv, u_uvOffset, u_uvScale, vec2(2880.0, 1442.0));
+        // 2. 🌟 Clean Hardware Texture Sampling (0 oscillation artifacts)
+        float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
         // Mask dry land / zero
         if (rawVal < 0.00001) {
@@ -96,7 +63,7 @@ function createPrecipPaletteTexture(gl, paletteHexArray) {
             paletteData[i * 4]     = 0;
             paletteData[i * 4 + 1] = 0;
             paletteData[i * 4 + 2] = 0;
-            paletteData[i * 4 + 3] = 0;
+            paletteData[i * 4 + 3] = 0; // Discard in shader
         } else {
             const num = parseInt(hex.replace('#', ''), 16);
             paletteData[i * 4]     = (num >> 16) & 255;
@@ -133,7 +100,10 @@ export function createPrecipShaderLayer(mapInstance) {
                 }
             }
             this.chunkTextures = {};
-            this.activeTex = null;
+            if (this.activeTex) {
+                this.gl.deleteTexture(this.activeTex);
+                this.activeTex = null;
+            }
         },
 
         updatePalette: function(paramIdOrHexArray) {
@@ -220,11 +190,32 @@ export function createPrecipShaderLayer(mapInstance) {
             this.chunkTextures[chunkIndex] = tex;
         },
 
+        // 🌟 Direct Single-Frame Upload from .bin Slices
         updateFrame: function (frameState) {
-            if (!this.gl) return;
-            this.uvOffset = frameState.uvOffset;
-            this.uvScale = frameState.uvScale;
-            this.activeTex = this.chunkTextures[frameState.chunkIndex];
+            if (!this.gl || !frameState) return;
+            this.uvOffset = frameState.uvOffset || [0.0, 0.0];
+            this.uvScale = frameState.uvScale || [1.0, 1.0];
+
+            const source = frameState.chunkImg;
+            if (source && source.isSingleFrame && source.data) {
+                const gl = this.gl;
+                if (!this.activeTex) {
+                    this.activeTex = gl.createTexture();
+                }
+                gl.bindTexture(gl.TEXTURE_2D, this.activeTex);
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+                gl.texImage2D(
+                    gl.TEXTURE_2D, 0, gl.LUMINANCE,
+                    source.width, source.height, 0,
+                    gl.LUMINANCE, gl.UNSIGNED_BYTE, source.data
+                );
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            } else if (frameState.chunkIndex !== undefined && this.chunkTextures[frameState.chunkIndex]) {
+                this.activeTex = this.chunkTextures[frameState.chunkIndex];
+            }
             mapInstance.triggerRepaint();
         },
 
