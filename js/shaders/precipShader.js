@@ -20,8 +20,51 @@ const fsSource = `
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
     uniform float u_opacity;
-    uniform vec2 u_uvOffset;
-    uniform vec2 u_uvScale;
+    uniform vec2 u_texResolution;
+
+    // 🌟 Catmull-Rom Cubic Spline 4-point Weights
+    vec4 catmullRom(float f) {
+        float f2 = f * f;
+        float f3 = f2 * f;
+        return vec4(
+            -0.5 * f3 + f2 - 0.5 * f,
+             1.5 * f3 - 2.5 * f2 + 1.0,
+            -1.5 * f3 + 2.0 * f2 + 0.5 * f,
+             0.5 * f3 - 0.5 * f2
+        );
+    }
+
+    // 🌟 2D Catmull-Rom Bicubic Evaluation with Cyclic Longitudinal Wrapping
+    float sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texRes) {
+        vec2 pos = uv * texRes - 0.5;
+        vec2 f = fract(pos);
+        vec2 i = floor(pos);
+
+        vec4 wx = catmullRom(f.x);
+        vec4 wy = catmullRom(f.y);
+
+        float total = 0.0;
+        for (int y = -1; y <= 2; y++) {
+            float rowVal = 0.0;
+            float yCoord = clamp((i.y + float(y) + 0.5) / texRes.y, 0.0, 1.0);
+            
+            float x0 = fract((i.x - 1.0 + 0.5) / texRes.x);
+            float x1 = fract((i.x + 0.0 + 0.5) / texRes.x);
+            float x2 = fract((i.x + 1.0 + 0.5) / texRes.x);
+            float x3 = fract((i.x + 2.0 + 0.5) / texRes.x);
+
+            rowVal += wx.x * texture2D(tex, vec2(x0, yCoord)).r;
+            rowVal += wx.y * texture2D(tex, vec2(x1, yCoord)).r;
+            rowVal += wx.z * texture2D(tex, vec2(x2, yCoord)).r;
+            rowVal += wx.w * texture2D(tex, vec2(x3, yCoord)).r;
+
+            int yIdx = y + 1;
+            float w_y = (yIdx == 0) ? wy.x : ((yIdx == 1) ? wy.y : ((yIdx == 2) ? wy.z : wy.w));
+            total += w_y * rowVal;
+        }
+
+        return clamp(total, 0.0, 1.0);
+    }
 
     void main() {
         // 1. Mercator UV coordinate transform
@@ -29,12 +72,10 @@ const fsSource = `
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // 2. 🌟 Continuous smooth bilinear sampling (matches Python's gaussian_filter)
-        vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
-        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
+        vec2 uv = vec2(fract(v_texcoord.x), normY);
 
-        // 3. Fetch raw data point
-        float rawVal = texture2D(u_dataTexture, sprite_uv).r;
+        // 2. 🌟 Catmull-Rom Bicubic Spline Evaluation on 2880x1442 grid
+        float rawVal = sampleCatmullRom(u_dataTexture, uv, u_texResolution);
 
         // Mask dry land
         if (rawVal < 0.00001) {
@@ -60,12 +101,11 @@ function createPrecipPaletteTexture(gl, paletteHexArray) {
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
     
     paletteHexArray.forEach((hex, i) => {
-        // 🌟 Write alpha = 0 for transparent threshold (e.g. PVA < 0.5 or dry land)
         if (hex === 'transparent' || !hex || i === 0) {
             paletteData[i * 4]     = 0;
             paletteData[i * 4 + 1] = 0;
             paletteData[i * 4 + 2] = 0;
-            paletteData[i * 4 + 3] = 0; // Alpha 0 triggers discard in fragment shader
+            paletteData[i * 4 + 3] = 0;
         } else {
             const num = parseInt(hex.replace('#', ''), 16);
             paletteData[i * 4]     = (num >> 16) & 255;
@@ -76,7 +116,6 @@ function createPrecipPaletteTexture(gl, paletteHexArray) {
     });
 
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteHexArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
-    
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -91,8 +130,7 @@ export function createPrecipShaderLayer(mapInstance) {
         chunkTextures: {},
         activeTex: null,
         paletteTex: null,
-        uvOffset: [0, 0],
-        uvScale: [1, 1],
+        texResolution: [2880.0, 1442.0],
 
         clearTextures: function() {
             if (!this.gl) return;
@@ -142,8 +180,7 @@ export function createPrecipShaderLayer(mapInstance) {
             this.uDataTexture = gl.getUniformLocation(this.program, 'u_dataTexture');
             this.uPaletteTexture = gl.getUniformLocation(this.program, 'u_paletteTexture');
             this.uOpacity = gl.getUniformLocation(this.program, 'u_opacity');
-            this.uUvOffset = gl.getUniformLocation(this.program, 'u_uvOffset');
-            this.uUvScale = gl.getUniformLocation(this.program, 'u_uvScale');
+            this.uTexResolution = gl.getUniformLocation(this.program, 'u_texResolution');
 
             const quadVertices = new Float32Array([
                 -2,0,  -1,0,  -2,1,   -2,1,  -1,0,  -1,1,
@@ -157,45 +194,66 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
 
-            // 🌟 Theme-aware initial palette on add
             const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
             const initialPalette = paletteFunc(stateManager.activeParam || 'tp');
             this.paletteTex = createPrecipPaletteTexture(gl, initialPalette);
         },
         
         preloadChunkTexture: function(chunkIndex, source) {
-            if (!this.gl || this.chunkTextures[chunkIndex] || !source) return;
+            if (!this.gl || !source) return;
             const gl = this.gl;
-            const tex = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-            
-            // 🌟 Polymorphic upload: checks if source is a binary buffer object or an ImageBitmap
-            if (source.data && source.width && source.height) {
-                gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.LUMINANCE, 
-                    source.width, source.height, 0, 
-                    gl.LUMINANCE, gl.UNSIGNED_BYTE, source.data
-                );
+
+            const uploadSingle = (img) => {
+                const tex = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+
+                if (img.data && img.width && img.height) {
+                    gl.texImage2D(
+                        gl.TEXTURE_2D, 0, gl.LUMINANCE, 
+                        img.width, img.height, 0, 
+                        gl.LUMINANCE, gl.UNSIGNED_BYTE, img.data
+                    );
+                } else {
+                    gl.texImage2D(
+                        gl.TEXTURE_2D, 0, gl.LUMINANCE, 
+                        gl.LUMINANCE, gl.UNSIGNED_BYTE, img
+                    );
+                }
+                
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                return tex;
+            };
+
+            // 🌟 Handles both Time-Volume slices and legacy standalone ImageBitmaps
+            if (source.frames && Array.isArray(source.frames)) {
+                if (source.width && source.height) {
+                    this.texResolution = [source.width, source.height];
+                }
+                source.frames.forEach((frameBmp, fIdx) => {
+                    const key = `${chunkIndex}_${fIdx}`;
+                    if (!this.chunkTextures[key] && frameBmp) {
+                        this.chunkTextures[key] = uploadSingle(frameBmp);
+                    }
+                });
             } else {
-                gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.LUMINANCE, 
-                    gl.LUMINANCE, gl.UNSIGNED_BYTE, source
-                );
+                const key = `${chunkIndex}_0`;
+                if (!this.chunkTextures[key]) {
+                    this.chunkTextures[key] = uploadSingle(source);
+                }
+                this.chunkTextures[chunkIndex] = this.chunkTextures[key];
             }
-            
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            this.chunkTextures[chunkIndex] = tex;
         },
 
         updateFrame: function (frameState) {
-            if (!this.gl) return;
-            this.uvOffset = frameState.uvOffset;
-            this.uvScale = frameState.uvScale;
-            this.activeTex = this.chunkTextures[frameState.chunkIndex];
+            if (!this.gl || !frameState) return;
+            const cIdx = frameState.chunkIndex;
+            const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
+            
+            this.activeTex = this.chunkTextures[`${cIdx}_${fIdx}`] || this.chunkTextures[cIdx];
             mapInstance.triggerRepaint();
         },
 
@@ -213,9 +271,8 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85); // Matches alpha=0.85 in Python Colab
-            gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
-            gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
+            gl.uniform1f(this.uOpacity, 0.85);
+            gl.uniform2f(this.uTexResolution, this.texResolution[0], this.texResolution[1]);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.enableVertexAttribArray(this.aPos);
