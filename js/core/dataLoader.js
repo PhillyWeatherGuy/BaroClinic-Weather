@@ -15,15 +15,14 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     const urlsToTry = [];
 
+    // 🌟 Strictly parameter-specific URLs (prevents PWAT from falling back to 2t's manifest)
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
         urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
-        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${dateStr}_${cycleStr}_manifest.json`);
     }
 
     urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_manifest.json`);
-    urlsToTry.push(`${stateManager.BASE_URL}manifest.json`);
 
     let fetchedData = null;
 
