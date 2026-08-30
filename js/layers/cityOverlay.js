@@ -8,39 +8,8 @@ let activeCities = [];
 let cityMarkers = {};
 let isLoaded = false;
 let mapInstance = null;
-let modelsConfig = null;
 let listenersAttached = false;
 
-// 🌟 Parameter Piecewise Scaling Fallback Tables
-const PARAM_SCALING_FALLBACKS = {
-    pwat: {
-        mode: 'piecewise',
-        val_points: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
-        byte_points: [0, 32, 64, 96, 128, 160, 192, 255]
-    },
-    tcwv: {
-        mode: 'piecewise',
-        val_points: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
-        byte_points: [0, 32, 64, 96, 128, 160, 192, 255]
-    },
-    tp: {
-        mode: 'piecewise',
-        val_points: [0.0, 1.0, 10.0, 50.0],
-        byte_points: [0, 100, 200, 255]
-    },
-    precip: {
-        mode: 'piecewise',
-        val_points: [0.0, 1.0, 10.0, 50.0],
-        byte_points: [0, 100, 200, 255]
-    },
-    pva: {
-        mode: 'piecewise',
-        val_points: [0.0, 3.0, 80.0],
-        byte_points: [0, 30, 107]
-    }
-};
-
-// Clean CSS styling for city callout nodes
 const style = document.createElement('style');
 style.textContent = `
     .city-callout-node {
@@ -77,14 +46,15 @@ style.textContent = `
 document.head.appendChild(style);
 
 /**
- * 🌟 UNIVERSAL PIXEL DECODER
+ * 🌟 100% GENERIC PIXEL DECODER
+ * Dynamically reads any piecewise breakpoints or linear ranges from manifest.scaling
  */
 export function decodePixelValue(rawVal, manifest) {
     if (rawVal === undefined) return 0.0;
 
-    const paramKey = (manifest?.parameter || manifest?.id || stateManager.activeParam || '').toLowerCase();
-    const scaling = manifest?.scaling || PARAM_SCALING_FALLBACKS[paramKey];
-
+    const scaling = manifest?.scaling;
+    
+    // 1. Dynamic Piecewise Scaling (e.g. TP, PWAT, PVA, CAPE)
     if (scaling && scaling.mode === 'piecewise' && scaling.val_points && scaling.byte_points) {
         const vp = scaling.val_points;
         const bp = scaling.byte_points;
@@ -98,13 +68,14 @@ export function decodePixelValue(rawVal, manifest) {
         return vp[vp.length - 1];
     }
 
-    const minVal = manifest?.min_val ?? manifest?.temp_min_k ?? scaling?.min_val ?? (paramKey === '2t' ? 216.4833 : 0.0);
-    const maxVal = manifest?.max_val ?? manifest?.temp_max_k ?? scaling?.max_val ?? (paramKey === '2t' ? 327.5944 : 255.0);
+    // 2. Dynamic Linear Scaling (e.g. 2m Temperature, Pressure, Wind Speed)
+    const minVal = scaling?.min_val ?? manifest?.min_val ?? manifest?.temp_min_k ?? 0.0;
+    const maxVal = scaling?.max_val ?? manifest?.max_val ?? manifest?.temp_max_k ?? 255.0;
     return minVal + (rawVal / 255.0) * (maxVal - minVal);
 }
 
 /**
- * 🌟 SHARED BILINEAR SAMPLER (Time-Volume Compatible)
+ * 🌟 GENERIC BILINEAR GPS SAMPLER
  */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameState = activeFrameState || stateManager.activeFrameState;
@@ -165,40 +136,39 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 }
 
 /**
- * 🌟 TRULY DYNAMIC UNIT FORMATTER
+ * 🌟 100% GENERIC DYNAMIC UNIT FORMATTER
+ * Formats any present or future parameter based entirely on its manifest / models.json unit
  */
 export function formatParameterValue(decodedVal, manifest) {
     if (decodedVal === undefined || isNaN(decodedVal)) return "--";
 
-    const param = (manifest?.parameter || manifest?.id || stateManager.activeParam || '').toLowerCase();
-    const unit = (manifest?.unit || '').trim().toLowerCase();
+    const unit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim();
 
-    // 🌟 Explicit PWAT / TCWV formatting
-    if (param === 'pwat' || param === 'tcwv') {
+    // 1. Inches (Precipitation, Precipitable Water, Snow Depth, etc.)
+    if (unit === 'in' || unit.toLowerCase().includes('inch')) {
         return `${decodedVal.toFixed(2)}"`;
     }
 
-    // 🌟 Precipitation formatting
-    if (param === 'tp' || param === 'precip' || unit === 'in' || unit.includes('inch')) {
-        return `${decodedVal.toFixed(2)}"`;
-    }
-
-    // 🌟 Temperature formatting
-    if (param === '2t' || param === 'temp' || unit === '°f' || unit.includes('f')) {
-        let tempF = decodedVal;
-        if (decodedVal > 150) {
-            const tempC = decodedVal - 273.15;
-            tempF = (tempC * 9 / 5) + 32;
+    // 2. Degrees Temperature (°F / °C / Kelvin conversion)
+    if (unit.includes('°') || unit.toLowerCase().includes('f') || unit.toLowerCase().includes('c')) {
+        let tempVal = decodedVal;
+        // Convert from Kelvin if raw value is in Kelvin (> 150K) and unit is Fahrenheit
+        if (decodedVal > 150 && (unit.includes('F') || unit.includes('f'))) {
+            tempVal = (decodedVal - 273.15) * 1.8 + 32.0;
+        } else if (decodedVal > 150 && (unit.includes('C') || unit.includes('c'))) {
+            tempVal = decodedVal - 273.15;
         }
-        return `${Math.round(tempF)}°`;
+        return `${Math.round(tempVal)}°`;
     }
 
-    if (unit === 'kts' || unit === 'mph') {
+    // 3. Percentages (Relative Humidity, Probabilities, Cloud Cover)
+    if (unit === '%') {
+        return `${Math.round(decodedVal)}%`;
+    }
+
+    // 4. Any other meteorological unit (kts, mph, hPa, mb, J/kg, 10⁻⁵ s⁻¹)
+    if (unit.length > 0) {
         return `${Math.round(decodedVal)} ${unit}`;
-    }
-
-    if (unit === 'hpa' || unit === 'mb' || unit === 'j/kg' || unit === '%') {
-        return `${Math.round(decodedVal)}`;
     }
 
     return `${Math.round(decodedVal)}`;
@@ -232,7 +202,6 @@ export function hideBasemapCityLabels(map) {
 export async function initCityOverlay(map) {
     mapInstance = map;
 
-    // Clean up any detached marker instances from previous basemap style
     for (const name in cityMarkers) {
         if (cityMarkers[name]) {
             cityMarkers[name].remove();
@@ -248,11 +217,6 @@ export async function initCityOverlay(map) {
         map.on('zoom', updateCityPositions);
         listenersAttached = true;
     }
-
-    try {
-        const cResp = await fetch('./config/models.json');
-        if (cResp.ok) modelsConfig = await cResp.json();
-    } catch (e) {}
 
     if (allGlobalCities.length > 0) {
         isLoaded = true;
@@ -303,9 +267,9 @@ export function updateCityPositions() {
 
     hideBasemapCityLabels(mapInstance);
 
-    // 🌟 Do not show city callouts for 500mb PVA
-    const isPva = (stateManager.activeParam === 'pva' || stateManager.manifest?.parameter === 'pva');
-    if (isPva) {
+    // 🌟 Dynamically check models.json / manifest for overlay suppression
+    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || stateManager.manifest?.suppress_city_overlay;
+    if (isSuppressed) {
         for (const name in cityMarkers) {
             cityMarkers[name].getElement().style.display = 'none';
         }
@@ -381,16 +345,13 @@ export function updateCityPositions() {
     }
 }
 
-/**
- * 🌟 MASTER CALLOUT SAMPLER (Uses Bilinear GPS Interpolation)
- */
 export function updateCityCallouts(map, activeFrameState, manifest) {
     if (!activeFrameState || !isLoaded) return;
 
     hideBasemapCityLabels(map);
 
-    const isPva = (stateManager.activeParam === 'pva' || manifest?.parameter === 'pva');
-    if (isPva) {
+    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || manifest?.suppress_city_overlay;
+    if (isSuppressed) {
         for (const name in cityMarkers) {
             cityMarkers[name].getElement().style.display = 'none';
         }
@@ -404,6 +365,9 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
         updateCityPositions();
     }
 
+    const activeUnit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim().toLowerCase();
+    const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch');
+
     for (let i = 0; i < activeCities.length; i++) {
         const city = activeCities[i];
         const marker = cityMarkers[city.name];
@@ -415,9 +379,7 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
         const valEl = marker.getElement().querySelector('.city-callout-val');
         marker.getElement().style.display = 'flex';
         if (valEl) {
-            valEl.className = (stateManager.activeParam === 'tp' || stateManager.activeParam === 'pwat' || manifest?.parameter === 'tp' || manifest?.parameter === 'pwat') 
-                ? 'city-callout-val precip-val' 
-                : 'city-callout-val';
+            valEl.className = isPrecipType ? 'city-callout-val precip-val' : 'city-callout-val';
             valEl.textContent = formattedText;
         }
     }
