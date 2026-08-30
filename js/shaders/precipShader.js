@@ -29,13 +29,14 @@ const fsSource = `
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
+        // 2. 🌟 Continuous smooth bilinear sampling (matches Python's gaussian_filter)
         vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
         vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
 
-        // 2. Clean Hardware Bilinear Sampling
+        // 3. Fetch raw data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
-        // Mask dry land / zero
+        // Mask dry land
         if (rawVal < 0.00001) {
             discard;
         }
@@ -59,11 +60,12 @@ function createPrecipPaletteTexture(gl, paletteHexArray) {
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
     
     paletteHexArray.forEach((hex, i) => {
+        // 🌟 Write alpha = 0 for transparent threshold (e.g. PVA < 0.5 or dry land)
         if (hex === 'transparent' || !hex || i === 0) {
             paletteData[i * 4]     = 0;
             paletteData[i * 4 + 1] = 0;
             paletteData[i * 4 + 2] = 0;
-            paletteData[i * 4 + 3] = 0;
+            paletteData[i * 4 + 3] = 0; // Alpha 0 triggers discard in fragment shader
         } else {
             const num = parseInt(hex.replace('#', ''), 16);
             paletteData[i * 4]     = (num >> 16) & 255;
@@ -100,10 +102,7 @@ export function createPrecipShaderLayer(mapInstance) {
                 }
             }
             this.chunkTextures = {};
-            if (this.activeTex) {
-                this.gl.deleteTexture(this.activeTex);
-                this.activeTex = null;
-            }
+            this.activeTex = null;
         },
 
         updatePalette: function(paramIdOrHexArray) {
@@ -158,6 +157,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
 
+            // 🌟 Theme-aware initial palette on add
             const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
             const initialPalette = paletteFunc(stateManager.activeParam || 'tp');
             this.paletteTex = createPrecipPaletteTexture(gl, initialPalette);
@@ -170,6 +170,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, tex);
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             
+            // 🌟 Polymorphic upload: checks if source is a binary buffer object or an ImageBitmap
             if (source.data && source.width && source.height) {
                 gl.texImage2D(
                     gl.TEXTURE_2D, 0, gl.LUMINANCE, 
@@ -191,30 +192,10 @@ export function createPrecipShaderLayer(mapInstance) {
         },
 
         updateFrame: function (frameState) {
-            if (!this.gl || !frameState) return;
-            this.uvOffset = frameState.uvOffset || [0.0, 0.0];
-            this.uvScale = frameState.uvScale || [1.0, 1.0];
-
-            const source = frameState.chunkImg;
-            if (source && source.isSingleFrame && source.data) {
-                const gl = this.gl;
-                if (!this.activeTex) {
-                    this.activeTex = gl.createTexture();
-                }
-                gl.bindTexture(gl.TEXTURE_2D, this.activeTex);
-                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-                gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.LUMINANCE,
-                    source.width, source.height, 0,
-                    gl.LUMINANCE, gl.UNSIGNED_BYTE, source.data
-                );
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            } else if (frameState.chunkIndex !== undefined && this.chunkTextures[frameState.chunkIndex]) {
-                this.activeTex = this.chunkTextures[frameState.chunkIndex];
-            }
+            if (!this.gl) return;
+            this.uvOffset = frameState.uvOffset;
+            this.uvScale = frameState.uvScale;
+            this.activeTex = this.chunkTextures[frameState.chunkIndex];
             mapInstance.triggerRepaint();
         },
 
@@ -232,7 +213,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85);
+            gl.uniform1f(this.uOpacity, 0.85); // Matches alpha=0.85 in Python Colab
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
 
