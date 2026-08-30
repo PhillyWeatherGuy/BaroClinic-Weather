@@ -8,10 +8,19 @@ import { updatePolarPalette } from '../layers/polarMap.js';
 let onStepChangeCallback = null;
 let onThemeChangeCallback = null;
 let onViewChangeCallback = null;
+let onZoomKeyCallback = null;
 let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 200;
 let shaderLayerRef = null;
+
+// Track cursor position for localized zooming
+let cursorX = window.innerWidth / 2;
+let cursorY = window.innerHeight / 2;
+window.addEventListener('mousemove', (e) => {
+    cursorX = e.clientX;
+    cursorY = e.clientY;
+}, { passive: true });
 
 export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
@@ -20,7 +29,9 @@ export function setShaderLayerReference(layer) {
 /**
  * 🌟 KEYBOARD SHORTCUTS & FAST-SCRUBBING ENGINE
  */
-function initKeyboardControls() {
+function initKeyboardControls(zoomCallback = null) {
+    onZoomKeyCallback = zoomCallback;
+
     let keyHoldTimeout = null;
     let keyHoldInterval = null;
     let activeKey = null;
@@ -38,9 +49,12 @@ function initKeyboardControls() {
         if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
         if (e.target.tagName === 'TEXTAREA') return;
 
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        // Prevent all arrow keys from scrolling/panning the browser or container
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
             e.preventDefault();
+        }
 
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
             // If already holding this key, let the interval handle it
             if (activeKey === e.key) return;
 
@@ -60,6 +74,18 @@ function initKeyboardControls() {
                     handleStep(delta);
                 }, FAST_SCRUB_INTERVAL_MS);
             }, HOLD_DELAY_MS);
+        } else if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
+            // 🌟 Zoom IN where cursor is located
+            e.preventDefault();
+            if (typeof onZoomKeyCallback === 'function') {
+                onZoomKeyCallback(1, cursorX, cursorY);
+            }
+        } else if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') {
+            // 🌟 Zoom OUT where cursor is located
+            e.preventDefault();
+            if (typeof onZoomKeyCallback === 'function') {
+                onZoomKeyCallback(-1, cursorX, cursorY);
+            }
         } else if (e.key === ' ' || e.code === 'Space') {
             // Spacebar: Play/Pause toggle
             e.preventDefault();
@@ -350,7 +376,7 @@ export function initModelCategoryBar() {
         });
     });
 
-    // 3. Mouse Drag-to-Scroll Logic for Desktop Users
+    // 3. 🌟 Mouse Drag-to-Scroll Logic for Desktop Users
     if (scrollContainer) {
         let isDown = false;
         let startX;
@@ -407,7 +433,6 @@ export function initParameterCategoryBar() {
                 if (labelSpan && modelsData.parameters?.[stateManager.activeParam]) {
                     labelSpan.textContent = modelsData.parameters[stateManager.activeParam].name;
                 }
-                // Defaults to Thermodynamics category (where 2m Temperature lives)
                 renderCategoryParameters('Thermodynamics');
             }
         })
@@ -590,7 +615,7 @@ export function initParameterCategoryBar() {
     });
 }
 
-export function initViewerUI(stepCallback, themeCallback = null, viewCallback = null) {
+export function initViewerUI(stepCallback, themeCallback = null, viewCallback = null, zoomCallback = null) {
     onStepChangeCallback = stepCallback;
     onThemeChangeCallback = themeCallback;
 
@@ -605,7 +630,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
     initParameterCategoryBar();
     initThemeToggle();
     initViewSelector(viewCallback);
-    initKeyboardControls(); // 🌟 Keyboard Navigation & Fast Scrubbing
+    initKeyboardControls(zoomCallback); // 🌟 Keyboard Navigation, Fast Scrubbing & Zoom at Cursor
 
     if (slider) {
         slider.addEventListener('input', (e) => {
