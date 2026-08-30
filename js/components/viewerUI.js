@@ -188,12 +188,15 @@ export function initThemeToggle() {
     });
 }
 
+/**
+ * 🌟 MEMORY-AWARE STEP INDEX CHECKER (Never gets locked to 27 hours)
+ */
 export function getMaxLoadedStepIndex() {
     if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) return 0;
     let maxIdx = 0;
     for (let i = 0; i < stateManager.globalSteps.length; i++) {
         const chunkIdx = stateManager.globalSteps[i].chunkIndex;
-        if (stateManager.loadedChunkBitmaps[chunkIdx]) {
+        if (stateManager.chunkPixelData[chunkIdx] || stateManager.loadedChunkBitmaps[chunkIdx]) {
             maxIdx = i;
         } else {
             break;
@@ -430,7 +433,6 @@ export function initParameterCategoryBar() {
             btn.setAttribute('data-param-id', param.id);
             btn.textContent = param.name;
 
-            // 🌟 PURE DATA-DRIVEN PARAMETER SWITCHER
             btn.addEventListener('click', async () => {
                 document.querySelectorAll('#param-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -444,7 +446,6 @@ export function initParameterCategoryBar() {
 
                 showToast(`Loading ${param.name}...`);
                 
-                // 🌟 Attach full dynamic parameter configuration
                 stateManager.paramConfig = param;
                 stateManager.activeParam = param.id;
                 stateManager.activeShader = param.shader || 'scalar';
