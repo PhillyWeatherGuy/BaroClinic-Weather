@@ -14,7 +14,6 @@ let playInterval = null;
 const PLAYBACK_SPEED_MS = 200;
 let shaderLayerRef = null;
 
-// Track cursor position for localized zooming
 let cursorX = window.innerWidth / 2;
 let cursorY = window.innerHeight / 2;
 window.addEventListener('mousemove', (e) => {
@@ -26,9 +25,6 @@ export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
 }
 
-/**
- * 🌟 KEYBOARD SHORTCUTS & FAST-SCRUBBING ENGINE
- */
 function initKeyboardControls(zoomCallback = null) {
     onZoomKeyCallback = zoomCallback;
 
@@ -36,8 +32,8 @@ function initKeyboardControls(zoomCallback = null) {
     let keyHoldInterval = null;
     let activeKey = null;
 
-    const FAST_SCRUB_INTERVAL_MS = 40; // Speed when holding down arrow key
-    const HOLD_DELAY_MS = 250;          // Time before rapid "zoom" scrub starts
+    const FAST_SCRUB_INTERVAL_MS = 40;
+    const HOLD_DELAY_MS = 250;
 
     function handleStep(delta) {
         if (isPlaying) pausePlayback();
@@ -45,49 +41,40 @@ function initKeyboardControls(zoomCallback = null) {
     }
 
     window.addEventListener('keydown', (e) => {
-        // Don't intercept if focused on text input fields
         if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
         if (e.target.tagName === 'TEXTAREA') return;
 
-        // Prevent all arrow keys from scrolling/panning the browser or container
         if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
             e.preventDefault();
         }
 
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-            // If already holding this key, let the interval handle it
             if (activeKey === e.key) return;
 
-            // Clear any active timers
             if (keyHoldTimeout) clearTimeout(keyHoldTimeout);
             if (keyHoldInterval) clearInterval(keyHoldInterval);
 
             activeKey = e.key;
             const delta = (e.key === 'ArrowRight') ? 1 : -1;
 
-            // 1. Immediate step on first press
             handleStep(delta);
 
-            // 2. Start rapid "zoom" scrub after hold delay
             keyHoldTimeout = setTimeout(() => {
                 keyHoldInterval = setInterval(() => {
                     handleStep(delta);
                 }, FAST_SCRUB_INTERVAL_MS);
             }, HOLD_DELAY_MS);
         } else if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
-            // 🌟 Zoom IN where cursor is located
             e.preventDefault();
             if (typeof onZoomKeyCallback === 'function') {
                 onZoomKeyCallback(1, cursorX, cursorY);
             }
         } else if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') {
-            // 🌟 Zoom OUT where cursor is located
             e.preventDefault();
             if (typeof onZoomKeyCallback === 'function') {
                 onZoomKeyCallback(-1, cursorX, cursorY);
             }
         } else if (e.key === ' ' || e.code === 'Space') {
-            // Spacebar: Play/Pause toggle
             e.preventDefault();
             togglePlayback();
         }
@@ -114,9 +101,6 @@ function initKeyboardControls(zoomCallback = null) {
     });
 }
 
-/**
- * 🌟 UNIVERSAL VIEW / PROJECTION SELECTOR (2D Map, 3D Globe, Polar Stereographic)
- */
 export function initViewSelector(viewCallback = null) {
     onViewChangeCallback = viewCallback;
 
@@ -126,7 +110,6 @@ export function initViewSelector(viewCallback = null) {
 
     if (!menu) return;
 
-    // Sync initial active state (default: 2d)
     const currentView = stateManager.activeView || '2d';
     optionBtns.forEach(btn => {
         if (btn.getAttribute('data-view') === currentView) {
@@ -136,7 +119,6 @@ export function initViewSelector(viewCallback = null) {
         }
     });
 
-    // Mobile Toggle Button Click
     if (toggleBtn) {
         toggleBtn.onclick = (e) => {
             e.stopPropagation();
@@ -145,7 +127,6 @@ export function initViewSelector(viewCallback = null) {
         };
     }
 
-    // Option selection (Handles both Mobile Flyout & Desktop Segmented Pill)
     optionBtns.forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation();
@@ -157,7 +138,6 @@ export function initViewSelector(viewCallback = null) {
 
             stateManager.activeView = targetView;
 
-            // Close mobile flyout
             if (window.innerWidth < 1024) {
                 menu.style.display = 'none';
             }
@@ -170,7 +150,6 @@ export function initViewSelector(viewCallback = null) {
         };
     });
 
-    // Close dropdown when clicking outside on mobile
     document.addEventListener('click', (e) => {
         if (window.innerWidth < 1024 && menu && toggleBtn) {
             if (!menu.contains(e.target) && !toggleBtn.contains(e.target)) {
@@ -180,14 +159,10 @@ export function initViewSelector(viewCallback = null) {
     });
 }
 
-/**
- * 🌟 DARK / LIGHT MODE THEME TOGGLE
- */
 export function initThemeToggle() {
     const themeBtn = document.getElementById('btn-theme-toggle');
     if (!themeBtn) return;
 
-    // Sync initial state (defaults to light mode)
     if (stateManager.currentTheme === 'light') {
         themeBtn.classList.add('light-mode');
     } else {
@@ -244,9 +219,6 @@ export function updateSliderTrackAndBounds() {
         rgba(239, 68, 68, 0.6) 100%)`;
 }
 
-/**
- * 🌟 MODEL CATEGORY SUB-BAR & DYNAMIC MODEL SELECTOR
- */
 export function initModelCategoryBar() {
     const modelBtn = document.getElementById('btn-model-menu');
     const categoryBar = document.getElementById('model-category-bar');
@@ -258,7 +230,6 @@ export function initModelCategoryBar() {
 
     let modelsData = null;
 
-    // Fetch config/models.json
     fetch('./config/models.json')
         .then(resp => resp.ok ? resp.json() : null)
         .then(data => {
@@ -273,7 +244,6 @@ export function initModelCategoryBar() {
         })
         .catch(err => console.warn("Could not load config/models.json:", err));
 
-    // Function to render models matching active category
     function renderCategoryModels(categoryName) {
         if (!modelListContainer) return;
         modelListContainer.innerHTML = '';
@@ -295,7 +265,6 @@ export function initModelCategoryBar() {
             btn.setAttribute('data-model-id', model.id);
             btn.textContent = model.name;
 
-            // 🌟 MODEL SWITCH EVENT LISTENER
             btn.addEventListener('click', async () => {
                 document.querySelectorAll('#model-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -344,11 +313,9 @@ export function initModelCategoryBar() {
         });
     }
 
-    // 1. Toggle Sub-Bar on Model Button Click
     modelBtn.addEventListener('click', (e) => {
         e.stopPropagation();
 
-        // Close parameter category bar if open
         const paramBar = document.getElementById('param-category-bar');
         const paramBtn = document.getElementById('btn-param-menu');
         if (paramBar) paramBar.style.display = 'none';
@@ -365,7 +332,6 @@ export function initModelCategoryBar() {
         }
     });
 
-    // 2. Category Pill Selection Listener
     catPills.forEach(pill => {
         pill.addEventListener('click', (e) => {
             catPills.forEach(p => p.classList.remove('active'));
@@ -376,7 +342,6 @@ export function initModelCategoryBar() {
         });
     });
 
-    // 3. 🌟 Mouse Drag-to-Scroll Logic for Desktop Users
     if (scrollContainer) {
         let isDown = false;
         let startX;
@@ -400,7 +365,6 @@ export function initModelCategoryBar() {
         });
     }
 
-    // Close menu when clicking outside
     document.addEventListener('click', (e) => {
         if (!categoryBar.contains(e.target) && !modelBtn.contains(e.target)) {
             categoryBar.style.display = 'none';
@@ -409,9 +373,6 @@ export function initModelCategoryBar() {
     });
 }
 
-/**
- * 🌟 PARAMETER CATEGORY SUB-BAR & DYNAMIC PARAMETER SELECTOR
- */
 export function initParameterCategoryBar() {
     const paramBtn = document.getElementById('btn-param-menu');
     const paramBar = document.getElementById('param-category-bar');
@@ -423,22 +384,23 @@ export function initParameterCategoryBar() {
 
     let modelsData = null;
 
-    // Fetch config/models.json
     fetch('./config/models.json')
         .then(resp => resp.ok ? resp.json() : null)
         .then(data => {
             if (data) {
                 modelsData = data;
+                const activeCfg = modelsData.parameters?.[stateManager.activeParam];
+                stateManager.paramConfig = activeCfg;
+
                 const labelSpan = paramBtn.querySelector('span');
-                if (labelSpan && modelsData.parameters?.[stateManager.activeParam]) {
-                    labelSpan.textContent = modelsData.parameters[stateManager.activeParam].name;
+                if (labelSpan && activeCfg) {
+                    labelSpan.textContent = activeCfg.name;
                 }
                 renderCategoryParameters('Thermodynamics');
             }
         })
         .catch(err => console.warn("Could not load config/models.json:", err));
 
-    // Function to render parameters matching active category
     function renderCategoryParameters(categoryName) {
         if (!paramListContainer) return;
         paramListContainer.innerHTML = '';
@@ -462,13 +424,13 @@ export function initParameterCategoryBar() {
             return;
         }
 
-        matchingParams.forEach((param, idx) => {
+        matchingParams.forEach((param) => {
             const btn = document.createElement('button');
             btn.className = `model-select-btn ${stateManager.activeParam === param.id ? 'active' : ''}`;
             btn.setAttribute('data-param-id', param.id);
             btn.textContent = param.name;
 
-            // 🌟 PARAMETER SWITCH EVENT LISTENER
+            // 🌟 PURE DATA-DRIVEN PARAMETER SWITCHER
             btn.addEventListener('click', async () => {
                 document.querySelectorAll('#param-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -482,10 +444,11 @@ export function initParameterCategoryBar() {
 
                 showToast(`Loading ${param.name}...`);
                 
+                // 🌟 Attach full dynamic parameter configuration
+                stateManager.paramConfig = param;
                 stateManager.activeParam = param.id;
                 stateManager.activeShader = param.shader || 'scalar';
 
-                // 🌟 1. Dynamic Basemap Style Switcher (Supports Light and Dark Mode URLs)
                 const targetStyle = (stateManager.currentTheme === 'dark' && param.map_style_dark)
                     ? param.map_style_dark
                     : (param.map_style_light || param.map_style);
@@ -494,31 +457,22 @@ export function initParameterCategoryBar() {
                     updateBasemapStyle(targetStyle);
                 }
 
-                // 🌟 2. Unload previous memory & destroy old layer
                 purgeAllAppMemory(shaderLayerRef);
                 const thisGen = stateManager.loadGeneration;
 
-                // 🌟 3. Mount matching shader layer based on models.json config!
                 if (typeof initLayer === 'function') {
                     initLayer(param.shader || 'scalar');
                 }
 
-                // 🌟 4. Swap GPU Palettes for 2D Shader, 3D Globe & Polar Map
                 if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
                     shaderLayerRef.updatePalette(param.palette || param.id);
                 }
-                try {
-                    updateThreeGlobePalette(param.palette || param.id);
-                } catch (e) {}
-                try {
-                    updatePolarPalette(param.palette || param.id);
-                } catch (e) {}
+                try { updateThreeGlobePalette(param.palette || param.id); } catch (e) {}
+                try { updatePolarPalette(param.palette || param.id); } catch (e) {}
 
                 try {
-                    // 🌟 5. Fetch Parameter Manifest
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
 
-                    // 🌟 6. Load Chunk 0 and Render Frame 0
                     const bitmap0 = await loadChunkBitmap(0, thisGen);
                     if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
                         shaderLayerRef.preloadChunkTexture(0, bitmap0);
@@ -534,8 +488,6 @@ export function initParameterCategoryBar() {
                     }
 
                     hideToast();
-
-                    // 🌟 7. Background Preload
                     preloadRemainingChunks(thisGen);
 
                 } catch (err) {
@@ -550,11 +502,9 @@ export function initParameterCategoryBar() {
         });
     }
 
-    // 1. Toggle Sub-Bar on Parameter Button Click
     paramBtn.addEventListener('click', (e) => {
         e.stopPropagation();
 
-        // Close model category bar if open
         const modelBar = document.getElementById('model-category-bar');
         const modelBtn = document.getElementById('btn-model-menu');
         if (modelBar) modelBar.style.display = 'none';
@@ -571,7 +521,6 @@ export function initParameterCategoryBar() {
         }
     });
 
-    // 2. Category Pill Selection Listener
     catPills.forEach(pill => {
         pill.addEventListener('click', (e) => {
             catPills.forEach(p => p.classList.remove('active'));
@@ -582,7 +531,6 @@ export function initParameterCategoryBar() {
         });
     });
 
-    // 3. Mouse Drag-to-Scroll Logic for Desktop
     if (scrollContainer) {
         let isDown = false;
         let startX;
@@ -606,7 +554,6 @@ export function initParameterCategoryBar() {
         });
     }
 
-    // Close menu when clicking outside
     document.addEventListener('click', (e) => {
         if (!paramBar.contains(e.target) && !paramBtn.contains(e.target)) {
             paramBar.style.display = 'none';
@@ -630,7 +577,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
     initParameterCategoryBar();
     initThemeToggle();
     initViewSelector(viewCallback);
-    initKeyboardControls(zoomCallback); // 🌟 Keyboard Navigation, Fast Scrubbing & Zoom at Cursor
+    initKeyboardControls(zoomCallback);
 
     if (slider) {
         slider.addEventListener('input', (e) => {
@@ -775,7 +722,6 @@ function initModelRunDropdown() {
                 }
 
                 hideToast();
-
                 preloadRemainingChunks(thisGen);
 
             } catch (err) {
