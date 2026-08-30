@@ -232,7 +232,7 @@ async function renderFrame(globalIdx) {
     if (!frameInfo) return;
 
     const chunkIdx = frameInfo.chunkIndex;
-    const chunkInfo = stateManager.manifest.chunks[chunkIdx];
+    const frameIdx = frameInfo.frameIndex !== undefined ? frameInfo.frameIndex : (frameInfo.col || 0);
 
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
@@ -244,17 +244,23 @@ async function renderFrame(globalIdx) {
         } catch (err) {
             return;
         }
-    } else if (customShaderLayer && !customShaderLayer.chunkTextures[chunkIdx]) {
+    } else if (customShaderLayer && !customShaderLayer.chunkTextures[`${chunkIdx}_${frameIdx}`]) {
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
     }
 
+    const chunkVolume = stateManager.loadedChunkBitmaps[chunkIdx];
+    const currentFrameImg = (chunkVolume && chunkVolume.frames && chunkVolume.frames[frameIdx])
+        ? chunkVolume.frames[frameIdx]
+        : chunkVolume;
+
     stateManager.activeFrameState = {
         chunkIndex: chunkIdx,
-        col: frameInfo.col,
-        row: frameInfo.row,
-        chunkImg: stateManager.loadedChunkBitmaps[chunkIdx],
-        uvOffset: [frameInfo.col / chunkInfo.columns, frameInfo.row / chunkInfo.rows],
-        uvScale: [1.0 / chunkInfo.columns, 1.0 / chunkInfo.rows]
+        frameIndex: frameIdx,
+        col: 0,
+        row: 0,
+        chunkImg: currentFrameImg,
+        uvOffset: [0.0, 0.0],
+        uvScale: [1.0, 1.0]
     };
     
     // 🌟 MEMORY OPTIMIZATION: Only push GPU textures to the ACTIVE view engine!
@@ -401,10 +407,10 @@ map.on('click', (e) => {
 
     if (normY < 0 || normY > 1) return;
 
-    const frameW = stateManager.manifest.frame_width;
-    const frameH = stateManager.manifest.frame_height;
-    const chunkInfo = stateManager.manifest.chunks[chunkIdx];
-    const sheetW = chunkInfo.sheet_width || (frameW * chunkInfo.columns);
+    const frameW = stateManager.manifest.frame_width || 1440;
+    const frameH = stateManager.manifest.frame_height || 721;
+    const frameSize = frameW * frameH;
+    const frameIdx = stateManager.activeFrameState.frameIndex || 0;
 
     const contX = (((normX % 1) + 1) % 1) * frameW;
     const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
@@ -417,13 +423,12 @@ map.on('click', (e) => {
     const fracX = contX - Math.floor(contX);
     const fracY = contY - y0;
 
-    const colOffset = stateManager.activeFrameState.col * frameW;
-    const rowOffset = stateManager.activeFrameState.row * frameH;
+    const frameOffset = frameIdx * frameSize;
 
-    const idx00 = (rowOffset + y0) * sheetW + (colOffset + x0);
-    const idx10 = (rowOffset + y0) * sheetW + (colOffset + x1);
-    const idx01 = (rowOffset + y1) * sheetW + (colOffset + x0);
-    const idx11 = (rowOffset + y1) * sheetW + (colOffset + x1);
+    const idx00 = frameOffset + y0 * frameW + x0;
+    const idx10 = frameOffset + y0 * frameW + x1;
+    const idx01 = frameOffset + y1 * frameW + x0;
+    const idx11 = frameOffset + y1 * frameW + x1;
 
     const v00 = pixelData[idx00];
     const v10 = pixelData[idx10];
