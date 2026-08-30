@@ -1,276 +1,253 @@
-// js/shaders/precipShader.js
-import { getPaletteForParameter as getLightPalette } from '../config/palettes.js';
-import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
-import { stateManager } from '../core/stateManager.js';
+// js/core/dataLoader.js
+import { stateManager } from './stateManager.js';
+import { clearThreeGlobeTextures } from '../layers/threeGlobe.js';
+import { clearPolarTextures } from '../layers/polarMap.js';
+import { clearVectorContours } from '../layers/vectorContours.js';
 
-const vsSource = `
-    attribute vec2 a_pos;
-    varying vec2 v_texcoord;
-    uniform mat4 u_matrix;
-    void main() {
-        v_texcoord = a_pos;
-        gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
+export async function fetchManifest(run = null, model = null, param = null) {
+    const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
+    const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
+
+    if (run && run.year && run.month && run.day && run.cycle) {
+        stateManager.currentDate = `${run.year}${run.month}${run.day}`;
+        stateManager.currentCycle = run.cycle.toLowerCase();
     }
-`;
 
-const fsSource = `
-    precision highp float;
+    const urlsToTry = [];
+
+    if (stateManager.currentDate && stateManager.currentCycle) {
+        const dateStr = stateManager.currentDate;
+        const cycleStr = stateManager.currentCycle;
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${dateStr}_${cycleStr}_manifest.json`);
+    }
+
+    urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_manifest.json`);
+    urlsToTry.push(`${stateManager.BASE_URL}manifest.json`);
+
+    let fetchedData = null;
+
+    for (const url of urlsToTry) {
+        try {
+            const resp = await fetch(url + `?t=${Date.now()}`);
+            if (resp.ok) {
+                fetchedData = await resp.json();
+                console.log(`✅ Loaded manifest from: ${url}`);
+                break;
+            }
+        } catch (err) {}
+    }
+
+    if (!fetchedData) {
+        throw new Error(`HTTP Manifest not found for ${activeModel} (${activeParam})`);
+    }
+
+    stateManager.manifest = fetchedData;
     
-    varying vec2 v_texcoord;
-    uniform sampler2D u_dataTexture;
-    uniform sampler2D u_paletteTexture;
-    uniform float u_opacity;
-    uniform vec2 u_texResolution;
+    if (stateManager.manifest.date) stateManager.currentDate = stateManager.manifest.date;
+    if (stateManager.manifest.run) stateManager.currentCycle = stateManager.manifest.run.toLowerCase();
+    if (stateManager.manifest.model) stateManager.activeModel = stateManager.manifest.model;
+    if (stateManager.manifest.parameter) stateManager.activeParam = stateManager.manifest.parameter;
 
-    // 🌟 C^2 Continuous Cubic B-Spline Filter (Eliminates grid-cell stair stepping)
-    vec4 cubicBSpline(float f) {
-        float f2 = f * f;
-        float f3 = f2 * f;
-        return vec4(
-            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
-            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
-            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
-            f3 / 6.0
-        );
-    }
-
-    // 🌟 2D Cubic Spline Evaluation on 2880x1442 Grid
-    float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
-        vec2 pos = uv * texRes - 0.5;
-        vec2 f = fract(pos);
-        vec2 i = floor(pos);
-
-        vec4 wx = cubicBSpline(f.x);
-        vec4 wy = cubicBSpline(f.y);
-
-        vec2 invTex = 1.0 / texRes;
-        float x0 = (i.x - 0.5) * invTex.x;
-        float x1 = (i.x + 0.5) * invTex.x;
-        float x2 = (i.x + 1.5) * invTex.x;
-        float x3 = (i.x + 2.5) * invTex.x;
-
-        float total = 0.0;
-        for (int y = -1; y <= 2; y++) {
-            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
-            
-            float rowVal = wx.x * texture2D(tex, vec2(x0, yCoord)).r +
-                           wx.y * texture2D(tex, vec2(x1, yCoord)).r +
-                           wx.z * texture2D(tex, vec2(x2, yCoord)).r +
-                           wx.w * texture2D(tex, vec2(x3, yCoord)).r;
-
-            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
-            total += w_y * rowVal;
-        }
-
-        return clamp(total, 0.0, 1.0);
-    }
-
-    void main() {
-        // 1. Mercator UV coordinate transform
-        float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
-        float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
-        float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
-
-        vec2 uv = vec2(fract(v_texcoord.x), normY);
-
-        // 2. 🌟 GPU Smooth Spline Evaluation
-        float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
-
-        // Mask dry land
-        if (rawVal < 0.00001) {
-            discard;
-        }
-
-        // Discrete step palette lookup
-        float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
-        float palU = (palIndex + 0.5) / 256.0;
-        vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
-        
-        if (color.a == 0.0) {
-            discard;
-        }
-
-        gl_FragColor = vec4(color.rgb, color.a * u_opacity);
-    }
-`;
-
-function createPrecipPaletteTexture(gl, paletteHexArray) {
-    const paletteTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, paletteTex);
-    const paletteData = new Uint8Array(paletteHexArray.length * 4);
+    stateManager.initTime = stateManager.manifest.init_time 
+                         || stateManager.manifest.run_time 
+                         || stateManager.manifest.base_time 
+                         || stateManager.manifest.model_run
+                         || stateManager.manifest.time;
     
-    paletteHexArray.forEach((hex, i) => {
-        if (hex === 'transparent' || !hex || i === 0) {
-            paletteData[i * 4]     = 0;
-            paletteData[i * 4 + 1] = 0;
-            paletteData[i * 4 + 2] = 0;
-            paletteData[i * 4 + 3] = 0;
-        } else {
-            const num = parseInt(hex.replace('#', ''), 16);
-            paletteData[i * 4]     = (num >> 16) & 255;
-            paletteData[i * 4 + 1] = (num >> 8) & 255;
-            paletteData[i * 4 + 2] = num & 255;
-            paletteData[i * 4 + 3] = 255;
+    stateManager.globalSteps = [];
+    const chunks = stateManager.manifest.chunks || [];
+    for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
+        const chunk = chunks[cIdx];
+        const steps = chunk.forecast_steps || [];
+        for (let fIdx = 0; fIdx < steps.length; fIdx++) {
+            stateManager.globalSteps.push({
+                step: steps[fIdx],
+                chunkIndex: cIdx,
+                frameIndex: fIdx,
+                col: 0,
+                row: 0
+            });
         }
-    });
-
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteHexArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return paletteTex;
+    }
+    return stateManager.manifest;
 }
 
-export function createPrecipShaderLayer(mapInstance) {
-    return {
-        id: 'weather-gpu-shader',
-        type: 'custom',
-        chunkTextures: {},
-        activeTex: null,
-        paletteTex: null,
-        texResolution: [2880.0, 1442.0],
+/**
+ * 🌟 2x Hardware Bilinear Upscaler
+ * Takes raw 1440x721 uint8 bytes and expands to a 2880x1442 ImageBitmap in ~1ms
+ */
+async function upscaleFrameToBitmap2x(frameBytes, width, height) {
+    const targetW = width * 2;
+    const targetH = height * 2;
 
-        clearTextures: function() {
-            if (!this.gl) return;
-            for (const key in this.chunkTextures) {
-                if (this.chunkTextures[key]) {
-                    this.gl.deleteTexture(this.chunkTextures[key]);
-                }
-            }
-            this.chunkTextures = {};
-            this.activeTex = null;
-        },
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < frameBytes.length; i++) {
+        const v = frameBytes[i];
+        const idx = i * 4;
+        rgba[idx]     = v;
+        rgba[idx + 1] = v;
+        rgba[idx + 2] = v;
+        rgba[idx + 3] = 255;
+    }
+    const imgData = new ImageData(rgba, width, height);
 
-        updatePalette: function(paramIdOrHexArray) {
-            if (!this.gl) return;
-            let hexArray;
-            if (Array.isArray(paramIdOrHexArray)) {
-                hexArray = paramIdOrHexArray;
-            } else {
-                const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-                hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam || 'tp');
-            }
+    try {
+        return await createImageBitmap(imgData, {
+            resizeWidth: targetW,
+            resizeHeight: targetH,
+            resizeQuality: 'high'
+        });
+    } catch (e) {
+        const off = document.createElement('canvas');
+        off.width = width;
+        off.height = height;
+        const offCtx = off.getContext('2d');
+        offCtx.putImageData(imgData, 0, 0);
 
-            if (this.paletteTex) {
-                this.gl.deleteTexture(this.paletteTex);
-            }
-            this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray);
-            mapInstance.triggerRepaint();
-        },
-        
-        onAdd: function (map, gl) {
-            this.gl = gl;
-            const vs = gl.createShader(gl.VERTEX_SHADER);
-            gl.shaderSource(vs, vsSource);
-            gl.compileShader(vs);
+        const up = document.createElement('canvas');
+        up.width = targetW;
+        up.height = targetH;
+        const upCtx = up.getContext('2d');
+        upCtx.imageSmoothingEnabled = true;
+        upCtx.imageSmoothingQuality = 'high';
+        upCtx.drawImage(off, 0, 0, targetW, targetH);
+        return up;
+    }
+}
 
-            const fs = gl.createShader(gl.FRAGMENT_SHADER);
-            gl.shaderSource(fs, fsSource);
-            gl.compileShader(fs);
+export async function loadChunkBitmap(chunkIndex, currentGen = null) {
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        throw new Error("Load cancelled");
+    }
 
-            this.program = gl.createProgram();
-            gl.attachShader(this.program, vs);
-            gl.attachShader(this.program, fs);
-            gl.linkProgram(this.program);
+    const chunk = stateManager.manifest.chunks[chunkIndex];
+    if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
-            this.aPos = gl.getAttribLocation(this.program, 'a_pos');
-            this.uMatrix = gl.getUniformLocation(this.program, 'u_matrix');
-            this.uDataTexture = gl.getUniformLocation(this.program, 'u_dataTexture');
-            this.uPaletteTexture = gl.getUniformLocation(this.program, 'u_paletteTexture');
-            this.uOpacity = gl.getUniformLocation(this.program, 'u_opacity');
-            this.uTexResolution = gl.getUniformLocation(this.program, 'u_texResolution');
+    const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+    const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+    const imgResp = await fetch(chunkUrl);
+    if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
-            const quadVertices = new Float32Array([
-                -2,0,  -1,0,  -2,1,   -2,1,  -1,0,  -1,1,
-                -1,0,   0,0,  -1,1,   -1,1,   0,0,   0,1,
-                 0,0,   1,0,   0,1,    0,1,   1,0,   1,1,
-                 1,0,   2,0,   1,1,    1,1,   2,0,   2,1,
-                 2,0,   3,0,   2,1,    2,1,   3,0,   3,1
-            ]);
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        throw new Error("Load cancelled");
+    }
 
-            this.vertexBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+    const frameW = stateManager.manifest.frame_width || 1440;
+    const frameH = stateManager.manifest.frame_height || 721;
+    const frameSize = frameW * frameH;
+    const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
 
-            const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-            const initialPalette = paletteFunc(stateManager.activeParam || 'tp');
-            this.paletteTex = createPrecipPaletteTexture(gl, initialPalette);
-        },
-        
-        preloadChunkTexture: function(chunkIndex, source) {
-            if (!this.gl || !source) return;
-            const gl = this.gl;
-
-            const uploadSingle = (img) => {
-                const tex = gl.createTexture();
-                gl.bindTexture(gl.TEXTURE_2D, tex);
-                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-
-                gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.RGBA, 
-                    gl.RGBA, gl.UNSIGNED_BYTE, img
-                );
-                
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-                return tex;
-            };
-
-            if (source.frames && Array.isArray(source.frames)) {
-                if (source.width && source.height) {
-                    this.texResolution = [source.width, source.height];
-                }
-                source.frames.forEach((frameBmp, fIdx) => {
-                    const key = `${chunkIndex}_${fIdx}`;
-                    if (!this.chunkTextures[key] && frameBmp) {
-                        this.chunkTextures[key] = uploadSingle(frameBmp);
-                    }
-                });
-            } else {
-                const key = `${chunkIndex}_0`;
-                if (!this.chunkTextures[key]) {
-                    this.chunkTextures[key] = uploadSingle(source);
-                }
-                this.chunkTextures[chunkIndex] = this.chunkTextures[key];
-            }
-        },
-
-        updateFrame: function (frameState) {
-            if (!this.gl || !frameState) return;
-            const cIdx = frameState.chunkIndex;
-            const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
-            
-            this.activeTex = this.chunkTextures[`${cIdx}_${fIdx}`] || this.chunkTextures[cIdx];
-            mapInstance.triggerRepaint();
-        },
-
-        render: function (gl, matrix) {
-            if (!this.program || !this.activeTex) return;
-
-            gl.useProgram(this.program);
-            
-            gl.activeTexture(gl.TEXTURE0);
-            gl.bindTexture(gl.TEXTURE_2D, this.activeTex);
-            gl.uniform1i(this.uDataTexture, 0);
-
-            gl.activeTexture(gl.TEXTURE1);
-            gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
-            gl.uniform1i(this.uPaletteTexture, 1);
-
-            gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85);
-            gl.uniform2f(this.uTexResolution, this.texResolution[0], this.texResolution[1]);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-            gl.enableVertexAttribArray(this.aPos);
-            gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0);
-
-            gl.enable(gl.BLEND);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-            gl.drawArrays(gl.TRIANGLES, 0, 30);
+    // 🌟 PATH A: Compressed Binary Time Volume (.bin) - Pure Contiguous 3D Slicing
+    if (chunk.file.endsWith('.bin')) {
+        let buffer;
+        try {
+            const decompressedStream = imgResp.body.pipeThrough(new DecompressionStream('gzip'));
+            const blob = await new Response(decompressedStream).blob();
+            buffer = await blob.arrayBuffer();
+        } catch (e) {
+            buffer = await imgResp.arrayBuffer();
         }
+
+        if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+            throw new Error("Load cancelled");
+        }
+
+        const rawData = new Uint8Array(buffer);
+        stateManager.chunkPixelData[chunkIndex] = rawData;
+
+        const upscaledFrames = [];
+        for (let f = 0; f < numFrames; f++) {
+            const srcStart = f * frameSize;
+            const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
+            const bitmap2x = await upscaleFrameToBitmap2x(frameBytes, frameW, frameH);
+            upscaledFrames.push(bitmap2x);
+        }
+
+        if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+            upscaledFrames.forEach(b => { if (b && b.close) b.close(); });
+            throw new Error("Load cancelled");
+        }
+
+        const volumeObj = {
+            frames: upscaledFrames,
+            width: frameW * 2,
+            height: frameH * 2,
+            isVolume: true
+        };
+
+        stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
+        return volumeObj;
+    }
+
+    // 🌟 PATH B: Image (.png / .webp legacy fallback)
+    const blob = await imgResp.blob();
+    const fullBitmap = await createImageBitmap(blob);
+
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        fullBitmap.close();
+        throw new Error("Load cancelled");
+    }
+
+    const upscaledFrames = [];
+    for (let f = 0; f < numFrames; f++) {
+        const frameBitmap = await createImageBitmap(
+            fullBitmap, 
+            f * frameW, 0, frameW, frameH,
+            {
+                resizeWidth: frameW * 2,
+                resizeHeight: frameH * 2,
+                resizeQuality: 'high'
+            }
+        );
+        upscaledFrames.push(frameBitmap);
+    }
+
+    fullBitmap.close();
+
+    const volumeObj = {
+        frames: upscaledFrames,
+        width: frameW * 2,
+        height: frameH * 2,
+        isVolume: true
     };
+
+    stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
+    return volumeObj;
+}
+
+export function purgeAllAppMemory(shaderLayerRef = null) {
+    stateManager.loadGeneration++;
+
+    clearThreeGlobeTextures();
+    clearPolarTextures();
+    clearVectorContours();
+
+    for (const key in stateManager.loadedChunkBitmaps) {
+        const item = stateManager.loadedChunkBitmaps[key];
+        if (item && item.frames) {
+            item.frames.forEach(frame => {
+                if (frame && typeof frame.close === 'function') {
+                    frame.close();
+                }
+            });
+        } else if (item && typeof item.close === 'function') {
+            item.close();
+        }
+    }
+    stateManager.loadedChunkBitmaps = {};
+    stateManager.chunkPixelData = {};
+
+    if (shaderLayerRef && typeof shaderLayerRef.clearTextures === 'function') {
+        shaderLayerRef.clearTextures();
+    }
+
+    stateManager.manifest = null;
+    stateManager.globalSteps = [];
+    stateManager.currentStepIndex = 0;
+    stateManager.activeFrameState = null;
+    stateManager.initTime = null;
+
+    window.lastActiveFrameState = null;
+    window.lastManifest = null;
 }
