@@ -34,7 +34,7 @@ const fsSource = `
         );
     }
 
-    // 🌟 2D Catmull-Rom Bicubic Evaluation with Cyclic Longitudinal Wrapping
+    // 🌟 2D Catmull-Rom Bicubic Evaluation on 2880x1442 Grid
     float sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texRes) {
         vec2 pos = uv * texRes - 0.5;
         vec2 f = fract(pos);
@@ -43,23 +43,22 @@ const fsSource = `
         vec4 wx = catmullRom(f.x);
         vec4 wy = catmullRom(f.y);
 
+        vec2 invTex = 1.0 / texRes;
+        float x0 = (i.x - 0.5) * invTex.x;
+        float x1 = (i.x + 0.5) * invTex.x;
+        float x2 = (i.x + 1.5) * invTex.x;
+        float x3 = (i.x + 2.5) * invTex.x;
+
         float total = 0.0;
         for (int y = -1; y <= 2; y++) {
-            float rowVal = 0.0;
-            float yCoord = clamp((i.y + float(y) + 0.5) / texRes.y, 0.0, 1.0);
+            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
             
-            float x0 = fract((i.x - 1.0 + 0.5) / texRes.x);
-            float x1 = fract((i.x + 0.0 + 0.5) / texRes.x);
-            float x2 = fract((i.x + 1.0 + 0.5) / texRes.x);
-            float x3 = fract((i.x + 2.0 + 0.5) / texRes.x);
+            float rowVal = wx.x * texture2D(tex, vec2(x0, yCoord)).r +
+                           wx.y * texture2D(tex, vec2(x1, yCoord)).r +
+                           wx.z * texture2D(tex, vec2(x2, yCoord)).r +
+                           wx.w * texture2D(tex, vec2(x3, yCoord)).r;
 
-            rowVal += wx.x * texture2D(tex, vec2(x0, yCoord)).r;
-            rowVal += wx.y * texture2D(tex, vec2(x1, yCoord)).r;
-            rowVal += wx.z * texture2D(tex, vec2(x2, yCoord)).r;
-            rowVal += wx.w * texture2D(tex, vec2(x3, yCoord)).r;
-
-            int yIdx = y + 1;
-            float w_y = (yIdx == 0) ? wy.x : ((yIdx == 1) ? wy.y : ((yIdx == 2) ? wy.z : wy.w));
+            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
             total += w_y * rowVal;
         }
 
@@ -74,7 +73,7 @@ const fsSource = `
 
         vec2 uv = vec2(fract(v_texcoord.x), normY);
 
-        // 2. 🌟 Catmull-Rom Bicubic Spline Evaluation on 2880x1442 grid
+        // 2. 🌟 GPU Catmull-Rom Bicubic Spline Evaluation
         float rawVal = sampleCatmullRom(u_dataTexture, uv, u_texResolution);
 
         // Mask dry land
@@ -208,18 +207,11 @@ export function createPrecipShaderLayer(mapInstance) {
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
-                if (img.data && img.width && img.height) {
-                    gl.texImage2D(
-                        gl.TEXTURE_2D, 0, gl.LUMINANCE, 
-                        img.width, img.height, 0, 
-                        gl.LUMINANCE, gl.UNSIGNED_BYTE, img.data
-                    );
-                } else {
-                    gl.texImage2D(
-                        gl.TEXTURE_2D, 0, gl.LUMINANCE, 
-                        gl.LUMINANCE, gl.UNSIGNED_BYTE, img
-                    );
-                }
+                // 🌟 Correct RGBA upload matching the 2x ImageBitmap / Canvas
+                gl.texImage2D(
+                    gl.TEXTURE_2D, 0, gl.RGBA, 
+                    gl.RGBA, gl.UNSIGNED_BYTE, img
+                );
                 
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -228,7 +220,6 @@ export function createPrecipShaderLayer(mapInstance) {
                 return tex;
             };
 
-            // 🌟 Handles both Time-Volume slices and legacy standalone ImageBitmaps
             if (source.frames && Array.isArray(source.frames)) {
                 if (source.width && source.height) {
                     this.texResolution = [source.width, source.height];
