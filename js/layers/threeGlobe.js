@@ -377,7 +377,6 @@ export function initThreeGlobe() {
     globeGroup.rotation.y = -Math.PI / 2;
     scene.add(globeGroup);
 
-    // 🌟 Layer 0: Styled Ocean & Land Basemap Sphere (Radius 1.996)
     renderBaseMapTexture();
     const baseGeometry = new THREE.SphereGeometry(1.996, 64, 64);
     const baseMaterial = new THREE.MeshBasicMaterial({ map: baseMapTexture });
@@ -386,7 +385,6 @@ export function initThreeGlobe() {
 
     load3DBasemapFills();
 
-    // 🌟 Layer 1: Weather Heatmap Sphere (Radius 2.000, Opacity 0.85)
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
@@ -409,7 +407,6 @@ export function initThreeGlobe() {
     globeMesh = new THREE.Mesh(geometry, material);
     globeGroup.add(globeMesh);
 
-    // 🌟 Layer 2: Vector Coastlines & Admin Borders (Radius 2.003)
     load3DVectorBorders(globeGroup);
 
     window.addEventListener('resize', () => {
@@ -459,7 +456,6 @@ export function updateThreeGlobePalette(paramIdOrHexArray) {
     material.uniforms.u_paletteTexture.value = paletteTex;
     material.needsUpdate = true;
 
-    // Redraw 3D Basemap Texture with updated theme colors
     renderBaseMapTexture();
 
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
@@ -476,10 +472,12 @@ export function updateThreeGlobePalette(paramIdOrHexArray) {
 export function updateThreeGlobeFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
-    const chunkIdx = frameState.chunkIndex;
+    const cIdx = frameState.chunkIndex;
+    const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
+    const frameKey = `${cIdx}_${fIdx}`;
     const source = frameState.chunkImg;
 
-    if (!globeChunkTextures[chunkIdx]) {
+    if (!globeChunkTextures[frameKey]) {
         let texture;
         if (source.data && source.width && source.height) {
             texture = new THREE.DataTexture(
@@ -495,10 +493,10 @@ export function updateThreeGlobeFrame(frameState) {
         }
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
-        globeChunkTextures[chunkIdx] = texture;
+        globeChunkTextures[frameKey] = texture;
     }
 
-    material.uniforms.u_dataTexture.value = globeChunkTextures[chunkIdx];
+    material.uniforms.u_dataTexture.value = globeChunkTextures[frameKey];
     material.uniforms.u_uvOffset.value.set(frameState.uvOffset[0], frameState.uvOffset[1]);
     material.uniforms.u_uvScale.value.set(frameState.uvScale[0], frameState.uvScale[1]);
     material.needsUpdate = true;
