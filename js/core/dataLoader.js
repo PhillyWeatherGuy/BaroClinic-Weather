@@ -63,16 +63,62 @@ export async function fetchManifest(run = null, model = null, param = null) {
     const chunks = stateManager.manifest.chunks || [];
     for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
         const chunk = chunks[cIdx];
-        for (let fIdx = 0; fIdx < chunk.forecast_steps.length; fIdx++) {
+        const steps = chunk.forecast_steps || [];
+        for (let fIdx = 0; fIdx < steps.length; fIdx++) {
             stateManager.globalSteps.push({
-                step: chunk.forecast_steps[fIdx],
+                step: steps[fIdx],
                 chunkIndex: cIdx,
-                col: fIdx % chunk.columns,
-                row: Math.floor(fIdx / chunk.columns)
+                frameIndex: fIdx,
+                col: 0,
+                row: 0
             });
         }
     }
     return stateManager.manifest;
+}
+
+/**
+ * 🌟 2x Hardware Bilinear Upscaler
+ * Takes raw 1440x721 uint8 bytes and expands to a 2880x1442 ImageBitmap in ~1ms
+ */
+async function upscaleFrameToBitmap2x(frameBytes, width, height) {
+    const targetW = width * 2;
+    const targetH = height * 2;
+
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < frameBytes.length; i++) {
+        const v = frameBytes[i];
+        const idx = i * 4;
+        rgba[idx] = v;
+        rgba[idx + 1] = v;
+        rgba[idx + 2] = v;
+        rgba[idx + 3] = 255;
+    }
+    const imgData = new ImageData(rgba, width, height);
+
+    try {
+        return await createImageBitmap(imgData, {
+            resizeWidth: targetW,
+            resizeHeight: targetH,
+            resizeQuality: 'high'
+        });
+    } catch (e) {
+        // Fallback for environments where createImageBitmap resize options are unsupported
+        const off = document.createElement('canvas');
+        off.width = width;
+        off.height = height;
+        const offCtx = off.getContext('2d');
+        offCtx.putImageData(imgData, 0, 0);
+
+        const up = document.createElement('canvas');
+        up.width = targetW;
+        up.height = targetH;
+        const upCtx = up.getContext('2d');
+        upCtx.imageSmoothingEnabled = true;
+        upCtx.imageSmoothingQuality = 'high';
+        upCtx.drawImage(off, 0, 0, targetW, targetH);
+        return up;
+    }
 }
 
 export async function loadChunkBitmap(chunkIndex, currentGen = null) {
@@ -91,7 +137,12 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    // 🌟 PATH A: Raw/Gzipped Binary Buffer (.bin)
+    const frameW = stateManager.manifest.frame_width || 1440;
+    const frameH = stateManager.manifest.frame_height || 721;
+    const frameSize = frameW * frameH;
+    const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
+
+    // 🌟 PATH A: Compressed Binary Time Volume (.bin)
     if (chunk.file.endsWith('.bin')) {
         let buffer;
         try {
@@ -109,15 +160,28 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         const singleChannel = new Uint8Array(buffer);
         stateManager.chunkPixelData[chunkIndex] = singleChannel;
 
-        const bufferObj = {
-            data: singleChannel,
-            width: chunk.sheet_width,
-            height: chunk.sheet_height,
-            isBinary: true
+        // Upscale each time frame in background memory to 2880x1442
+        const upscaledFrames = [];
+        for (let f = 0; f < numFrames; f++) {
+            const frameBytes = singleChannel.subarray(f * frameSize, (f + 1) * frameSize);
+            const bitmap2x = await upscaleFrameToBitmap2x(frameBytes, frameW, frameH);
+            upscaledFrames.push(bitmap2x);
+        }
+
+        if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+            upscaledFrames.forEach(b => { if (b && b.close) b.close(); });
+            throw new Error("Load cancelled");
+        }
+
+        const volumeObj = {
+            frames: upscaledFrames,
+            width: frameW * 2,
+            height: frameH * 2,
+            isVolume: true
         };
 
-        stateManager.loadedChunkBitmaps[chunkIndex] = bufferObj;
-        return bufferObj;
+        stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
+        return volumeObj;
     }
 
     // 🌟 PATH B: Image (.png / .webp)
@@ -129,29 +193,15 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
+    const volumeObj = {
+        frames: [bitmap],
+        width: bitmap.width,
+        height: bitmap.height,
+        isVolume: false
+    };
 
-    let offCanvas = document.createElement('canvas');
-    offCanvas.width = bitmap.width;
-    offCanvas.height = bitmap.height;
-    let offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
-    offCtx.drawImage(bitmap, 0, 0);
-
-    const rgba = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
-    const singleChannel = new Uint8Array(bitmap.width * bitmap.height);
-
-    for (let i = 0; i < singleChannel.length; i++) {
-        singleChannel[i] = rgba[i * 4];
-    }
-
-    stateManager.chunkPixelData[chunkIndex] = singleChannel;
-
-    offCanvas.width = 0;
-    offCanvas.height = 0;
-    offCanvas = null;
-    offCtx = null;
-
-    return bitmap;
+    stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
+    return volumeObj;
 }
 
 /**
@@ -168,7 +218,13 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
     // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
         const item = stateManager.loadedChunkBitmaps[key];
-        if (item && typeof item.close === 'function') {
+        if (item && item.frames) {
+            item.frames.forEach(frame => {
+                if (frame && typeof frame.close === 'function') {
+                    frame.close();
+                }
+            });
+        } else if (item && typeof item.close === 'function') {
             item.close();
         }
     }
