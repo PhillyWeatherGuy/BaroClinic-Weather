@@ -22,7 +22,7 @@ const fsSource = `
     uniform float u_opacity;
     uniform vec2 u_texResolution;
 
-    // 🌟 C^2 Continuous Cubic B-Spline Filter (Eliminates grid-cell stair stepping)
+    // 🌟 C^2 Continuous Cubic B-Spline Filter
     vec4 cubicBSpline(float f) {
         float f2 = f * f;
         float f3 = f2 * f;
@@ -66,22 +66,18 @@ const fsSource = `
     }
 
     void main() {
-        // 1. Mercator UV coordinate transform
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
         vec2 uv = vec2(fract(v_texcoord.x), normY);
 
-        // 2. 🌟 GPU Smooth Spline Evaluation
         float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
 
-        // Mask dry land
         if (rawVal < 0.00001) {
             discard;
         }
 
-        // Discrete step palette lookup
         float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
         float palU = (palIndex + 0.5) / 256.0;
         vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
@@ -218,6 +214,18 @@ export function createPrecipShaderLayer(mapInstance) {
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 return tex;
             };
+
+            // 🌟 VRAM Limiter: caps active textures to prevent mobile crashes
+            const existingKeys = Object.keys(this.chunkTextures);
+            if (existingKeys.length > 30) {
+                const keysToRemove = existingKeys.slice(0, 10);
+                keysToRemove.forEach(k => {
+                    if (this.chunkTextures[k]) {
+                        gl.deleteTexture(this.chunkTextures[k]);
+                        delete this.chunkTextures[k];
+                    }
+                });
+            }
 
             if (source.frames && Array.isArray(source.frames)) {
                 if (source.width && source.height) {
