@@ -11,6 +11,35 @@ let mapInstance = null;
 let modelsConfig = null;
 let listenersAttached = false;
 
+// 🌟 Parameter Piecewise Scaling Fallback Tables
+const PARAM_SCALING_FALLBACKS = {
+    pwat: {
+        mode: 'piecewise',
+        val_points: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
+        byte_points: [0, 32, 64, 96, 128, 160, 192, 255]
+    },
+    tcwv: {
+        mode: 'piecewise',
+        val_points: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
+        byte_points: [0, 32, 64, 96, 128, 160, 192, 255]
+    },
+    tp: {
+        mode: 'piecewise',
+        val_points: [0.0, 1.0, 10.0, 50.0],
+        byte_points: [0, 100, 200, 255]
+    },
+    precip: {
+        mode: 'piecewise',
+        val_points: [0.0, 1.0, 10.0, 50.0],
+        byte_points: [0, 100, 200, 255]
+    },
+    pva: {
+        mode: 'piecewise',
+        val_points: [0.0, 3.0, 80.0],
+        byte_points: [0, 30, 107]
+    }
+};
+
 // Clean CSS styling for city callout nodes
 const style = document.createElement('style');
 style.textContent = `
@@ -51,9 +80,11 @@ document.head.appendChild(style);
  * 🌟 UNIVERSAL PIXEL DECODER
  */
 export function decodePixelValue(rawVal, manifest) {
-    if (rawVal === undefined || !manifest) return 0.0;
+    if (rawVal === undefined) return 0.0;
 
-    const scaling = manifest.scaling;
+    const paramKey = (manifest?.parameter || manifest?.id || stateManager.activeParam || '').toLowerCase();
+    const scaling = manifest?.scaling || PARAM_SCALING_FALLBACKS[paramKey];
+
     if (scaling && scaling.mode === 'piecewise' && scaling.val_points && scaling.byte_points) {
         const vp = scaling.val_points;
         const bp = scaling.byte_points;
@@ -67,8 +98,8 @@ export function decodePixelValue(rawVal, manifest) {
         return vp[vp.length - 1];
     }
 
-    const minVal = manifest.min_val ?? manifest.temp_min_k ?? scaling?.min_val ?? 0.0;
-    const maxVal = manifest.max_val ?? manifest.temp_max_k ?? scaling?.max_val ?? 255.0;
+    const minVal = manifest?.min_val ?? manifest?.temp_min_k ?? scaling?.min_val ?? (paramKey === '2t' ? 216.4833 : 0.0);
+    const maxVal = manifest?.max_val ?? manifest?.temp_max_k ?? scaling?.max_val ?? (paramKey === '2t' ? 327.5944 : 255.0);
     return minVal + (rawVal / 255.0) * (maxVal - minVal);
 }
 
@@ -76,9 +107,10 @@ export function decodePixelValue(rawVal, manifest) {
  * 🌟 SHARED BILINEAR SAMPLER (Time-Volume Compatible)
  */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
-    if (!activeFrameState || !manifest) return 0.0;
+    const frameState = activeFrameState || stateManager.activeFrameState;
+    if (!frameState) return 0.0;
 
-    const chunkIdx = activeFrameState.chunkIndex;
+    const chunkIdx = frameState.chunkIndex ?? 0;
     const pixelData = stateManager.chunkPixelData[chunkIdx];
     if (!pixelData) return 0.0;
 
@@ -90,10 +122,10 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 
     if (normY < 0 || normY > 1) return 0.0;
 
-    const frameW = manifest.frame_width || 1440;
-    const frameH = manifest.frame_height || 721;
+    const frameW = manifest?.frame_width || stateManager.manifest?.frame_width || 1440;
+    const frameH = manifest?.frame_height || stateManager.manifest?.frame_height || 721;
     const frameSize = frameW * frameH;
-    const frameIdx = activeFrameState.frameIndex !== undefined ? activeFrameState.frameIndex : (activeFrameState.col || 0);
+    const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
 
     const contX = (((normX % 1) + 1) % 1) * frameW;
     const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
@@ -120,10 +152,12 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 
     if (v00 === undefined) return 0.0;
 
-    const d00 = decodePixelValue(v00, manifest);
-    const d10 = decodePixelValue(v10 ?? v00, manifest);
-    const d01 = decodePixelValue(v01 ?? v00, manifest);
-    const d11 = decodePixelValue(v11 ?? v00, manifest);
+    const activeManifest = manifest || stateManager.manifest;
+
+    const d00 = decodePixelValue(v00, activeManifest);
+    const d10 = decodePixelValue(v10 ?? v00, activeManifest);
+    const d01 = decodePixelValue(v01 ?? v00, activeManifest);
+    const d11 = decodePixelValue(v11 ?? v00, activeManifest);
 
     const top = d00 * (1.0 - fracX) + d10 * fracX;
     const bottom = d01 * (1.0 - fracX) + d11 * fracX;
@@ -134,16 +168,23 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
  * 🌟 TRULY DYNAMIC UNIT FORMATTER
  */
 export function formatParameterValue(decodedVal, manifest) {
-    if (!manifest) return `${Math.round(decodedVal)}`;
+    if (decodedVal === undefined || isNaN(decodedVal)) return "--";
 
-    const unit = (manifest.unit || '').trim().toLowerCase();
-    const param = (manifest.parameter || '').toLowerCase();
+    const param = (manifest?.parameter || manifest?.id || stateManager.activeParam || '').toLowerCase();
+    const unit = (manifest?.unit || '').trim().toLowerCase();
 
-    if (unit === 'in' || unit.includes('inch') || param === 'tp' || param === 'pwat' || param === 'tcwv') {
+    // 🌟 Explicit PWAT / TCWV formatting
+    if (param === 'pwat' || param === 'tcwv') {
         return `${decodedVal.toFixed(2)}"`;
     }
 
-    if (unit === '°f' || unit.includes('f') || param === '2t') {
+    // 🌟 Precipitation formatting
+    if (param === 'tp' || param === 'precip' || unit === 'in' || unit.includes('inch')) {
+        return `${decodedVal.toFixed(2)}"`;
+    }
+
+    // 🌟 Temperature formatting
+    if (param === '2t' || param === 'temp' || unit === '°f' || unit.includes('f')) {
         let tempF = decodedVal;
         if (decodedVal > 150) {
             const tempC = decodedVal - 273.15;
@@ -191,7 +232,7 @@ export function hideBasemapCityLabels(map) {
 export async function initCityOverlay(map) {
     mapInstance = map;
 
-    // 🌟 Clean up any detached marker instances from previous basemap style
+    // Clean up any detached marker instances from previous basemap style
     for (const name in cityMarkers) {
         if (cityMarkers[name]) {
             cityMarkers[name].remove();
@@ -344,11 +385,11 @@ export function updateCityPositions() {
  * 🌟 MASTER CALLOUT SAMPLER (Uses Bilinear GPS Interpolation)
  */
 export function updateCityCallouts(map, activeFrameState, manifest) {
-    if (!activeFrameState || !manifest || !isLoaded) return;
+    if (!activeFrameState || !isLoaded) return;
 
     hideBasemapCityLabels(map);
 
-    const isPva = (stateManager.activeParam === 'pva' || manifest.parameter === 'pva');
+    const isPva = (stateManager.activeParam === 'pva' || manifest?.parameter === 'pva');
     if (isPva) {
         for (const name in cityMarkers) {
             cityMarkers[name].getElement().style.display = 'none';
@@ -357,7 +398,7 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
     }
 
     window.lastActiveFrameState = activeFrameState;
-    window.lastManifest = manifest;
+    window.lastManifest = manifest || stateManager.manifest;
 
     if (activeCities.length === 0) {
         updateCityPositions();
@@ -374,7 +415,7 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
         const valEl = marker.getElement().querySelector('.city-callout-val');
         marker.getElement().style.display = 'flex';
         if (valEl) {
-            valEl.className = (manifest.unit === 'in' || manifest.parameter === 'tp' || manifest.parameter === 'pwat') 
+            valEl.className = (stateManager.activeParam === 'tp' || stateManager.activeParam === 'pwat' || manifest?.parameter === 'tp' || manifest?.parameter === 'pwat') 
                 ? 'city-callout-val precip-val' 
                 : 'city-callout-val';
             valEl.textContent = formattedText;
