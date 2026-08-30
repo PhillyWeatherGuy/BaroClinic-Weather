@@ -282,7 +282,7 @@ async function renderFrame(globalIdx) {
 }
 
 /**
- * 🌟 SEQUENTIAL PRELOADER
+ * 🌟 SEQUENTIAL PRELOADER WITH CPU/NETWORK STAGGER
  */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
@@ -293,6 +293,10 @@ export async function preloadRemainingChunks(currentGen) {
 
         if (!stateManager.loadedChunkBitmaps[i]) {
             try {
+                // 🌟 50ms stagger prevents UI lockup on low-end CPUs and throttles network bandwidth
+                await new Promise(r => setTimeout(r, 50));
+                if (currentGen !== stateManager.loadGeneration) break;
+
                 const bitmap = await loadChunkBitmap(i, currentGen);
                 if (currentGen === stateManager.loadGeneration) {
                     if (customShaderLayer) {
