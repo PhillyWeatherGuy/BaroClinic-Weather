@@ -1,5 +1,6 @@
 // js/shaders/scalarShader.js
-import { getPaletteForParameter, TEMP_PALETTE, PRECIP_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter as getLightPalette } from '../config/palettes.js';
+import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
 const vsSource = `
@@ -41,19 +42,26 @@ const fsSource = `
     }
 `;
 
-function createPaletteTexture(gl, paletteHexArray = TEMP_PALETTE) {
+function createPaletteTexture(gl, paletteHexArray) {
     const paletteTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, paletteTex);
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
-    const isPrecip = (paletteHexArray === PRECIP_PALETTE);
+    const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeShader === 'precip');
     
     paletteHexArray.forEach((hex, i) => {
-        const num = parseInt(hex.replace('#', ''), 16);
-        paletteData[i * 4]     = (num >> 16) & 255;
-        paletteData[i * 4 + 1] = (num >> 8) & 255;
-        paletteData[i * 4 + 2] = num & 255;
-        // 🌟 Make index 0 (0.00" rain) transparent so basemap shows through
-        paletteData[i * 4 + 3] = (isPrecip && i === 0) ? 0 : 255;
+        // 🌟 Make transparent slots (noise < 0.4 or dry land) alpha 0 so shader discards them
+        if (hex === 'transparent' || !hex || (isPrecip && i === 0)) {
+            paletteData[i * 4]     = 0;
+            paletteData[i * 4 + 1] = 0;
+            paletteData[i * 4 + 2] = 0;
+            paletteData[i * 4 + 3] = 0;
+        } else {
+            const num = parseInt(hex.replace('#', ''), 16);
+            paletteData[i * 4]     = (num >> 16) & 255;
+            paletteData[i * 4 + 1] = (num >> 8) & 255;
+            paletteData[i * 4 + 2] = num & 255;
+            paletteData[i * 4 + 3] = 255;
+        }
     });
 
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteHexArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
@@ -86,17 +94,16 @@ export function createScalarShaderLayer(mapInstance) {
         },
 
         /**
-         * 🌟 DYNAMIC PALETTE SWAP: Swaps GPU palette texture when picking a new parameter
+         * 🌟 DYNAMIC PALETTE SWAP: Swaps GPU palette texture for any parameter / theme
          */
         updatePalette: function(paramIdOrHexArray) {
             if (!this.gl) return;
             let hexArray;
             if (Array.isArray(paramIdOrHexArray)) {
                 hexArray = paramIdOrHexArray;
-            } else if (paramIdOrHexArray === 'tp' || paramIdOrHexArray === 'precip') {
-                hexArray = PRECIP_PALETTE;
             } else {
-                hexArray = getPaletteForParameter(paramIdOrHexArray);
+                const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+                hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam || '2t');
             }
             
             if (this.paletteTex) {
@@ -141,8 +148,9 @@ export function createScalarShaderLayer(mapInstance) {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
 
-            // 🌟 Load PRECIP_PALETTE if active param is 'tp', otherwise TEMP_PALETTE
-            const initialPalette = (stateManager.activeParam === 'tp') ? PRECIP_PALETTE : TEMP_PALETTE;
+            // 🌟 Theme & parameter-aware initial palette
+            const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+            const initialPalette = paletteFunc(stateManager.activeParam || '2t');
             this.paletteTex = createPaletteTexture(gl, initialPalette);
         },
         
@@ -153,7 +161,6 @@ export function createScalarShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, tex);
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             
-            // 🌟 Polymorphic upload: checks if source is a binary buffer object or an ImageBitmap
             if (source.data && source.width && source.height) {
                 gl.texImage2D(
                     gl.TEXTURE_2D, 0, gl.LUMINANCE, 
