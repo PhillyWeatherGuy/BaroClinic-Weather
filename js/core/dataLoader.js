@@ -15,7 +15,6 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     const urlsToTry = [];
 
-    // 🌟 Strictly parameter-specific manifest resolution
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
@@ -72,11 +71,11 @@ export async function fetchManifest(run = null, model = null, param = null) {
 }
 
 /**
- * 🌟 2x Hardware Bilinear Upscaler ($1440 \times 721 \to 2880 \times 1442$)
+ * 🌟 Dynamic Frame to ImageBitmap Converter (Supports 1x Native and 2x Upscale)
  */
-async function upscaleFrameToBitmap2x(frameBytes, width, height) {
-    const targetW = width * 2;
-    const targetH = height * 2;
+async function frameToBitmap(frameBytes, width, height, shouldUpscale = false) {
+    const targetW = shouldUpscale ? width * 2 : width;
+    const targetH = shouldUpscale ? height * 2 : height;
 
     const rgba = new Uint8ClampedArray(width * height * 4);
     for (let i = 0; i < frameBytes.length; i++) {
@@ -93,7 +92,7 @@ async function upscaleFrameToBitmap2x(frameBytes, width, height) {
         return await createImageBitmap(imgData, {
             resizeWidth: targetW,
             resizeHeight: targetH,
-            resizeQuality: 'high'
+            resizeQuality: shouldUpscale ? 'high' : 'pixelated'
         });
     } catch (e) {
         const off = document.createElement('canvas');
@@ -101,6 +100,8 @@ async function upscaleFrameToBitmap2x(frameBytes, width, height) {
         off.height = height;
         const offCtx = off.getContext('2d');
         offCtx.putImageData(imgData, 0, 0);
+
+        if (!shouldUpscale) return off;
 
         const up = document.createElement('canvas');
         up.width = targetW;
@@ -121,26 +122,28 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const chunk = stateManager.manifest.chunks[chunkIndex];
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
+    const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+    const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+    const imgResp = await fetch(chunkUrl);
+    if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
+
+    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+        throw new Error("Load cancelled");
+    }
+
     const frameW = stateManager.manifest.frame_width || 1440;
     const frameH = stateManager.manifest.frame_height || 721;
     const frameSize = frameW * frameH;
     const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
 
+    // 🌟 Dynamically check if models.json specifies upscale_2x for this parameter
+    const shouldUpscale = Boolean(stateManager.paramConfig?.upscale_2x || stateManager.manifest?.upscale_2x);
+
     // 🌟 PATH A: Compressed Binary Time Volume (.bin)
     if (chunk.file.endsWith('.bin')) {
         let rawData = stateManager.chunkPixelData[chunkIndex];
 
-        // 🌟 FAST PATH: If raw bytes are already cached in RAM, skip network download completely!
         if (!rawData) {
-            const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-            const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
-            const imgResp = await fetch(chunkUrl);
-            if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
-
-            if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-                throw new Error("Load cancelled");
-            }
-
             const arrayBuffer = await imgResp.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
 
@@ -164,9 +167,9 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             stateManager.chunkPixelData[chunkIndex] = rawData;
         }
 
-        // 🌟 SLIDING WINDOW MEMORY CAP: Evict distant chunks' ImageBitmaps from CPU RAM
+        // Keep active chunk window in memory
         const activeKeys = Object.keys(stateManager.loadedChunkBitmaps);
-        if (activeKeys.length >= 2) {
+        if (activeKeys.length >= 3) {
             for (const oldKey of activeKeys) {
                 if (Number(oldKey) !== Number(chunkIndex)) {
                     const oldChunk = stateManager.loadedChunkBitmaps[oldKey];
@@ -179,24 +182,23 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             }
         }
 
-        // 🌟 Upscale each frame in the chunk 2x to 2880x1442
-        const upscaledFrames = [];
+        const outFrames = [];
         for (let f = 0; f < numFrames; f++) {
             const srcStart = f * frameSize;
             const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
-            const bitmap2x = await upscaleFrameToBitmap2x(frameBytes, frameW, frameH);
-            upscaledFrames.push(bitmap2x);
+            const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale);
+            outFrames.push(bitmap);
         }
 
         if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-            upscaledFrames.forEach(b => { if (b && b.close) b.close(); });
+            outFrames.forEach(b => { if (b && b.close) b.close(); });
             throw new Error("Load cancelled");
         }
 
         const volumeObj = {
-            frames: upscaledFrames,
-            width: frameW * 2,
-            height: frameH * 2,
+            frames: outFrames,
+            width: shouldUpscale ? frameW * 2 : frameW,
+            height: shouldUpscale ? frameH * 2 : frameH,
             isVolume: true
         };
 
@@ -205,11 +207,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     }
 
     // 🌟 PATH B: Image fallback (.png / .webp)
-    const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-    const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
-    const imgResp = await fetch(chunkUrl);
-    if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
-
     const blob = await imgResp.blob();
     const fullBitmap = await createImageBitmap(blob);
 
@@ -218,26 +215,22 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    const upscaledFrames = [];
+    const outFrames = [];
     for (let f = 0; f < numFrames; f++) {
         const frameBitmap = await createImageBitmap(
             fullBitmap, 
             f * frameW, 0, frameW, frameH,
-            {
-                resizeWidth: frameW * 2,
-                resizeHeight: frameH * 2,
-                resizeQuality: 'high'
-            }
+            shouldUpscale ? { resizeWidth: frameW * 2, resizeHeight: frameH * 2, resizeQuality: 'high' } : undefined
         );
-        upscaledFrames.push(frameBitmap);
+        outFrames.push(frameBitmap);
     }
 
     fullBitmap.close();
 
     const volumeObj = {
-        frames: upscaledFrames,
-        width: frameW * 2,
-        height: frameH * 2,
+        frames: outFrames,
+        width: shouldUpscale ? frameW * 2 : frameW,
+        height: shouldUpscale ? frameH * 2 : frameH,
         isVolume: true
     };
 
