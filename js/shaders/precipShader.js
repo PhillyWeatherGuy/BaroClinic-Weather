@@ -22,26 +22,26 @@ const fsSource = `
     uniform float u_opacity;
     uniform vec2 u_texResolution;
 
-    // 🌟 Catmull-Rom Cubic Spline 4-point Weights
-    vec4 catmullRom(float f) {
+    // 🌟 C^2 Continuous Cubic B-Spline Filter (Eliminates grid-cell stair stepping)
+    vec4 cubicBSpline(float f) {
         float f2 = f * f;
         float f3 = f2 * f;
         return vec4(
-            -0.5 * f3 + f2 - 0.5 * f,
-             1.5 * f3 - 2.5 * f2 + 1.0,
-            -1.5 * f3 + 2.0 * f2 + 0.5 * f,
-             0.5 * f3 - 0.5 * f2
+            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
+            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
+            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
+            f3 / 6.0
         );
     }
 
-    // 🌟 2D Catmull-Rom Bicubic Evaluation on 2880x1442 Grid
-    float sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texRes) {
+    // 🌟 2D Cubic Spline Evaluation on 2880x1442 Grid
+    float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
         vec2 pos = uv * texRes - 0.5;
         vec2 f = fract(pos);
         vec2 i = floor(pos);
 
-        vec4 wx = catmullRom(f.x);
-        vec4 wy = catmullRom(f.y);
+        vec4 wx = cubicBSpline(f.x);
+        vec4 wy = cubicBSpline(f.y);
 
         vec2 invTex = 1.0 / texRes;
         float x0 = (i.x - 0.5) * invTex.x;
@@ -73,8 +73,8 @@ const fsSource = `
 
         vec2 uv = vec2(fract(v_texcoord.x), normY);
 
-        // 2. 🌟 GPU Catmull-Rom Bicubic Spline Evaluation
-        float rawVal = sampleCatmullRom(u_dataTexture, uv, u_texResolution);
+        // 2. 🌟 GPU Smooth Spline Evaluation
+        float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
 
         // Mask dry land
         if (rawVal < 0.00001) {
@@ -207,7 +207,6 @@ export function createPrecipShaderLayer(mapInstance) {
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
-                // 🌟 Correct RGBA upload matching the 2x ImageBitmap / Canvas
                 gl.texImage2D(
                     gl.TEXTURE_2D, 0, gl.RGBA, 
                     gl.RGBA, gl.UNSIGNED_BYTE, img
