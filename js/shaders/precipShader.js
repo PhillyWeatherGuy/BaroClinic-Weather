@@ -29,11 +29,19 @@ const fsSource = `
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        // 2. 🌟 Continuous smooth bilinear sampling (matches Python's gaussian_filter)
         vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
-        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
 
-        // 3. Fetch raw data point
+        // 2. 🌟 GPU Quintic Hermite Sub-Grid Spline (Eliminates 28km grid diamond facets)
+        vec2 grid_dim = vec2(1440.0, 721.0);
+        vec2 grid_pos = tile_uv * grid_dim - 0.5;
+        vec2 i = floor(grid_pos);
+        vec2 f = fract(grid_pos);
+        vec2 f_smooth = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // C2-smooth polynomial
+        vec2 smooth_tile_uv = (i + 0.5 + f_smooth) / grid_dim;
+
+        vec2 sprite_uv = u_uvOffset + clamp(smooth_tile_uv, 0.0, 1.0) * u_uvScale;
+
+        // 3. Fetch smoothed data point
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
         // Mask dry land
@@ -60,12 +68,11 @@ function createPrecipPaletteTexture(gl, paletteHexArray) {
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
     
     paletteHexArray.forEach((hex, i) => {
-        // 🌟 Write alpha = 0 for transparent threshold (e.g. PVA < 0.5 or dry land)
         if (hex === 'transparent' || !hex || i === 0) {
             paletteData[i * 4]     = 0;
             paletteData[i * 4 + 1] = 0;
             paletteData[i * 4 + 2] = 0;
-            paletteData[i * 4 + 3] = 0; // Alpha 0 triggers discard in fragment shader
+            paletteData[i * 4 + 3] = 0;
         } else {
             const num = parseInt(hex.replace('#', ''), 16);
             paletteData[i * 4]     = (num >> 16) & 255;
@@ -157,7 +164,6 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
 
-            // 🌟 Theme-aware initial palette on add
             const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
             const initialPalette = paletteFunc(stateManager.activeParam || 'tp');
             this.paletteTex = createPrecipPaletteTexture(gl, initialPalette);
@@ -170,7 +176,6 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, tex);
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
             
-            // 🌟 Polymorphic upload: checks if source is a binary buffer object or an ImageBitmap
             if (source.data && source.width && source.height) {
                 gl.texImage2D(
                     gl.TEXTURE_2D, 0, gl.LUMINANCE, 
@@ -213,7 +218,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85); // Matches alpha=0.85 in Python Colab
+            gl.uniform1f(this.uOpacity, 0.85);
             gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
             gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
 
