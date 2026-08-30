@@ -92,6 +92,21 @@ const LIGHT_PWAT_HEX = [
     "#2600dc", "#0027da", "#004ddb", "#0673de", "#009bd5"
 ];
 
+// 🌀 500mb PVA / Vorticity Levels (10⁻⁵ s⁻¹)
+const LIGHT_PVA_LEVELS = [
+    0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0,
+    10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 25.0, 30.0, 35.0,
+    40.0, 45.0, 50.0, 55.0, 60.0, 80.0
+];
+
+// 🌀 500mb PVA / Vorticity Hex Colors
+const LIGHT_PVA_HEX = [
+    "#2a2f3a", "#2e3440", "#333947", "#39404f", "#3e4656", "#0afeff",
+    "#01e6cb", "#11cc7c", "#02b302", "#7ecb05", "#cde60a", "#fdff00",
+    "#fccc00", "#fe9a00", "#fd6600", "#ff0000", "#a10202", "#8b0000",
+    "#770201", "#7b0066", "#92009d", "#a201bc", "#fe01e6", "#ffc8ef"
+];
+
 /**
  * 🌟 WebGL Dynamic Breakpoint Step Interpolator
  * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
@@ -141,6 +156,15 @@ export const PWAT_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+// 🌀 Light Mode 500mb PVA Palette (0 -> 80 piecewise mapped matching parameters.json)
+export const PVA_PALETTE = createNonLinearPrecipPalette(
+    LIGHT_PVA_LEVELS,
+    LIGHT_PVA_HEX,
+    [0.0, 3.0, 80.0],
+    [0, 30, 107],
+    256
+);
+
 /**
  * 🌟 Dynamic Palette Selector
  */
@@ -151,6 +175,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
         return PWAT_PALETTE;
+    }
+    if (id === 'pva' || id.includes('pva') || id === 'vo' || id.includes('vort')) {
+        return PVA_PALETTE;
     }
     return TEMP_PALETTE;
 }
