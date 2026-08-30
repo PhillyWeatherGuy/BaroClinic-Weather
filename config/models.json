@@ -14,7 +14,7 @@
       "name": "2m Temperature",
       "unit": "°F",
       "category": "Thermodynamics",
-      "shader": "scalar",
+      "shader": "precip",
       "palette": "temp",
       "map_style_light": "https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG",
       "map_style_dark": "https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG"
@@ -45,7 +45,7 @@
       "unit": "10⁻⁵ s⁻¹",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
-      "palette": "pva",
+      "palette": "scalar",
       "map_style_light": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG",
       "map_style_dark": "https://api.maptiler.com/maps/01a00fc8-041b-74f2-bdaf-cdf4c900ec01/style.json?key=f9fTA5Ce0HKefPDICSVG"
     }
