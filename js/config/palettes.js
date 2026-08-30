@@ -101,7 +101,7 @@ const LIGHT_PVA_LEVELS = [
 
 // 🌀 500mb PVA / Vorticity Hex Colors
 const LIGHT_PVA_HEX = [
-    "#2a2f3a", "#2e3440", "#333947", "#39404f", "#3e4656", "#0afeff",
+    "#ffffff", "#bebebe", "#959595", "#828282", "#636363", "#0afeff",
     "#01e6cb", "#11cc7c", "#02b302", "#7ecb05", "#cde60a", "#fdff00",
     "#fccc00", "#fe9a00", "#fd6600", "#ff0000", "#a10202", "#8b0000",
     "#770201", "#7b0066", "#92009d", "#a201bc", "#fe01e6", "#ffc8ef"
