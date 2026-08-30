@@ -60,11 +60,19 @@ function createPrecipPaletteTexture(gl, paletteHexArray) {
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
     
     paletteHexArray.forEach((hex, i) => {
-        const num = parseInt(hex.replace('#', ''), 16);
-        paletteData[i * 4]     = (num >> 16) & 255;
-        paletteData[i * 4 + 1] = (num >> 8) & 255;
-        paletteData[i * 4 + 2] = num & 255;
-        paletteData[i * 4 + 3] = (i === 0) ? 0 : 255; // Transparent index 0 for dry land
+        // 🌟 Write alpha = 0 for transparent threshold (e.g. PVA < 0.5 or dry land)
+        if (hex === 'transparent' || !hex || i === 0) {
+            paletteData[i * 4]     = 0;
+            paletteData[i * 4 + 1] = 0;
+            paletteData[i * 4 + 2] = 0;
+            paletteData[i * 4 + 3] = 0; // Alpha 0 triggers discard in fragment shader
+        } else {
+            const num = parseInt(hex.replace('#', ''), 16);
+            paletteData[i * 4]     = (num >> 16) & 255;
+            paletteData[i * 4 + 1] = (num >> 8) & 255;
+            paletteData[i * 4 + 2] = num & 255;
+            paletteData[i * 4 + 3] = 255;
+        }
     });
 
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, paletteHexArray.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
