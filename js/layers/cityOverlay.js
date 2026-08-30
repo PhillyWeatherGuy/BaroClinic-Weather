@@ -46,36 +46,41 @@ style.textContent = `
 document.head.appendChild(style);
 
 /**
- * 🌟 100% GENERIC PIXEL DECODER
- * Dynamically reads any piecewise breakpoints or linear ranges from manifest.scaling
+ * 🌟 100% DYNAMIC PIXEL DECODER
+ * Dynamically converts raw 8-bit bytes to physical values using models.json or manifest scaling
  */
 export function decodePixelValue(rawVal, manifest) {
     if (rawVal === undefined) return 0.0;
 
-    const scaling = manifest?.scaling;
-    
-    // 1. Dynamic Piecewise Scaling (e.g. TP, PWAT, PVA, CAPE)
+    const val = Number(rawVal);
+    if (isNaN(val)) return 0.0;
+
+    // 🌟 Read scaling dynamically from models.json or the manifest
+    const scaling = manifest?.scaling || stateManager.paramConfig?.scaling || stateManager.manifest?.scaling;
+
+    // Piecewise Breakpoint Interpolation (PWAT, TP, PVA)
     if (scaling && scaling.mode === 'piecewise' && scaling.val_points && scaling.byte_points) {
-        const vp = scaling.val_points;
-        const bp = scaling.byte_points;
+        const vp = scaling.val_points.map(Number);
+        const bp = scaling.byte_points.map(Number);
 
         for (let i = 0; i < bp.length - 1; i++) {
-            if (rawVal >= bp[i] && rawVal <= bp[i + 1]) {
-                const t = (rawVal - bp[i]) / (bp[i + 1] - bp[i]);
+            if (val >= bp[i] && val <= bp[i + 1]) {
+                const span = bp[i + 1] - bp[i];
+                const t = span > 0 ? (val - bp[i]) / span : 0;
                 return vp[i] + t * (vp[i + 1] - vp[i]);
             }
         }
         return vp[vp.length - 1];
     }
 
-    // 2. Dynamic Linear Scaling (e.g. 2m Temperature, Pressure, Wind Speed)
-    const minVal = scaling?.min_val ?? manifest?.min_val ?? manifest?.temp_min_k ?? 0.0;
-    const maxVal = scaling?.max_val ?? manifest?.max_val ?? manifest?.temp_max_k ?? 255.0;
-    return minVal + (rawVal / 255.0) * (maxVal - minVal);
+    // Linear Scaling (2m Temperature, Wind, Pressure)
+    const minVal = Number(scaling?.min_val ?? manifest?.min_val ?? manifest?.temp_min_k ?? 0.0);
+    const maxVal = Number(scaling?.max_val ?? manifest?.max_val ?? manifest?.temp_max_k ?? 255.0);
+    return minVal + (val / 255.0) * (maxVal - minVal);
 }
 
 /**
- * 🌟 GENERIC BILINEAR GPS SAMPLER
+ * 🌟 GENERIC BILINEAR SAMPLER
  */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameState = activeFrameState || stateManager.activeFrameState;
@@ -136,23 +141,21 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 }
 
 /**
- * 🌟 100% GENERIC DYNAMIC UNIT FORMATTER
- * Formats any present or future parameter based entirely on its manifest / models.json unit
+ * 🌟 DYNAMIC UNIT FORMATTER
  */
 export function formatParameterValue(decodedVal, manifest) {
     if (decodedVal === undefined || isNaN(decodedVal)) return "--";
 
     const unit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim();
 
-    // 1. Inches (Precipitation, Precipitable Water, Snow Depth, etc.)
+    // 1. Inches (Precipitation, Precipitable Water, Snow)
     if (unit === 'in' || unit.toLowerCase().includes('inch')) {
         return `${decodedVal.toFixed(2)}"`;
     }
 
-    // 2. Degrees Temperature (°F / °C / Kelvin conversion)
+    // 2. Degrees Temperature (°F / °C)
     if (unit.includes('°') || unit.toLowerCase().includes('f') || unit.toLowerCase().includes('c')) {
         let tempVal = decodedVal;
-        // Convert from Kelvin if raw value is in Kelvin (> 150K) and unit is Fahrenheit
         if (decodedVal > 150 && (unit.includes('F') || unit.includes('f'))) {
             tempVal = (decodedVal - 273.15) * 1.8 + 32.0;
         } else if (decodedVal > 150 && (unit.includes('C') || unit.includes('c'))) {
@@ -161,12 +164,12 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(tempVal)}°`;
     }
 
-    // 3. Percentages (Relative Humidity, Probabilities, Cloud Cover)
+    // 3. Percentage (%)
     if (unit === '%') {
         return `${Math.round(decodedVal)}%`;
     }
 
-    // 4. Any other meteorological unit (kts, mph, hPa, mb, J/kg, 10⁻⁵ s⁻¹)
+    // 4. Any other unit (kts, mph, hPa, mb, J/kg, 10⁻⁵ s⁻¹)
     if (unit.length > 0) {
         return `${Math.round(decodedVal)} ${unit}`;
     }
@@ -267,7 +270,6 @@ export function updateCityPositions() {
 
     hideBasemapCityLabels(mapInstance);
 
-    // 🌟 Dynamically check models.json / manifest for overlay suppression
     const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || stateManager.manifest?.suppress_city_overlay;
     if (isSuppressed) {
         for (const name in cityMarkers) {
