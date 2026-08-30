@@ -16,6 +16,7 @@
       "category": "Thermodynamics",
       "shader": "scalar",
       "palette": "temp",
+      "upscale_2x": false,
       "scaling": {
         "mode": "linear",
         "min_val": 216.4833,
@@ -31,6 +32,7 @@
       "category": "Surface and Precipitation",
       "shader": "precip",
       "palette": "precip",
+      "upscale_2x": true,
       "scaling": {
         "mode": "piecewise",
         "val_points": [0.0, 1.0, 10.0, 50.0],
@@ -46,6 +48,7 @@
       "category": "Surface and Precipitation",
       "shader": "precip",
       "palette": "pwat",
+      "upscale_2x": false,
       "scaling": {
         "mode": "piecewise",
         "val_points": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
@@ -61,12 +64,13 @@
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
       "palette": "pva",
+      "upscale_2x": false,
+      "suppress_city_overlay": true,
       "scaling": {
         "mode": "piecewise",
         "val_points": [0.0, 3.0, 80.0],
         "byte_points": [0, 30, 107]
       },
-      "suppress_city_overlay": true,
       "map_style_light": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG",
       "map_style_dark": "https://api.maptiler.com/maps/01a00fc8-041b-74f2-bdaf-cdf4c900ec01/style.json?key=f9fTA5Ce0HKefPDICSVG"
     }
