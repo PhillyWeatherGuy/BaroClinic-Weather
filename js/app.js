@@ -287,7 +287,7 @@ async function renderFrame(globalIdx) {
 }
 
 /**
- * 🌟 GENTLE BACKGROUND PRELOADER (Yields to UI thread)
+ * 🌟 CONTINUOUS BACKGROUND PRELOADER
  */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
@@ -296,10 +296,9 @@ export async function preloadRemainingChunks(currentGen) {
     for (let i = 1; i < totalChunks; i++) {
         if (currentGen !== stateManager.loadGeneration) break;
 
-        if (!stateManager.loadedChunkBitmaps[i]) {
+        if (!stateManager.loadedChunkBitmaps[i] && !stateManager.chunkPixelData[i]) {
             try {
-                // Yields between chunk fetches so the UI never stutters
-                await new Promise(r => setTimeout(r, 60));
+                await new Promise(r => setTimeout(r, 50));
                 if (currentGen !== stateManager.loadGeneration) break;
 
                 const bitmap = await loadChunkBitmap(i, currentGen);
@@ -311,9 +310,10 @@ export async function preloadRemainingChunks(currentGen) {
                 updateSliderTrackAndBounds();
             } catch (err) {
                 if (err.message !== "Load cancelled") {
-                    console.warn(`Background preload chunk ${i} paused:`, err);
+                    console.warn(`Preload chunk ${i} skipped:`, err);
                 }
-                break;
+                // 🌟 Continue preloading the rest of the forecast run
+                continue;
             }
         }
     }
