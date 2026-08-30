@@ -120,7 +120,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         return bufferObj;
     }
 
-    // 🌟 PATH B: Image (.png / .webp)
+    // 🌟 PATH B: Image (.png / .webp) with 2x High-Resolution Upsampling Pass
     const blob = await imgResp.blob();
     const bitmap = await createImageBitmap(blob);
 
@@ -129,16 +129,21 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    stateManager.loadedChunkBitmaps[chunkIndex] = bitmap;
+    // 🌟 One-Time 2x Upscale in background memory (2880 x 1442 per frame)
+    const scaleFactor = 2;
+    const targetW = bitmap.width * scaleFactor;
+    const targetH = bitmap.height * scaleFactor;
 
     let offCanvas = document.createElement('canvas');
-    offCanvas.width = bitmap.width;
-    offCanvas.height = bitmap.height;
+    offCanvas.width = targetW;
+    offCanvas.height = targetH;
     let offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
-    offCtx.drawImage(bitmap, 0, 0);
+    offCtx.imageSmoothingEnabled = true;
+    offCtx.imageSmoothingQuality = 'high';
+    offCtx.drawImage(bitmap, 0, 0, targetW, targetH);
 
-    const rgba = offCtx.getImageData(0, 0, bitmap.width, bitmap.height).data;
-    const singleChannel = new Uint8Array(bitmap.width * bitmap.height);
+    const rgba = offCtx.getImageData(0, 0, targetW, targetH).data;
+    const singleChannel = new Uint8Array(targetW * targetH);
 
     for (let i = 0; i < singleChannel.length; i++) {
         singleChannel[i] = rgba[i * 4];
@@ -146,12 +151,22 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
     stateManager.chunkPixelData[chunkIndex] = singleChannel;
 
+    const bufferObj = {
+        data: singleChannel,
+        width: targetW,
+        height: targetH,
+        isBinary: true
+    };
+
+    stateManager.loadedChunkBitmaps[chunkIndex] = bufferObj;
+
+    bitmap.close();
     offCanvas.width = 0;
     offCanvas.height = 0;
     offCanvas = null;
     offCtx = null;
 
-    return bitmap;
+    return bufferObj;
 }
 
 /**
@@ -182,7 +197,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
         shaderLayerRef.clearTextures();
     }
 
-    // 4. Clear state references (Note: currentDate & currentCycle are preserved so parameter switches remember the run!)
+    // 4. Clear state references
     stateManager.manifest = null;
     stateManager.globalSteps = [];
     stateManager.currentStepIndex = 0;
