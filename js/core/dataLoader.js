@@ -1,14 +1,13 @@
 // js/core/dataLoader.js
 import { stateManager } from './stateManager.js';
-import { clearThreeGlobeTextures } from '../layers/threeGlobe.js'; // 🌟 3D VRAM Disposer
-import { clearPolarTextures } from '../layers/polarMap.js'; // 🌟 2D Polar VRAM Disposer
-import { clearVectorContours } from '../layers/vectorContours.js'; // 🌟 Vector Contour Disposer
+import { clearThreeGlobeTextures } from '../layers/threeGlobe.js';
+import { clearPolarTextures } from '../layers/polarMap.js';
+import { clearVectorContours } from '../layers/vectorContours.js';
 
 export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
 
-    // 1. Store run date & cycle in stateManager so parameter switches remember them
     if (run && run.year && run.month && run.day && run.cycle) {
         stateManager.currentDate = `${run.year}${run.month}${run.day}`;
         stateManager.currentCycle = run.cycle.toLowerCase();
@@ -16,7 +15,6 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     const urlsToTry = [];
 
-    // 2. Build parameter-specific URL using active date & cycle
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
@@ -24,7 +22,6 @@ export async function fetchManifest(run = null, model = null, param = null) {
         urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${dateStr}_${cycleStr}_manifest.json`);
     }
 
-    // 3. Fallback URLs
     urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_manifest.json`);
     urlsToTry.push(`${stateManager.BASE_URL}manifest.json`);
 
@@ -47,7 +44,6 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     stateManager.manifest = fetchedData;
     
-    // Save date, cycle, model, param to stateManager
     if (stateManager.manifest.date) stateManager.currentDate = stateManager.manifest.date;
     if (stateManager.manifest.run) stateManager.currentCycle = stateManager.manifest.run.toLowerCase();
     if (stateManager.manifest.model) stateManager.activeModel = stateManager.manifest.model;
@@ -89,7 +85,7 @@ async function upscaleFrameToBitmap2x(frameBytes, width, height) {
     for (let i = 0; i < frameBytes.length; i++) {
         const v = frameBytes[i];
         const idx = i * 4;
-        rgba[idx] = v;
+        rgba[idx]     = v;
         rgba[idx + 1] = v;
         rgba[idx + 2] = v;
         rgba[idx + 3] = 255;
@@ -103,7 +99,6 @@ async function upscaleFrameToBitmap2x(frameBytes, width, height) {
             resizeQuality: 'high'
         });
     } catch (e) {
-        // Fallback for environments where createImageBitmap resize options are unsupported
         const off = document.createElement('canvas');
         off.width = width;
         off.height = height;
@@ -129,7 +124,8 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const chunk = stateManager.manifest.chunks[chunkIndex];
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
-    const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+    const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+    const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
     const imgResp = await fetch(chunkUrl);
     if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
@@ -142,7 +138,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const frameSize = frameW * frameH;
     const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
 
-    // 🌟 PATH A: Compressed Binary Time Volume (.bin)
+    // 🌟 PATH A: Compressed Binary Time Volume (.bin) - Pure Contiguous 3D Slicing
     if (chunk.file.endsWith('.bin')) {
         let buffer;
         try {
@@ -157,13 +153,13 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             throw new Error("Load cancelled");
         }
 
-        const singleChannel = new Uint8Array(buffer);
-        stateManager.chunkPixelData[chunkIndex] = singleChannel;
+        const rawData = new Uint8Array(buffer);
+        stateManager.chunkPixelData[chunkIndex] = rawData;
 
-        // Upscale each time frame in background memory to 2880x1442
         const upscaledFrames = [];
         for (let f = 0; f < numFrames; f++) {
-            const frameBytes = singleChannel.subarray(f * frameSize, (f + 1) * frameSize);
+            const srcStart = f * frameSize;
+            const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
             const bitmap2x = await upscaleFrameToBitmap2x(frameBytes, frameW, frameH);
             upscaledFrames.push(bitmap2x);
         }
@@ -184,38 +180,49 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         return volumeObj;
     }
 
-    // 🌟 PATH B: Image (.png / .webp)
+    // 🌟 PATH B: Image (.png / .webp legacy fallback)
     const blob = await imgResp.blob();
-    const bitmap = await createImageBitmap(blob);
+    const fullBitmap = await createImageBitmap(blob);
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-        bitmap.close();
+        fullBitmap.close();
         throw new Error("Load cancelled");
     }
 
+    const upscaledFrames = [];
+    for (let f = 0; f < numFrames; f++) {
+        const frameBitmap = await createImageBitmap(
+            fullBitmap, 
+            f * frameW, 0, frameW, frameH,
+            {
+                resizeWidth: frameW * 2,
+                resizeHeight: frameH * 2,
+                resizeQuality: 'high'
+            }
+        );
+        upscaledFrames.push(frameBitmap);
+    }
+
+    fullBitmap.close();
+
     const volumeObj = {
-        frames: [bitmap],
-        width: bitmap.width,
-        height: bitmap.height,
-        isVolume: false
+        frames: upscaledFrames,
+        width: frameW * 2,
+        height: frameH * 2,
+        isVolume: true
     };
 
     stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
     return volumeObj;
 }
 
-/**
- * 🌟 UNIFIED APP MEMORY PURGER: Wipes 2D, 3D & Polar GPU VRAM + CPU RAM + Vector Contours
- */
 export function purgeAllAppMemory(shaderLayerRef = null) {
     stateManager.loadGeneration++;
 
-    // 🌟 Disposes 3D Globe & 2D Polar GPU VRAM textures & vector contour features
     clearThreeGlobeTextures();
     clearPolarTextures();
     clearVectorContours();
 
-    // 1. Close CPU ImageBitmap handles
     for (const key in stateManager.loadedChunkBitmaps) {
         const item = stateManager.loadedChunkBitmaps[key];
         if (item && item.frames) {
@@ -229,23 +236,18 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
         }
     }
     stateManager.loadedChunkBitmaps = {};
-
-    // 2. Clear raw city temperature pixel memory
     stateManager.chunkPixelData = {};
 
-    // 3. Delete 2D WebGL textures from GPU VRAM
     if (shaderLayerRef && typeof shaderLayerRef.clearTextures === 'function') {
         shaderLayerRef.clearTextures();
     }
 
-    // 4. Clear state references (Note: currentDate & currentCycle are preserved so parameter switches remember the run!)
     stateManager.manifest = null;
     stateManager.globalSteps = [];
     stateManager.currentStepIndex = 0;
     stateManager.activeFrameState = null;
     stateManager.initTime = null;
 
-    // 5. Clear overlay window caches
     window.lastActiveFrameState = null;
     window.lastManifest = null;
 }
