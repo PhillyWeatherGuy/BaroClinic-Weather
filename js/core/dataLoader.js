@@ -15,13 +15,12 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     const urlsToTry = [];
 
-    // 🌟 Strictly parameter-specific URLs (prevents PWAT from falling back to 2t's manifest)
+    // 🌟 Strictly parameter-specific manifest resolution
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
         urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
     }
-
     urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_manifest.json`);
 
     let fetchedData = null;
@@ -74,7 +73,6 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
 /**
  * 🌟 2x Hardware Bilinear Upscaler
- * Takes raw 1440x721 uint8 bytes and expands to a 2880x1442 ImageBitmap in ~1ms
  */
 async function upscaleFrameToBitmap2x(frameBytes, width, height) {
     const targetW = width * 2;
