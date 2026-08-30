@@ -244,16 +244,14 @@ const fsPolar = `
             discard;
         }
 
+        // Exact Inverse Polar Stereographic Conformal Formula
         float c = 2.0 * atan(r);
+        float lat = u_poleSign * ((PI * 0.5) - c);
         
-        float lat;
         float lon;
-
         if (u_poleSign > 0.0) {
-            lat = (PI * 0.5) - c;
             lon = u_centralLon + atan(v_pos.x, -v_pos.y);
         } else {
-            lat = -(PI * 0.5 - c);
             lon = u_centralLon + atan(v_pos.x, v_pos.y);
         }
 
@@ -296,6 +294,9 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     return texture;
 }
 
+/**
+ * 🌟 TRUE Forward Polar Stereographic Coordinate Projection (Matches Shader 1:1 Across Equator)
+ */
 function lngLatToPolarPlanar(lng, lat, isNorth = true) {
     if (isNorth && lat < -35.0) return null;
     if (!isNorth && lat > 35.0) return null;
@@ -316,7 +317,7 @@ function lngLatToPolarPlanar(lng, lat, isNorth = true) {
         r = Math.tan(c * 0.5);
         deltaLambda = lambda - SOUTH_CENTRAL_LON;
         x = r * Math.sin(deltaLambda);
-        y = r * Math.cos(deltaLambda);
+        y = -r * Math.cos(deltaLambda);
     }
 
     return new THREE.Vector2(x, y);
@@ -744,6 +745,38 @@ export function fitSynopticSector() {
 }
 
 /**
+ * 🌟 CURSOR-ANCHORED ZOOM FOR KEYBOARD SHORTCUTS (+ / -)
+ */
+export function zoomPolarAtPoint(direction, clientX, clientY) {
+    if (!camera || !renderer) return;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    
+    const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
+    const unitsPerPixelY = visibleHeight / h;
+
+    const screenY = clientY - (h / 2);
+    const worldPointY = camera.position.y - screenY * unitsPerPixelY;
+
+    const zoomFactor = direction > 0 ? 1.25 : 0.8;
+    const newZoom = Math.max(0.4, Math.min(6.0, camera.zoom * zoomFactor));
+
+    const newVisibleHeight = (camera.top - camera.bottom) / newZoom;
+    const newUnitsPerPixelY = newVisibleHeight / h;
+
+    camera.zoom = newZoom;
+    camera.updateProjectionMatrix();
+
+    // Adjust Y position towards cursor anchor
+    mapTargetY = worldPointY + screenY * newUnitsPerPixelY;
+    mapTargetY = Math.max(-1.5, Math.min(1.5, mapTargetY));
+    camera.position.y = mapTargetY;
+
+    render2DOverlay();
+}
+
+/**
  * 🌟 DIRECTIONALLY-LOCKED GESTURE CONTROLLER
  */
 function init2DMapControls(canvas) {
@@ -960,7 +993,7 @@ export function initPolarMap() {
             u_paletteTexture: { value: paletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
-            u_opacity: { value: 0.85 }, // Matches 2D MapLibre exact 0.85 opacity
+            u_opacity: { value: 0.85 },
             u_centralLon: { value: NORTH_CENTRAL_LON },
             u_poleSign: { value: 1.0 }
         },
