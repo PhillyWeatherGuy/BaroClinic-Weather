@@ -19,21 +19,61 @@ const fsSource = `
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
     uniform float u_opacity;
-    uniform vec2 u_uvOffset;
-    uniform vec2 u_uvScale;
+    uniform vec2 u_texResolution;
+
+    // 🌟 C^2 Continuous Cubic B-Spline Filter
+    vec4 cubicBSpline(float f) {
+        float f2 = f * f;
+        float f3 = f2 * f;
+        return vec4(
+            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
+            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
+            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
+            f3 / 6.0
+        );
+    }
+
+    // 🌟 2D Cubic Spline Evaluation on 2880x1442 Grid
+    float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
+        vec2 pos = uv * texRes - 0.5;
+        vec2 f = fract(pos);
+        vec2 i = floor(pos);
+
+        vec4 wx = cubicBSpline(f.x);
+        vec4 wy = cubicBSpline(f.y);
+
+        vec2 invTex = 1.0 / texRes;
+        float x0 = (i.x - 0.5) * invTex.x;
+        float x1 = (i.x + 0.5) * invTex.x;
+        float x2 = (i.x + 1.5) * invTex.x;
+        float x3 = (i.x + 2.5) * invTex.x;
+
+        float total = 0.0;
+        for (int y = -1; y <= 2; y++) {
+            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
+            
+            float rowVal = wx.x * texture2D(tex, vec2(x0, yCoord)).r +
+                           wx.y * texture2D(tex, vec2(x1, yCoord)).r +
+                           wx.z * texture2D(tex, vec2(x2, yCoord)).r +
+                           wx.w * texture2D(tex, vec2(x3, yCoord)).r;
+
+            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
+            total += w_y * rowVal;
+        }
+
+        return clamp(total, 0.0, 1.0);
+    }
 
     void main() {
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
         float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
 
-        vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
-        vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
+        vec2 uv = vec2(fract(v_texcoord.x), normY);
 
-        float rawVal = texture2D(u_dataTexture, sprite_uv).r;
+        float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
         vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
         
-        // 🌟 Discard dry land / transparent pixels
         if (color.a == 0.0) {
             discard;
         }
@@ -46,11 +86,9 @@ function createPaletteTexture(gl, paletteHexArray) {
     const paletteTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, paletteTex);
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
-    const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeShader === 'precip');
     
     paletteHexArray.forEach((hex, i) => {
-        // 🌟 Make transparent slots (noise < 0.4 or dry land) alpha 0 so shader discards them
-        if (hex === 'transparent' || !hex || (isPrecip && i === 0)) {
+        if (hex === 'transparent' || !hex) {
             paletteData[i * 4]     = 0;
             paletteData[i * 4 + 1] = 0;
             paletteData[i * 4 + 2] = 0;
@@ -79,8 +117,7 @@ export function createScalarShaderLayer(mapInstance) {
         chunkTextures: {},
         activeTex: null,
         paletteTex: null,
-        uvOffset: [0, 0],
-        uvScale: [1, 1],
+        texResolution: [2880.0, 1442.0],
 
         clearTextures: function() {
             if (!this.gl) return;
@@ -93,9 +130,6 @@ export function createScalarShaderLayer(mapInstance) {
             this.activeTex = null;
         },
 
-        /**
-         * 🌟 DYNAMIC PALETTE SWAP: Swaps GPU palette texture for any parameter / theme
-         */
         updatePalette: function(paramIdOrHexArray) {
             if (!this.gl) return;
             let hexArray;
@@ -133,8 +167,7 @@ export function createScalarShaderLayer(mapInstance) {
             this.uDataTexture = gl.getUniformLocation(this.program, 'u_dataTexture');
             this.uPaletteTexture = gl.getUniformLocation(this.program, 'u_paletteTexture');
             this.uOpacity = gl.getUniformLocation(this.program, 'u_opacity');
-            this.uUvOffset = gl.getUniformLocation(this.program, 'u_uvOffset');
-            this.uUvScale = gl.getUniformLocation(this.program, 'u_uvScale');
+            this.uTexResolution = gl.getUniformLocation(this.program, 'u_texResolution');
 
             const quadVertices = new Float32Array([
                 -2,0,  -1,0,  -2,1,   -2,1,  -1,0,  -1,1,
@@ -148,44 +181,57 @@ export function createScalarShaderLayer(mapInstance) {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
 
-            // 🌟 Theme & parameter-aware initial palette
             const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
             const initialPalette = paletteFunc(stateManager.activeParam || '2t');
             this.paletteTex = createPaletteTexture(gl, initialPalette);
         },
         
         preloadChunkTexture: function(chunkIndex, source) {
-            if (!this.gl || this.chunkTextures[chunkIndex] || !source) return;
+            if (!this.gl || !source) return;
             const gl = this.gl;
-            const tex = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-            
-            if (source.data && source.width && source.height) {
+
+            const uploadSingle = (img) => {
+                const tex = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+
                 gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.LUMINANCE, 
-                    source.width, source.height, 0, 
-                    gl.LUMINANCE, gl.UNSIGNED_BYTE, source.data
+                    gl.TEXTURE_2D, 0, gl.RGBA, 
+                    gl.RGBA, gl.UNSIGNED_BYTE, img
                 );
+                
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                return tex;
+            };
+
+            if (source.frames && Array.isArray(source.frames)) {
+                if (source.width && source.height) {
+                    this.texResolution = [source.width, source.height];
+                }
+                source.frames.forEach((frameBmp, fIdx) => {
+                    const key = `${chunkIndex}_${fIdx}`;
+                    if (!this.chunkTextures[key] && frameBmp) {
+                        this.chunkTextures[key] = uploadSingle(frameBmp);
+                    }
+                });
             } else {
-                gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.LUMINANCE, 
-                    gl.LUMINANCE, gl.UNSIGNED_BYTE, source
-                );
+                const key = `${chunkIndex}_0`;
+                if (!this.chunkTextures[key]) {
+                    this.chunkTextures[key] = uploadSingle(source);
+                }
+                this.chunkTextures[chunkIndex] = this.chunkTextures[key];
             }
-            
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            this.chunkTextures[chunkIndex] = tex;
         },
 
         updateFrame: function (frameState) {
-            if (!this.gl) return;
-            this.uvOffset = frameState.uvOffset;
-            this.uvScale = frameState.uvScale;
-            this.activeTex = this.chunkTextures[frameState.chunkIndex];
+            if (!this.gl || !frameState) return;
+            const cIdx = frameState.chunkIndex;
+            const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
+            
+            this.activeTex = this.chunkTextures[`${cIdx}_${fIdx}`] || this.chunkTextures[cIdx];
             mapInstance.triggerRepaint();
         },
 
@@ -204,8 +250,7 @@ export function createScalarShaderLayer(mapInstance) {
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
             gl.uniform1f(this.uOpacity, 0.85); 
-            gl.uniform2f(this.uUvOffset, this.uvOffset[0], this.uvOffset[1]);
-            gl.uniform2f(this.uUvScale, this.uvScale[0], this.uvScale[1]);
+            gl.uniform2f(this.uTexResolution, this.texResolution[0], this.texResolution[1]);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.enableVertexAttribArray(this.aPos);
