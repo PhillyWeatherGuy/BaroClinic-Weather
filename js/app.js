@@ -20,7 +20,7 @@ import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThr
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 
 // 🌟 Dedicated 2D North Polar Stereographic Engine
-import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures } from './layers/polarMap.js';
+import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
 
 // 🌟 Import Light and Dark Palette Resolvers
 import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
@@ -35,7 +35,8 @@ const map = new maplibregl.Map({
     container: 'map',
     style: 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG',
     center: [-74.4, 39.3], 
-    zoom: 7
+    zoom: 7,
+    keyboard: false // 🌟 Disables default arrow key map panning so arrows strictly control forecast steps
 });
 
 /**
@@ -118,6 +119,27 @@ export function applyView(targetView) {
             updatePolarFrame(stateManager.activeFrameState);
         }
         console.log("❄️ [App Engine] 2D Polar Stereographic Activated (3D VRAM Cleared)");
+    }
+}
+
+/**
+ * 🌟 CURSOR-CENTERED KEYBOARD ZOOM HANDLER (+ / - Keys)
+ */
+export function handleKeyboardZoom(direction, x, y) {
+    const activeView = stateManager.activeView || '2d';
+
+    if (activeView === '2d' && map) {
+        const targetLngLat = map.unproject([x, y]);
+        const deltaZoom = direction > 0 ? 0.65 : -0.65;
+        map.easeTo({
+            zoom: map.getZoom() + deltaZoom,
+            around: targetLngLat,
+            duration: 150
+        });
+    } else if (activeView === 'polar') {
+        if (typeof zoomPolarAtPoint === 'function') {
+            zoomPolarAtPoint(direction, x, y);
+        }
     }
 }
 
@@ -292,6 +314,9 @@ initViewerUI(
     },
     (newView) => {
         applyView(newView);
+    },
+    (direction, x, y) => {
+        handleKeyboardZoom(direction, x, y);
     }
 );
 
