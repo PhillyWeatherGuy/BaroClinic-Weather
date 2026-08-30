@@ -65,8 +65,8 @@ const fsSource = `
 
         vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
 
-        // 2. Sample data using Catmull-Rom Bicubic Spline (smooth C1 curvature)
-        float rawVal = sampleBicubicCatmullRom(u_dataTexture, tile_uv, u_uvOffset, u_uvScale, vec2(1440.0, 721.0));
+        // 2. 🌟 Sample 2x dense grid (2880 x 1442) using Catmull-Rom Bicubic Spline
+        float rawVal = sampleBicubicCatmullRom(u_dataTexture, tile_uv, u_uvOffset, u_uvScale, vec2(2880.0, 1442.0));
 
         // Mask dry land / zero
         if (rawVal < 0.00001) {
