@@ -15,7 +15,6 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     const urlsToTry = [];
 
-    // 🌟 Strictly parameter-specific manifest resolution
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
@@ -72,7 +71,7 @@ export async function fetchManifest(run = null, model = null, param = null) {
 }
 
 /**
- * 🌟 2x Hardware Bilinear Upscaler
+ * 🌟 2x Hardware Bilinear Upscaler ($1440 \times 721 \to 2880 \times 1442$)
  */
 async function upscaleFrameToBitmap2x(frameBytes, width, height) {
     const targetW = width * 2;
@@ -135,24 +134,33 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const frameSize = frameW * frameH;
     const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
 
-    // 🌟 PATH A: Compressed Binary Time Volume (.bin) - Pure Contiguous 3D Slicing
+    // 🌟 PATH A: Compressed Binary Time Volume (.bin)
     if (chunk.file.endsWith('.bin')) {
-        let buffer;
-        try {
-            const decompressedStream = imgResp.body.pipeThrough(new DecompressionStream('gzip'));
-            const blob = await new Response(decompressedStream).blob();
-            buffer = await blob.arrayBuffer();
-        } catch (e) {
-            buffer = await imgResp.arrayBuffer();
+        const arrayBuffer = await imgResp.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+
+        let rawData;
+        if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+            try {
+                const stream = new Response(arrayBuffer).body.pipeThrough(new DecompressionStream('gzip'));
+                const decompressedBlob = await new Response(stream).blob();
+                const decompressedBuffer = await decompressedBlob.arrayBuffer();
+                rawData = new Uint8Array(decompressedBuffer);
+            } catch (e) {
+                rawData = bytes;
+            }
+        } else {
+            rawData = bytes;
         }
 
         if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
             throw new Error("Load cancelled");
         }
 
-        const rawData = new Uint8Array(buffer);
+        // Store raw 1D byte array for instant CPU sampling
         stateManager.chunkPixelData[chunkIndex] = rawData;
 
+        // 🌟 Upscale each frame in the chunk 2x to 2880x1442
         const upscaledFrames = [];
         for (let f = 0; f < numFrames; f++) {
             const srcStart = f * frameSize;
@@ -177,7 +185,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         return volumeObj;
     }
 
-    // 🌟 PATH B: Image (.png / .webp legacy fallback)
+    // 🌟 PATH B: Image fallback (.png / .webp)
     const blob = await imgResp.blob();
     const fullBitmap = await createImageBitmap(blob);
 
