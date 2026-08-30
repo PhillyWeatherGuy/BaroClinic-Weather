@@ -23,6 +23,40 @@ const fsSource = `
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
 
+    // 🌟 Method 1: Fast GPU Catmull-Rom Bicubic Spline Data Sampler
+    float sampleBicubicCatmullRom(sampler2D tex, vec2 uv, vec2 uvOffset, vec2 uvScale, vec2 texSize) {
+        vec2 sampleCoord = uv * texSize - 0.5;
+        vec2 f = fract(sampleCoord);
+        vec2 i = floor(sampleCoord);
+
+        // 1D Catmull-Rom Spline Basis Polynomials
+        vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+        vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+        vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+        vec2 w3 = f * f * (-0.5 + 0.5 * f);
+
+        vec2 w12 = w1 + w2;
+        vec2 offset12 = w2 / max(w12, 0.0001);
+
+        vec2 texPos0  = (i - 0.5) / texSize;
+        vec2 texPos12 = (i + 0.5 + offset12) / texSize;
+        vec2 texPos3  = (i + 2.5) / texSize;
+
+        vec2 uv0  = uvOffset + clamp(texPos0,  0.0, 1.0) * uvScale;
+        vec2 uv12 = uvOffset + clamp(texPos12, 0.0, 1.0) * uvScale;
+        vec2 uv3  = uvOffset + clamp(texPos3,  0.0, 1.0) * uvScale;
+
+        float val = 0.0;
+        val += texture2D(tex, vec2(uv12.x, uv12.y)).r * w12.x * w12.y;
+        val += texture2D(tex, vec2(uv0.x,  uv12.y)).r * w0.x  * w12.y;
+        val += texture2D(tex, vec2(uv3.x,  uv12.y)).r * w3.x  * w12.y;
+        val += texture2D(tex, vec2(uv12.x, uv0.y)).r  * w12.x * w0.y;
+        val += texture2D(tex, vec2(uv12.x, uv3.y)).r  * w12.x * w3.y;
+
+        float sumWeights = (w0.x + w12.x + w3.x) * (w0.y + w12.y + w3.y);
+        return clamp(val / max(sumWeights, 0.0001), 0.0, 1.0);
+    }
+
     void main() {
         // 1. Mercator UV coordinate transform
         float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
@@ -31,20 +65,10 @@ const fsSource = `
 
         vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
 
-        // 2. 🌟 GPU Quintic Hermite Sub-Grid Spline (Eliminates 28km grid diamond facets)
-        vec2 grid_dim = vec2(1440.0, 721.0);
-        vec2 grid_pos = tile_uv * grid_dim - 0.5;
-        vec2 i = floor(grid_pos);
-        vec2 f = fract(grid_pos);
-        vec2 f_smooth = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // C2-smooth polynomial
-        vec2 smooth_tile_uv = (i + 0.5 + f_smooth) / grid_dim;
+        // 2. Sample data using Catmull-Rom Bicubic Spline (smooth C1 curvature)
+        float rawVal = sampleBicubicCatmullRom(u_dataTexture, tile_uv, u_uvOffset, u_uvScale, vec2(1440.0, 721.0));
 
-        vec2 sprite_uv = u_uvOffset + clamp(smooth_tile_uv, 0.0, 1.0) * u_uvScale;
-
-        // 3. Fetch smoothed data point
-        float rawVal = texture2D(u_dataTexture, sprite_uv).r;
-
-        // Mask dry land
+        // Mask dry land / zero
         if (rawVal < 0.00001) {
             discard;
         }
