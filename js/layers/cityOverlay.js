@@ -9,6 +9,7 @@ let cityMarkers = {};
 let isLoaded = false;
 let mapInstance = null;
 let modelsConfig = null;
+let listenersAttached = false;
 
 // Clean CSS styling for city callout nodes
 const style = document.createElement('style');
@@ -135,13 +136,14 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 export function formatParameterValue(decodedVal, manifest) {
     if (!manifest) return `${Math.round(decodedVal)}`;
 
-    const unit = (manifest.unit || '').trim();
+    const unit = (manifest.unit || '').trim().toLowerCase();
+    const param = (manifest.parameter || '').toLowerCase();
 
-    if (unit === 'in' || unit.toLowerCase().includes('inch')) {
+    if (unit === 'in' || unit.includes('inch') || param === 'tp' || param === 'pwat' || param === 'tcwv') {
         return `${decodedVal.toFixed(2)}"`;
     }
 
-    if (unit === '°F' || unit.includes('F') || manifest.parameter === '2t') {
+    if (unit === '°f' || unit.includes('f') || param === '2t') {
         let tempF = decodedVal;
         if (decodedVal > 150) {
             const tempC = decodedVal - 273.15;
@@ -154,7 +156,7 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(decodedVal)} ${unit}`;
     }
 
-    if (unit === 'hPa' || unit === 'mb' || unit === 'J/kg' || unit === '%') {
+    if (unit === 'hpa' || unit === 'mb' || unit === 'j/kg' || unit === '%') {
         return `${Math.round(decodedVal)}`;
     }
 
@@ -189,15 +191,36 @@ export function hideBasemapCityLabels(map) {
 export async function initCityOverlay(map) {
     mapInstance = map;
 
+    // 🌟 Clean up any detached marker instances from previous basemap style
+    for (const name in cityMarkers) {
+        if (cityMarkers[name]) {
+            cityMarkers[name].remove();
+        }
+    }
+    cityMarkers = {};
+    activeCities = [];
+
     hideBasemapCityLabels(map);
 
-    map.on('move', updateCityPositions);
-    map.on('zoom', updateCityPositions);
+    if (!listenersAttached) {
+        map.on('move', updateCityPositions);
+        map.on('zoom', updateCityPositions);
+        listenersAttached = true;
+    }
 
     try {
         const cResp = await fetch('./config/models.json');
         if (cResp.ok) modelsConfig = await cResp.json();
     } catch (e) {}
+
+    if (allGlobalCities.length > 0) {
+        isLoaded = true;
+        updateCityPositions();
+        if (window.lastActiveFrameState && window.lastManifest) {
+            updateCityCallouts(mapInstance, window.lastActiveFrameState, window.lastManifest);
+        }
+        return;
+    }
 
     try {
         const resp = await fetch(GLOBAL_CITIES_URL);
@@ -227,14 +250,14 @@ export async function initCityOverlay(map) {
         updateCityPositions();
 
         if (window.lastActiveFrameState && window.lastManifest) {
-            updateCityCallouts(map, window.lastActiveFrameState, window.lastManifest);
+            updateCityCallouts(mapInstance, window.lastActiveFrameState, window.lastManifest);
         }
     } catch (err) {
         console.error("Failed to load global cities dataset:", err);
     }
 }
 
-function updateCityPositions() {
+export function updateCityPositions() {
     if (!mapInstance || !isLoaded) return;
 
     hideBasemapCityLabels(mapInstance);
@@ -245,6 +268,7 @@ function updateCityPositions() {
         for (const name in cityMarkers) {
             cityMarkers[name].getElement().style.display = 'none';
         }
+        activeCities = [];
         return;
     }
 
@@ -320,11 +344,10 @@ function updateCityPositions() {
  * 🌟 MASTER CALLOUT SAMPLER (Uses Bilinear GPS Interpolation)
  */
 export function updateCityCallouts(map, activeFrameState, manifest) {
-    if (!activeFrameState || !manifest || !isLoaded || activeCities.length === 0) return;
+    if (!activeFrameState || !manifest || !isLoaded) return;
 
     hideBasemapCityLabels(map);
 
-    // 🌟 Do not show city callouts for 500mb PVA
     const isPva = (stateManager.activeParam === 'pva' || manifest.parameter === 'pva');
     if (isPva) {
         for (const name in cityMarkers) {
@@ -335,6 +358,10 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
 
     window.lastActiveFrameState = activeFrameState;
     window.lastManifest = manifest;
+
+    if (activeCities.length === 0) {
+        updateCityPositions();
+    }
 
     for (let i = 0; i < activeCities.length; i++) {
         const city = activeCities[i];
