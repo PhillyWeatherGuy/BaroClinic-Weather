@@ -516,7 +516,6 @@ function render2DOverlay() {
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. Soft Graticules
     if (pathGraticule) {
         overlayCtx.lineWidth = (0.8 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.graticule;
@@ -525,28 +524,24 @@ function render2DOverlay() {
         overlayCtx.setLineDash([]);
     }
 
-    // 2. County Lines (When zoomed in deep)
     if (pathCounties && camera.zoom > 2.6) {
         overlayCtx.lineWidth = (0.75 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.countyBorders;
         overlayCtx.stroke(pathCounties);
     }
 
-    // 3. State & Province Lines
     if (pathStates) {
         overlayCtx.lineWidth = (1.2 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.stateBorders;
         overlayCtx.stroke(pathStates);
     }
 
-    // 4. Country Borders
     if (pathCountries) {
         overlayCtx.lineWidth = (1.8 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.countryBorders;
         overlayCtx.stroke(pathCountries);
     }
 
-    // 5. Bold Coastlines
     if (pathCoastlines) {
         overlayCtx.lineWidth = (2.2 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.coastline;
@@ -768,7 +763,6 @@ export function zoomPolarAtPoint(direction, clientX, clientY) {
     camera.zoom = newZoom;
     camera.updateProjectionMatrix();
 
-    // Adjust Y position towards cursor anchor
     mapTargetY = worldPointY + screenY * newUnitsPerPixelY;
     mapTargetY = Math.max(-1.5, Math.min(1.5, mapTargetY));
     camera.position.y = mapTargetY;
@@ -1061,10 +1055,12 @@ export function updatePolarPalette(paramIdOrHexArray) {
 export function updatePolarFrame(frameState) {
     if (!material || !frameState || !frameState.chunkImg) return;
 
-    const chunkIdx = frameState.chunkIndex;
+    const cIdx = frameState.chunkIndex;
+    const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
+    const frameKey = `${cIdx}_${fIdx}`;
     const source = frameState.chunkImg;
 
-    if (!polarChunkTextures[chunkIdx]) {
+    if (!polarChunkTextures[frameKey]) {
         let texture;
         if (source.data && source.width && source.height) {
             texture = new THREE.DataTexture(
@@ -1080,10 +1076,10 @@ export function updatePolarFrame(frameState) {
         }
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
-        polarChunkTextures[chunkIdx] = texture;
+        polarChunkTextures[frameKey] = texture;
     }
 
-    material.uniforms.u_dataTexture.value = polarChunkTextures[chunkIdx];
+    material.uniforms.u_dataTexture.value = polarChunkTextures[frameKey];
     material.uniforms.u_uvOffset.value.set(frameState.uvOffset[0], frameState.uvOffset[1]);
     material.uniforms.u_uvScale.value.set(frameState.uvScale[0], frameState.uvScale[1]);
     material.needsUpdate = true;
