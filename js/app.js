@@ -15,7 +15,7 @@ import {
 } from './components/viewerUI.js';
 
 // 🌟 Universal overlays & 3D Globe
-import { initCityOverlay, updateCityCallouts, decodePixelValue, formatParameterValue } from './layers/cityOverlay.js'; 
+import { initCityOverlay, updateCityCallouts, sampleBilinearValue, formatParameterValue } from './layers/cityOverlay.js'; 
 import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe, clearThreeGlobeTextures } from './layers/threeGlobe.js';
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 
@@ -391,61 +391,11 @@ map.on('load', async () => {
     }
 });
 
-// 🌟 Bilinear Interpolation on Click
+// 🌟 Unified Bilinear Inspection on Click
 map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
-    const chunkIdx = stateManager.activeFrameState.chunkIndex;
-    const pixelData = stateManager.chunkPixelData[chunkIdx];
-    if (!pixelData) return;
-
-    let lng = ((e.lngLat.lng % 360) + 360) % 360;
-    if (lng > 180) lng -= 360;
-
-    const normX = (lng + 180.0) / 360.0;
-    const normY = (90.0 - e.lngLat.lat) / 180.0;
-
-    if (normY < 0 || normY > 1) return;
-
-    const frameW = stateManager.manifest.frame_width || 1440;
-    const frameH = stateManager.manifest.frame_height || 721;
-    const frameSize = frameW * frameH;
-    const frameIdx = stateManager.activeFrameState.frameIndex || 0;
-
-    const contX = (((normX % 1) + 1) % 1) * frameW;
-    const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
-
-    const x0 = Math.floor(contX) % frameW;
-    const x1 = (x0 + 1) % frameW;
-    const y0 = Math.floor(contY);
-    const y1 = Math.min(y0 + 1, frameH - 1);
-
-    const fracX = contX - Math.floor(contX);
-    const fracY = contY - y0;
-
-    const frameOffset = frameIdx * frameSize;
-
-    const idx00 = frameOffset + y0 * frameW + x0;
-    const idx10 = frameOffset + y0 * frameW + x1;
-    const idx01 = frameOffset + y1 * frameW + x0;
-    const idx11 = frameOffset + y1 * frameW + x1;
-
-    const v00 = pixelData[idx00];
-    const v10 = pixelData[idx10];
-    const v01 = pixelData[idx01];
-    const v11 = pixelData[idx11];
-
-    if (v00 === undefined) return;
-
-    const d00 = decodePixelValue(v00, stateManager.manifest);
-    const d10 = decodePixelValue(v10 ?? v00, stateManager.manifest);
-    const d01 = decodePixelValue(v01 ?? v00, stateManager.manifest);
-    const d11 = decodePixelValue(v11 ?? v00, stateManager.manifest);
-
-    const top = d00 * (1.0 - fracX) + d10 * fracX;
-    const bottom = d01 * (1.0 - fracX) + d11 * fracX;
-    const decodedVal = top * (1.0 - fracY) + bottom * fracY;
-
+    const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
     const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
     const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
 
