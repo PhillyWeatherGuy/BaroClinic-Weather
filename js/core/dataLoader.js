@@ -15,6 +15,7 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     const urlsToTry = [];
 
+    // 🌟 Strictly parameter-specific manifest resolution
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
@@ -120,15 +121,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     const chunk = stateManager.manifest.chunks[chunkIndex];
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
-    const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-    const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
-    const imgResp = await fetch(chunkUrl);
-    if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
-
-    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-        throw new Error("Load cancelled");
-    }
-
     const frameW = stateManager.manifest.frame_width || 1440;
     const frameH = stateManager.manifest.frame_height || 721;
     const frameSize = frameW * frameH;
@@ -136,29 +128,56 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
     // 🌟 PATH A: Compressed Binary Time Volume (.bin)
     if (chunk.file.endsWith('.bin')) {
-        const arrayBuffer = await imgResp.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
+        let rawData = stateManager.chunkPixelData[chunkIndex];
 
-        let rawData;
-        if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
-            try {
-                const stream = new Response(arrayBuffer).body.pipeThrough(new DecompressionStream('gzip'));
-                const decompressedBlob = await new Response(stream).blob();
-                const decompressedBuffer = await decompressedBlob.arrayBuffer();
-                rawData = new Uint8Array(decompressedBuffer);
-            } catch (e) {
+        // 🌟 FAST PATH: If raw bytes are already cached in RAM, skip network download completely!
+        if (!rawData) {
+            const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+            const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+            const imgResp = await fetch(chunkUrl);
+            if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
+
+            if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+                throw new Error("Load cancelled");
+            }
+
+            const arrayBuffer = await imgResp.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+
+            if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+                try {
+                    const stream = new Response(arrayBuffer).body.pipeThrough(new DecompressionStream('gzip'));
+                    const decompressedBlob = await new Response(stream).blob();
+                    const decompressedBuffer = await decompressedBlob.arrayBuffer();
+                    rawData = new Uint8Array(decompressedBuffer);
+                } catch (e) {
+                    rawData = bytes;
+                }
+            } else {
                 rawData = bytes;
             }
-        } else {
-            rawData = bytes;
+
+            if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+                throw new Error("Load cancelled");
+            }
+
+            stateManager.chunkPixelData[chunkIndex] = rawData;
         }
 
-        if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-            throw new Error("Load cancelled");
+        // 🌟 SLIDING WINDOW MEMORY CAP: Evict distant chunks' ImageBitmaps from CPU RAM
+        const activeKeys = Object.keys(stateManager.loadedChunkBitmaps);
+        if (activeKeys.length >= 2) {
+            for (const oldKey of activeKeys) {
+                if (Number(oldKey) !== Number(chunkIndex)) {
+                    const oldChunk = stateManager.loadedChunkBitmaps[oldKey];
+                    if (oldChunk && oldChunk.frames) {
+                        oldChunk.frames.forEach(b => { if (b && b.close) b.close(); });
+                    }
+                    delete stateManager.loadedChunkBitmaps[oldKey];
+                    break;
+                }
+            }
         }
-
-        // Store raw 1D byte array for instant CPU sampling
-        stateManager.chunkPixelData[chunkIndex] = rawData;
 
         // 🌟 Upscale each frame in the chunk 2x to 2880x1442
         const upscaledFrames = [];
@@ -186,6 +205,11 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     }
 
     // 🌟 PATH B: Image fallback (.png / .webp)
+    const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+    const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+    const imgResp = await fetch(chunkUrl);
+    if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
+
     const blob = await imgResp.blob();
     const fullBitmap = await createImageBitmap(blob);
 
