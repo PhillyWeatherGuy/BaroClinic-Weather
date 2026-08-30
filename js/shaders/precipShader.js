@@ -32,7 +32,7 @@ const fsSource = `
         vec2 tile_uv = vec2(fract(v_texcoord.x), normY);
         vec2 sprite_uv = u_uvOffset + tile_uv * u_uvScale;
 
-        // 2. 🌟 Clean Hardware Texture Sampling (0 oscillation artifacts)
+        // 2. Clean Hardware Bilinear Sampling
         float rawVal = texture2D(u_dataTexture, sprite_uv).r;
 
         // Mask dry land / zero
@@ -63,7 +63,7 @@ function createPrecipPaletteTexture(gl, paletteHexArray) {
             paletteData[i * 4]     = 0;
             paletteData[i * 4 + 1] = 0;
             paletteData[i * 4 + 2] = 0;
-            paletteData[i * 4 + 3] = 0; // Discard in shader
+            paletteData[i * 4 + 3] = 0;
         } else {
             const num = parseInt(hex.replace('#', ''), 16);
             paletteData[i * 4]     = (num >> 16) & 255;
@@ -190,7 +190,6 @@ export function createPrecipShaderLayer(mapInstance) {
             this.chunkTextures[chunkIndex] = tex;
         },
 
-        // 🌟 Direct Single-Frame Upload from .bin Slices
         updateFrame: function (frameState) {
             if (!this.gl || !frameState) return;
             this.uvOffset = frameState.uvOffset || [0.0, 0.0];
