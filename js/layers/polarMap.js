@@ -369,7 +369,7 @@ function lngLatToPolarPlanar(lng, lat, isNorth = true) {
         r = Math.tan(c * 0.5);
         deltaLambda = lambda - SOUTH_CENTRAL_LON;
         x = r * Math.sin(deltaLambda);
-        y = -r * Math.cos(deltaLambda);
+        y = r * Math.cos(deltaLambda); // 🌟 Corrected: Positive y matches shader atan(x, y) 1:1
     }
 
     return new THREE.Vector2(x, y);
