@@ -32,7 +32,7 @@ const popup = new maplibregl.Popup({ closeButton: false });
 
 const map = new maplibregl.Map({
     container: 'map',
-    style: 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG',
+    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
     center: [-74.4, 39.3], 
     zoom: 7,
     keyboard: false
