@@ -64,7 +64,7 @@
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
       "palette": "pva",
-      "upscale_2x": false,
+      "upscale_2x": true,
       "suppress_city_overlay": true,
       "scaling": {
         "mode": "piecewise",
