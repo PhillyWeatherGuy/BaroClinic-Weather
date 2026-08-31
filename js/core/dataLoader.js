@@ -4,8 +4,6 @@ import { clearThreeGlobeTextures } from '../layers/threeGlobe.js';
 import { clearPolarTextures } from '../layers/polarMap.js';
 import { clearVectorContours } from '../layers/vectorContours.js';
 
-const MAX_CACHED_CHUNKS = 4;
-
 export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
@@ -122,35 +120,17 @@ async function frameToBitmap(frameBytes, width, height, shouldUpscale = false) {
     }
 }
 
-/**
- * Evict oldest chunks to keep memory usage strictly bounded
- */
-function evictOldChunks(currentChunkIndex) {
-    const activeKeys = Object.keys(stateManager.loadedChunkBitmaps);
-    if (activeKeys.length > MAX_CACHED_CHUNKS) {
-        // Sort by furthest distance from active chunk
-        const sortedByDistance = activeKeys
-            .map(Number)
-            .sort((a, b) => Math.abs(b - currentChunkIndex) - Math.abs(a - currentChunkIndex));
-
-        const toRemove = sortedByDistance.slice(0, activeKeys.length - MAX_CACHED_CHUNKS);
-        for (const oldKey of toRemove) {
-            const oldChunk = stateManager.loadedChunkBitmaps[oldKey];
-            if (oldChunk && oldChunk.frames) {
-                oldChunk.frames.forEach(b => { if (b && typeof b.close === 'function') b.close(); });
-            }
-            delete stateManager.loadedChunkBitmaps[oldKey];
-            delete stateManager.chunkPixelData[oldKey];
-        }
-    }
-}
-
 export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
         throw new Error("Load cancelled");
     }
 
-    const chunk = stateManager.manifest.chunks[chunkIndex];
+    // 🌟 Instant Cache Return (Zero latency if already in memory)
+    if (stateManager.loadedChunkBitmaps[chunkIndex]) {
+        return stateManager.loadedChunkBitmaps[chunkIndex];
+    }
+
+    const chunk = stateManager.manifest?.chunks?.[chunkIndex];
     if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
     const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
@@ -198,9 +178,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             stateManager.chunkPixelData[chunkIndex] = rawData;
         }
 
-        // Sliding window eviction
-        evictOldChunks(chunkIndex);
-
         const outFrames = [];
         for (let f = 0; f < numFrames; f++) {
             const srcStart = f * frameSize;
@@ -245,8 +222,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     }
 
     fullBitmap.close();
-
-    evictOldChunks(chunkIndex);
 
     const volumeObj = {
         frames: outFrames,
