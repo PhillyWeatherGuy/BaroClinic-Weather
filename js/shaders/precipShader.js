@@ -203,10 +203,9 @@ export function createPrecipShaderLayer(mapInstance) {
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
-                // 🌟 Single-channel 8-bit Luminance (75% less VRAM)
                 gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.LUMINANCE, 
-                    gl.LUMINANCE, gl.UNSIGNED_BYTE, img
+                    gl.TEXTURE_2D, 0, gl.RGBA, 
+                    gl.RGBA, gl.UNSIGNED_BYTE, img
                 );
                 
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -215,18 +214,6 @@ export function createPrecipShaderLayer(mapInstance) {
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 return tex;
             };
-
-            // 🌟 VRAM Limiter: caps active textures to 15
-            const existingKeys = Object.keys(this.chunkTextures);
-            if (existingKeys.length > 15) {
-                const keysToRemove = existingKeys.slice(0, 5);
-                keysToRemove.forEach(k => {
-                    if (this.chunkTextures[k]) {
-                        gl.deleteTexture(this.chunkTextures[k]);
-                        delete this.chunkTextures[k];
-                    }
-                });
-            }
 
             if (source.frames && Array.isArray(source.frames)) {
                 if (source.width && source.height) {
