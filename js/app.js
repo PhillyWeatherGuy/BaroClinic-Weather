@@ -116,9 +116,7 @@ export function applyView(targetView) {
             try {
                 initPolarMap();
                 polarMapLoaded = true;
-            } catch (err) {
-                console.error("Polar map init error:", err);
-            }
+            } catch (err) {}
         }
 
         showPolarMap();
@@ -312,12 +310,14 @@ export async function preloadRemainingChunks(currentGen) {
                 if (err.message !== "Load cancelled") {
                     console.warn(`Preload chunk ${i} skipped:`, err);
                 }
-                // 🌟 Continue preloading the rest of the forecast run
                 continue;
             }
         }
     }
 }
+
+// 🌟 Initialize Splash Transition & Viewer UI immediately (Decoupled from MapTiler network state)
+initHubTransition();
 
 initViewerUI(
     (stepIndex) => {
@@ -329,9 +329,12 @@ initViewerUI(
     (direction, x, y) => { handleKeyboardZoom(direction, x, y); }
 );
 
+map.on('error', (e) => {
+    console.warn("MapLibre Basemap load warning:", e);
+});
+
 map.on('load', async () => {
     stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
-    initHubTransition();
 
     // 🌟 1. Fetch initial parameter manifest (instant)
     try {
