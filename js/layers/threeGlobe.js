@@ -78,23 +78,74 @@ const vsThreeGlobe = `
 `;
 
 const fsThreeGlobe = `
+    precision highp float;
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
     uniform float u_opacity;
+    uniform vec2 u_texResolution;
     varying vec2 v_uv;
     varying vec3 v_normal;
+
+    // 🌟 C^2 Continuous Cubic B-Spline Filter
+    vec4 cubicBSpline(float f) {
+        float f2 = f * f;
+        float f3 = f2 * f;
+        return vec4(
+            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
+            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
+            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
+            f3 / 6.0
+        );
+    }
+
+    // 🌟 2D Cubic Spline Evaluation on 2880x1442 Grid
+    float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
+        vec2 pos = uv * texRes - 0.5;
+        vec2 f = fract(pos);
+        vec2 i = floor(pos);
+
+        vec4 wx = cubicBSpline(f.x);
+        vec4 wy = cubicBSpline(f.y);
+
+        vec2 invTex = 1.0 / texRes;
+        float x0 = (i.x - 0.5) * invTex.x;
+        float x1 = (i.x + 0.5) * invTex.x;
+        float x2 = (i.x + 1.5) * invTex.x;
+        float x3 = (i.x + 2.5) * invTex.x;
+
+        float total = 0.0;
+        for (int y = -1; y <= 2; y++) {
+            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
+            
+            float rowVal = wx.x * texture2D(tex, vec2(x0, yCoord)).r +
+                           wx.y * texture2D(tex, vec2(x1, yCoord)).r +
+                           wx.z * texture2D(tex, vec2(x2, yCoord)).r +
+                           wx.w * texture2D(tex, vec2(x3, yCoord)).r;
+
+            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
+            total += w_y * rowVal;
+        }
+
+        return clamp(total, 0.0, 1.0);
+    }
 
     void main() {
         // 🌟 100% Pure 1:1 Equirectangular UV Mapping
         vec2 wrapped_uv = vec2(v_uv.x, 1.0 - v_uv.y);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
-        float rawVal = texture2D(u_dataTexture, sprite_uv).r;
-        vec4 color = texture2D(u_paletteTexture, vec2(rawVal, 0.5));
+        float rawVal = sampleSmoothSpline(u_dataTexture, sprite_uv, u_texResolution);
 
-        // 🌟 Discard transparent pixels (e.g. dry land for precip)
+        if (rawVal < 0.00001) {
+            discard;
+        }
+
+        float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
+        float palU = (palIndex + 0.5) / 256.0;
+        vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
+
         if (color.a == 0.0) {
             discard;
         }
@@ -421,7 +472,8 @@ export function initThreeGlobe() {
             u_paletteTexture: { value: paletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
-            u_opacity: { value: 0.85 }
+            u_opacity: { value: 0.85 },
+            u_texResolution: { value: new THREE.Vector2(2880.0, 1442.0) }
         },
         transparent: true,
         depthWrite: false
@@ -508,6 +560,11 @@ export function updateThreeGlobeFrame(frameState) {
     material.uniforms.u_dataTexture.value = globeChunkTextures[frameKey];
     material.uniforms.u_uvOffset.value.set(frameState.uvOffset[0], frameState.uvOffset[1]);
     material.uniforms.u_uvScale.value.set(frameState.uvScale[0], frameState.uvScale[1]);
+    
+    if (source.width && source.height) {
+        material.uniforms.u_texResolution.value.set(source.width, source.height);
+    }
+    
     material.needsUpdate = true;
 }
 
