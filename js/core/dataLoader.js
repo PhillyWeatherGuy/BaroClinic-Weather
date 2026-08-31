@@ -4,6 +4,8 @@ import { clearThreeGlobeTextures } from '../layers/threeGlobe.js';
 import { clearPolarTextures } from '../layers/polarMap.js';
 import { clearVectorContours } from '../layers/vectorContours.js';
 
+const MAX_CACHED_CHUNKS = 4;
+
 export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
@@ -76,24 +78,27 @@ export async function fetchManifest(run = null, model = null, param = null) {
 async function frameToBitmap(frameBytes, width, height, shouldUpscale = false) {
     const targetW = shouldUpscale ? width * 2 : width;
     const targetH = shouldUpscale ? height * 2 : height;
+    const totalPixels = width * height;
 
-    const rgba = new Uint8ClampedArray(width * height * 4);
-    for (let i = 0; i < frameBytes.length; i++) {
+    const rgbaBuffer = new ArrayBuffer(totalPixels * 4);
+    const rgba32 = new Uint32Array(rgbaBuffer);
+
+    // Fast 32-bit Little-Endian pixel packing: A(255) | B(v) | G(v) | R(v)
+    for (let i = 0; i < totalPixels; i++) {
         const v = frameBytes[i];
-        const idx = i * 4;
-        rgba[idx]     = v;
-        rgba[idx + 1] = v;
-        rgba[idx + 2] = v;
-        rgba[idx + 3] = 255;
+        rgba32[i] = 0xFF000000 | (v << 16) | (v << 8) | v;
     }
-    const imgData = new ImageData(rgba, width, height);
+
+    const imgData = new ImageData(new Uint8ClampedArray(rgbaBuffer), width, height);
+
+    const bitmapOptions = shouldUpscale ? {
+        resizeWidth: targetW,
+        resizeHeight: targetH,
+        resizeQuality: 'high'
+    } : undefined;
 
     try {
-        return await createImageBitmap(imgData, {
-            resizeWidth: targetW,
-            resizeHeight: targetH,
-            resizeQuality: shouldUpscale ? 'high' : 'pixelated'
-        });
+        return await (bitmapOptions ? createImageBitmap(imgData, bitmapOptions) : createImageBitmap(imgData));
     } catch (e) {
         const off = document.createElement('canvas');
         off.width = width;
@@ -110,7 +115,33 @@ async function frameToBitmap(frameBytes, width, height, shouldUpscale = false) {
         upCtx.imageSmoothingEnabled = true;
         upCtx.imageSmoothingQuality = 'high';
         upCtx.drawImage(off, 0, 0, targetW, targetH);
+        
+        off.width = 0;
+        off.height = 0;
         return up;
+    }
+}
+
+/**
+ * Evict oldest chunks to keep memory usage strictly bounded
+ */
+function evictOldChunks(currentChunkIndex) {
+    const activeKeys = Object.keys(stateManager.loadedChunkBitmaps);
+    if (activeKeys.length > MAX_CACHED_CHUNKS) {
+        // Sort by furthest distance from active chunk
+        const sortedByDistance = activeKeys
+            .map(Number)
+            .sort((a, b) => Math.abs(b - currentChunkIndex) - Math.abs(a - currentChunkIndex));
+
+        const toRemove = sortedByDistance.slice(0, activeKeys.length - MAX_CACHED_CHUNKS);
+        for (const oldKey of toRemove) {
+            const oldChunk = stateManager.loadedChunkBitmaps[oldKey];
+            if (oldChunk && oldChunk.frames) {
+                oldChunk.frames.forEach(b => { if (b && typeof b.close === 'function') b.close(); });
+            }
+            delete stateManager.loadedChunkBitmaps[oldKey];
+            delete stateManager.chunkPixelData[oldKey];
+        }
     }
 }
 
@@ -167,20 +198,8 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             stateManager.chunkPixelData[chunkIndex] = rawData;
         }
 
-        // Keep active chunk window in memory
-        const activeKeys = Object.keys(stateManager.loadedChunkBitmaps);
-        if (activeKeys.length >= 3) {
-            for (const oldKey of activeKeys) {
-                if (Number(oldKey) !== Number(chunkIndex)) {
-                    const oldChunk = stateManager.loadedChunkBitmaps[oldKey];
-                    if (oldChunk && oldChunk.frames) {
-                        oldChunk.frames.forEach(b => { if (b && b.close) b.close(); });
-                    }
-                    delete stateManager.loadedChunkBitmaps[oldKey];
-                    break;
-                }
-            }
-        }
+        // Sliding window eviction
+        evictOldChunks(chunkIndex);
 
         const outFrames = [];
         for (let f = 0; f < numFrames; f++) {
@@ -191,7 +210,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         }
 
         if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-            outFrames.forEach(b => { if (b && b.close) b.close(); });
+            outFrames.forEach(b => { if (b && typeof b.close === 'function') b.close(); });
             throw new Error("Load cancelled");
         }
 
@@ -226,6 +245,8 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
     }
 
     fullBitmap.close();
+
+    evictOldChunks(chunkIndex);
 
     const volumeObj = {
         frames: outFrames,
