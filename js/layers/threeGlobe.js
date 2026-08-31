@@ -15,6 +15,7 @@ let scene, camera, renderer, controls, globeGroup, globeMesh, baseGlobeMesh, mat
 let linesMesh = null, countyMesh = null;
 let globeChunkTextures = {};
 let isGlobeActive = false;
+let globeAnimationId = null;
 
 // 2D Equirectangular Basemap Texture Generator for 3D Globe
 let baseMapCanvas = null;
@@ -342,6 +343,29 @@ async function load3DCountyBorders(parentMesh) {
     }
 }
 
+function animate() {
+    if (!isGlobeActive) {
+        globeAnimationId = null;
+        return;
+    }
+    globeAnimationId = requestAnimationFrame(animate);
+
+    if (controls && renderer && scene && globeGroup) {
+        const dist = camera.position.distanceTo(globeGroup.position);
+
+        const zoomRatio = Math.max(0, Math.min(1, (dist - controls.minDistance) / (controls.maxDistance - controls.minDistance)));
+        controls.rotateSpeed = 0.12 + zoomRatio * 0.53;
+
+        controls.update();
+
+        if (countyMesh) {
+            countyMesh.visible = (dist < 4.2);
+        }
+
+        renderer.render(scene, camera);
+    }
+}
+
 export function initThreeGlobe() {
     const container = document.getElementById('globe-container');
     if (!container || scene) return;
@@ -416,24 +440,9 @@ export function initThreeGlobe() {
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    function animate() {
-        requestAnimationFrame(animate);
-        if (isGlobeActive && controls && renderer && scene && globeGroup) {
-            const dist = camera.position.distanceTo(globeGroup.position);
-
-            const zoomRatio = Math.max(0, Math.min(1, (dist - controls.minDistance) / (controls.maxDistance - controls.minDistance)));
-            controls.rotateSpeed = 0.12 + zoomRatio * 0.53;
-
-            controls.update();
-
-            if (countyMesh) {
-                countyMesh.visible = (dist < 4.2);
-            }
-
-            renderer.render(scene, camera);
-        }
+    if (isGlobeActive && !globeAnimationId) {
+        animate();
     }
-    animate();
 }
 
 /**
@@ -521,6 +530,9 @@ export function showThreeGlobe() {
     if (mapDiv) mapDiv.style.display = 'none';
 
     isGlobeActive = true;
+    if (!globeAnimationId) {
+        animate();
+    }
 }
 
 export function hideThreeGlobe() {
@@ -529,4 +541,9 @@ export function hideThreeGlobe() {
     if (container) container.style.display = 'none';
     if (mapDiv) mapDiv.style.display = 'block';
     isGlobeActive = false;
+
+    if (globeAnimationId) {
+        cancelAnimationFrame(globeAnimationId);
+        globeAnimationId = null;
+    }
 }
