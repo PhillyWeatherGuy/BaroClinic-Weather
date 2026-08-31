@@ -13,6 +13,7 @@ let isPlaying = false;
 let playInterval = null;
 const PLAYBACK_SPEED_MS = 200;
 let shaderLayerRef = null;
+let highestPreloadedChunk = 0;
 
 let cursorX = window.innerWidth / 2;
 let cursorY = window.innerHeight / 2;
@@ -189,14 +190,30 @@ export function initThemeToggle() {
 }
 
 /**
- * 🌟 MEMORY-AWARE STEP INDEX CHECKER (Never gets locked to 27 hours)
+ * 🌟 MEMORY-AWARE STEP INDEX CHECKER (Monotonic sliding window support)
  */
 export function getMaxLoadedStepIndex() {
-    if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) return 0;
+    if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) {
+        highestPreloadedChunk = 0;
+        return 0;
+    }
+
+    for (const key of Object.keys(stateManager.loadedChunkBitmaps)) {
+        const num = Number(key);
+        if (!isNaN(num) && num > highestPreloadedChunk) {
+            highestPreloadedChunk = num;
+        }
+    }
+    for (const key of Object.keys(stateManager.chunkPixelData)) {
+        const num = Number(key);
+        if (!isNaN(num) && num > highestPreloadedChunk) {
+            highestPreloadedChunk = num;
+        }
+    }
+
     let maxIdx = 0;
     for (let i = 0; i < stateManager.globalSteps.length; i++) {
-        const chunkIdx = stateManager.globalSteps[i].chunkIndex;
-        if (stateManager.chunkPixelData[chunkIdx] || stateManager.loadedChunkBitmaps[chunkIdx]) {
+        if (stateManager.globalSteps[i].chunkIndex <= highestPreloadedChunk) {
             maxIdx = i;
         } else {
             break;
@@ -283,6 +300,7 @@ export function initModelCategoryBar() {
                 stateManager.activeModel = model.id;
                 
                 purgeAllAppMemory(shaderLayerRef);
+                highestPreloadedChunk = 0;
                 const thisGen = stateManager.loadGeneration;
 
                 try {
@@ -459,6 +477,7 @@ export function initParameterCategoryBar() {
                 }
 
                 purgeAllAppMemory(shaderLayerRef);
+                highestPreloadedChunk = 0;
                 const thisGen = stateManager.loadGeneration;
 
                 if (typeof initLayer === 'function') {
@@ -625,6 +644,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
                 if (isPlaying) pausePlayback();
                 showToast(`Switching view...`);
                 purgeAllAppMemory(shaderLayerRef);
+                highestPreloadedChunk = 0;
             }
         });
     });
@@ -700,6 +720,7 @@ function initModelRunDropdown() {
             showToast(`Unloading previous run data...`);
             
             purgeAllAppMemory(shaderLayerRef);
+            highestPreloadedChunk = 0;
             const thisGen = stateManager.loadGeneration;
 
             showToast(`Loading model run ${run.id}...`);
