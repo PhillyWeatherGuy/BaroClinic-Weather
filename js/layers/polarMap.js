@@ -15,6 +15,7 @@ let scene, camera, renderer, polarGroup, polarMesh, material, paletteTex;
 let oceanMesh = null, landMesh = null, lakesMesh = null;
 let polarChunkTextures = {};
 let isPolarActive = false;
+let polarAnimationId = null;
 
 // 2D High-DPI Overlay Canvas
 let overlayCanvas = null;
@@ -1013,13 +1014,20 @@ export function initPolarMap() {
         fitSynopticSector();
     });
 
-    function animate() {
-        requestAnimationFrame(animate);
-        if (isPolarActive && renderer && scene && camera) {
-            renderer.render(scene, camera);
-        }
+    if (isPolarActive && !polarAnimationId) {
+        animate();
     }
-    animate();
+}
+
+function animate() {
+    if (!isPolarActive) {
+        polarAnimationId = null;
+        return;
+    }
+    polarAnimationId = requestAnimationFrame(animate);
+    if (renderer && scene && camera) {
+        renderer.render(scene, camera);
+    }
 }
 
 export function updatePolarPalette(paramIdOrHexArray) {
@@ -1105,10 +1113,19 @@ export function showPolarMap() {
 
     isPolarActive = true;
     fitSynopticSector();
+
+    if (!polarAnimationId) {
+        animate();
+    }
 }
 
 export function hidePolarMap() {
     const container = document.getElementById('polar-container');
     if (container) container.style.display = 'none';
     isPolarActive = false;
+
+    if (polarAnimationId) {
+        cancelAnimationFrame(polarAnimationId);
+        polarAnimationId = null;
+    }
 }
