@@ -214,18 +214,18 @@ export function initLayer(shaderType = null) {
         }
     }
 
-    let firstOverlayId = null;
+    // 🌟 Place weather layer underneath ALL basemap content layers so the entire transparent basemap sits on top
+    let firstContentLayerId = null;
     const layers = map.getStyle().layers || [];
     for (const layer of layers) {
-        const id = layer.id.toLowerCase();
-        if (layer.type === 'symbol' || id.includes('admin') || id.includes('boundary') || id.includes('border') || id.includes('road')) {
-            firstOverlayId = layer.id;
+        if (layer.id !== 'background') {
+            firstContentLayerId = layer.id;
             break;
         }
     }
 
     if (!map.getLayer('weather-gpu-shader')) {
-        map.addLayer(customShaderLayer, firstOverlayId);
+        map.addLayer(customShaderLayer, firstContentLayerId);
     }
 }
 
@@ -316,7 +316,7 @@ export async function preloadRemainingChunks(currentGen) {
     }
 }
 
-// 🌟 Initialize Splash Transition & Viewer UI immediately (Decoupled from MapTiler network state)
+// 🌟 Initialize Splash Transition & Viewer UI immediately
 initHubTransition();
 
 initViewerUI(
@@ -334,7 +334,6 @@ map.on('error', (e) => {
 });
 
 map.on('load', async () => {
-    // 🌟 Set current map style to local Maputnik design
     stateManager.currentMapStyle = './config/style_default.json';
 
     // 🌟 1. Fetch initial parameter manifest (instant)
