@@ -249,7 +249,8 @@ export function createScalarShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            gl.uniform1f(this.uOpacity, 0.85); 
+            // 🌟 100% Opacity
+            gl.uniform1f(this.uOpacity, 1.0); 
             gl.uniform2f(this.uTexResolution, this.texResolution[0], this.texResolution[1]);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
