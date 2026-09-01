@@ -38,7 +38,7 @@
         "val_points": [0.0, 1.0, 10.0, 50.0],
         "byte_points": [0, 100, 200, 255]
       },
-      "map_style_light": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG",
+      "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "https://api.maptiler.com/maps/01a00fc8-041b-74f2-bdaf-cdf4c900ec01/style.json?key=f9fTA5Ce0HKefPDICSVG"
     },
     "pwat": {
@@ -54,7 +54,7 @@
         "val_points": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
         "byte_points": [0, 32, 64, 96, 128, 160, 192, 255]
       },
-      "map_style_light": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG",
+      "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "https://api.maptiler.com/maps/01a00fc8-041b-74f2-bdaf-cdf4c900ec01/style.json?key=f9fTA5Ce0HKefPDICSVG"
     },
     "pva": {
@@ -71,7 +71,7 @@
         "val_points": [0.0, 3.0, 80.0],
         "byte_points": [0, 30, 107]
       },
-      "map_style_light": "https://api.maptiler.com/maps/019ff6ac-b981-70b8-bb04-9e97be85b9d8/style.json?key=f9fTA5Ce0HKefPDICSVG",
+      "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "https://api.maptiler.com/maps/01a00fc8-041b-74f2-bdaf-cdf4c900ec01/style.json?key=f9fTA5Ce0HKefPDICSVG"
     }
   }
