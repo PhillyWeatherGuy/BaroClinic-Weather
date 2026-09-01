@@ -17,6 +17,10 @@
     "openmaptiles": {
       "type": "vector",
       "url": "https://tiles.openfreemap.org/planet"
+    },
+    "us_counties": {
+      "type": "geojson",
+      "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson"
     }
   },
   "sprite": "https://openmaptiles.github.io/maptiler-toner-gl-style/sprite",
@@ -25,7 +29,14 @@
     {
       "id": "background",
       "type": "background",
-      "paint": {"background-color": "#fff"}
+      "paint": {"background-color": "rgba(253, 229, 207, 1)"}
+    },
+    {
+      "id": "WaterColor",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "water",
+      "paint": {"fill-color": "#E7F1F4"}
     },
     {
       "id": "landcover_grass_fill",
@@ -372,7 +383,7 @@
     {
       "id": "building_pattern",
       "type": "fill",
-      "metadata": {"mapbox:group": "1444849388993.3071"},
+      "metadata": {"mapbox:group": "1444849364238.8171"},
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 14,
@@ -385,36 +396,11 @@
       }
     },
     {
-      "id": "boundary_state-copy-copy",
-      "type": "line",
-      "metadata": {"mapbox:group": "a14c9607bc7954ba1df7205bf660433f"},
-      "source": "openmaptiles",
-      "source-layer": "boundary",
-      "minzoom": 1,
-      "maxzoom": 14,
-      "filter": ["all", ["==", "admin_level", 4], ["==", "adm0_a3", "USA"]],
-      "layout": {
-        "line-cap": "round",
-        "line-join": "round",
-        "visibility": "visible"
-      },
-      "paint": {
-        "line-color": "#000000",
-        "line-opacity": 1,
-        "line-width": {
-          "base": 1.3,
-          "stops": [[5, 1], [6, 1.2], [7, 1.6], [14, 5]]
-        }
-      }
-    },
-    {
       "id": "boundary_county",
       "type": "line",
-      "source": "openmaptiles",
-      "source-layer": "boundary",
-      "minzoom": 6,
+      "source": "us_counties",
+      "minzoom": 4.5,
       "maxzoom": 24,
-      "filter": ["all", ["==", "admin_level", 6], ["!=", "maritime", 1]],
       "layout": {
         "line-cap": "round",
         "line-join": "round",
@@ -422,8 +408,11 @@
       },
       "paint": {
         "line-color": "#000000",
-        "line-opacity": 0.7,
-        "line-width": {"base": 1.1, "stops": [[6, 0.6], [8, 1.0], [12, 1.8]]}
+        "line-opacity": 0.6,
+        "line-width": {
+          "base": 1.1,
+          "stops": [[4.5, 0.45], [7, 0.85], [12, 1.8]]
+        }
       }
     },
     {
@@ -445,7 +434,7 @@
         "line-opacity": 1,
         "line-width": {
           "base": 1.3,
-          "stops": [[5, 2], [6, 2], [7, 1.6], [14, 5]]
+          "stops": [[5, 1.6], [7, 2.0], [14, 5]]
         }
       }
     },
@@ -474,7 +463,7 @@
       "source": "openmaptiles",
       "source-layer": "boundary",
       "minzoom": 1,
-      "maxzoom": 8,
+      "maxzoom": 24,
       "filter": [
         "all",
         ["==", "admin_level", 2],
