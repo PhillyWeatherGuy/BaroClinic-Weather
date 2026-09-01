@@ -32,7 +32,7 @@ const popup = new maplibregl.Popup({ closeButton: false });
 
 const map = new maplibregl.Map({
     container: 'map',
-    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    style: './config/style_default.json',
     center: [-74.4, 39.3], 
     zoom: 7,
     keyboard: false
