@@ -372,7 +372,7 @@
     {
       "id": "building_pattern",
       "type": "fill",
-      "metadata": {"mapbox:group": "1444849364238.8171"},
+      "metadata": {"mapbox:group": "1444849388993.3071"},
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 14,
@@ -399,10 +399,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": {
-          "stops": [[5, "rgba(80, 80, 80, 1)"], [6, "rgba(0, 0, 0, 1)"]]
-        },
-        "line-dasharray": {"stops": [[5, [1, 1]], [6, [1, 2]]]},
+        "line-color": "#000000",
         "line-opacity": 1,
         "line-width": {
           "base": 1.3,
@@ -425,9 +422,8 @@
       },
       "paint": {
         "line-color": "#000000",
-        "line-opacity": 0.65,
-        "line-width": {"base": 1.1, "stops": [[6, 0.6], [8, 1.0], [12, 1.8]]},
-        "line-dasharray": [2, 2]
+        "line-opacity": 0.7,
+        "line-width": {"base": 1.1, "stops": [[6, 0.6], [8, 1.0], [12, 1.8]]}
       }
     },
     {
@@ -445,10 +441,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": {
-          "stops": [[5, "rgba(80, 80, 80, 1)"], [6, "rgba(0, 0, 0, 1)"]]
-        },
-        "line-dasharray": {"stops": [[5, [1, 1]], [6, [1, 2]]]},
+        "line-color": "#000000",
         "line-opacity": 1,
         "line-width": {
           "base": 1.3,
@@ -495,7 +488,7 @@
       },
       "paint": {
         "line-blur": 0,
-        "line-color": "rgba(0, 0, 0, 1)",
+        "line-color": "#000000",
         "line-opacity": 1,
         "line-width": {"base": 1.1, "stops": [[2, 1], [22, 20]]}
       }
@@ -807,7 +800,11 @@
       "source": "openmaptiles",
       "source-layer": "water",
       "minzoom": 0,
-      "maxzoom": 24
+      "maxzoom": 24,
+      "paint": {
+        "line-color": "#000000",
+        "line-width": 1.5
+      }
     }
   ],
   "id": "c4268e48-fac9-4478-8120-201224fbd4d8"
