@@ -28,6 +28,13 @@
       "paint": {"background-color": "rgba(253, 229, 207, 1)"}
     },
     {
+      "id": "WaterColor",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "water",
+      "paint": {"fill-color": "#E7F1F4"}
+    },
+    {
       "id": "landcover_grass_fill",
       "type": "fill",
       "metadata": {"mapbox:group": "1444849388993.3071"},
@@ -789,13 +796,6 @@
       "minzoom": 0,
       "maxzoom": 24,
       "paint": {"line-width": 1.5}
-    },
-    {
-      "id": "WaterColor",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "water",
-      "paint": {"fill-color": "#E7F1F4"}
     }
   ],
   "id": "c4268e48-fac9-4478-8120-201224fbd4d8"
