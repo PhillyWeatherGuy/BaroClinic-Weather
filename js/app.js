@@ -334,7 +334,8 @@ map.on('error', (e) => {
 });
 
 map.on('load', async () => {
-    stateManager.currentMapStyle = 'https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG';
+    // 🌟 Set current map style to local Maputnik design
+    stateManager.currentMapStyle = './config/style_default.json';
 
     // 🌟 1. Fetch initial parameter manifest (instant)
     try {
