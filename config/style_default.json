@@ -411,6 +411,26 @@
       }
     },
     {
+      "id": "boundary_county",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "minzoom": 6,
+      "maxzoom": 24,
+      "filter": ["all", ["==", "admin_level", 6], ["!=", "maritime", 1]],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "visible"
+      },
+      "paint": {
+        "line-color": "#000000",
+        "line-opacity": 0.65,
+        "line-width": {"base": 1.1, "stops": [[6, 0.6], [8, 1.0], [12, 1.8]]},
+        "line-dasharray": [2, 2]
+      }
+    },
+    {
       "id": "boundary_state",
       "type": "line",
       "metadata": {"mapbox:group": "a14c9607bc7954ba1df7205bf660433f"},
