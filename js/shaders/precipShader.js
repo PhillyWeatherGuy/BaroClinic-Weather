@@ -257,13 +257,15 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1i(this.uPaletteTexture, 1);
 
             gl.uniformMatrix4fv(this.uMatrix, false, matrix);
-            // 🌟 100% Opacity
             gl.uniform1f(this.uOpacity, 1.0);
             gl.uniform2f(this.uTexResolution, this.texResolution[0], this.texResolution[1]);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             gl.enableVertexAttribArray(this.aPos);
             gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0);
+
+            // 🌟 CRUCIAL: Disable depth testing so weather paints over both ocean and land!
+            gl.disable(gl.DEPTH_TEST);
 
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
