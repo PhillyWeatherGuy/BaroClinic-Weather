@@ -22,8 +22,8 @@
         "min_val": 216.4833,
         "max_val": 327.5944
       },
-      "map_style_light": "https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG",
-      "map_style_dark": "https://api.maptiler.com/maps/019fc9f8-1ca6-7efe-b666-aba0ef35bce8/style.json?key=f9fTA5Ce0HKefPDICSVG"
+      "map_style_light": "./config/style_default.json",
+      "map_style_dark": "./config/style_default.json"
     },
     "tp": {
       "id": "tp",
