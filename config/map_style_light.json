@@ -129,7 +129,7 @@
       "source": "openmaptiles",
       "source-layer": "water",
       "minzoom": 7,
-      "maxzoom": 1,
+      "maxzoom": 24,
       "filter": [
         "all",
         ["!=", "brunnel", "tunnel"],
@@ -795,7 +795,10 @@
       "source-layer": "water",
       "minzoom": 0,
       "maxzoom": 24,
-      "paint": {"line-width": 1.5}
+      "paint": {
+        "line-color": "#000000",
+        "line-width": 1.5
+      }
     }
   ],
   "id": "c4268e48-fac9-4478-8120-201224fbd4d8"
