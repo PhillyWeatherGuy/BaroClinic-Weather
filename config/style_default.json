@@ -32,13 +32,6 @@
       "paint": {"background-color": "rgba(253, 229, 207, 1)"}
     },
     {
-      "id": "WaterColor",
-      "type": "fill",
-      "source": "openmaptiles",
-      "source-layer": "water",
-      "paint": {"fill-color": "#E7F1F4"}
-    },
-    {
       "id": "landcover_grass_fill",
       "type": "fill",
       "metadata": {"mapbox:group": "1444849388993.3071"},
