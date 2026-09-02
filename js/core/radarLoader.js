@@ -5,7 +5,7 @@
  */
 export const radarState = {
     frames: [],          // Array of 24 frames: [{ index, offsetIndex, date, label, url }]
-    loadedImages: {},    // In-memory cache of loaded Image elements
+    loadedBitmaps: {},   // In-memory cache of decoded ImageBitmaps
     activeFrameIndex: 23,
     bounds: [-126.0, 24.0, -66.0, 50.0], // Full CONUS Bounding Box
     loadGeneration: 0,
@@ -63,38 +63,43 @@ export function buildRadarTimeline(numFrames = TOTAL_RADAR_FRAMES) {
 }
 
 /**
- * 🌟 2. Load Single IEM Frame (CORS-Safe for Mac & Mobile)
+ * 🌟 2. Load Single IEM Frame via CORS-Relay
  */
-export async function loadRadarImage(frameIndex, currentGen = null) {
+export async function loadRadarBitmap(frameIndex, currentGen = null) {
     if (currentGen !== null && currentGen !== radarState.loadGeneration) {
         throw new Error("Radar load cancelled");
     }
 
     // Return instant memory cache if already loaded
-    if (radarState.loadedImages[frameIndex]) {
-        return radarState.loadedImages[frameIndex];
+    if (radarState.loadedBitmaps[frameIndex]) {
+        return radarState.loadedBitmaps[frameIndex];
     }
 
     const frameInfo = radarState.frames[frameIndex];
     if (!frameInfo) throw new Error(`Frame ${frameIndex} not found`);
 
-    // Fetch via CORS-safe proxy fallback if direct browser fetch is restricted on Mac
-    const directUrl = `${frameInfo.url}?t=${Date.now()}`;
-    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(frameInfo.url)}`;
+    // CORS-enabled proxy URLs
+    const targetUrl = `${frameInfo.url}?t=${Date.now()}`;
+    const proxyUrls = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`
+    ];
 
     let blob = null;
 
-    try {
-        const resp = await fetch(directUrl);
-        if (resp.ok) blob = await resp.blob();
-    } catch (e) {
-        // Direct fetch failed due to Mac CORS security -> use open CORS proxy fallback
-        const proxyResp = await fetch(proxyUrl);
-        if (proxyResp.ok) blob = await proxyResp.blob();
+    // Try CORS relays
+    for (const pUrl of proxyUrls) {
+        try {
+            const resp = await fetch(pUrl);
+            if (resp.ok) {
+                blob = await resp.blob();
+                break;
+            }
+        } catch (e) {}
     }
 
     if (!blob) {
-        throw new Error(`Failed to load radar frame ${frameIndex}`);
+        throw new Error(`Failed to load IEM radar frame ${frameIndex}`);
     }
 
     if (currentGen !== null && currentGen !== radarState.loadGeneration) {
@@ -108,7 +113,7 @@ export async function loadRadarImage(frameIndex, currentGen = null) {
         throw new Error("Radar load cancelled");
     }
 
-    radarState.loadedImages[frameIndex] = bitmap;
+    radarState.loadedBitmaps[frameIndex] = bitmap;
     return bitmap;
 }
 
@@ -122,11 +127,11 @@ export async function preloadAllRadarFrames(onFrameLoaded = null) {
     for (let i = radarState.frames.length - 1; i >= 0; i--) {
         if (thisGen !== radarState.loadGeneration) break;
 
-        if (!radarState.loadedImages[i]) {
+        if (!radarState.loadedBitmaps[i]) {
             try {
-                const img = await loadRadarImage(i, thisGen);
+                const bitmap = await loadRadarBitmap(i, thisGen);
                 if (thisGen === radarState.loadGeneration && typeof onFrameLoaded === 'function') {
-                    onFrameLoaded(i, img);
+                    onFrameLoaded(i, bitmap);
                 }
                 await new Promise(r => setTimeout(r, 40));
             } catch (err) {
@@ -147,13 +152,13 @@ export function purgeRadarMemory(shaderRef = null) {
     radarState.loadGeneration++;
     radarState.isPreloading = false;
 
-    for (const key in radarState.loadedImages) {
-        const bmp = radarState.loadedImages[key];
+    for (const key in radarState.loadedBitmaps) {
+        const bmp = radarState.loadedBitmaps[key];
         if (bmp && typeof bmp.close === 'function') {
             bmp.close();
         }
     }
-    radarState.loadedImages = {};
+    radarState.loadedBitmaps = {};
 
     if (shaderRef && typeof shaderRef.clearTextures === 'function') {
         shaderRef.clearTextures();
