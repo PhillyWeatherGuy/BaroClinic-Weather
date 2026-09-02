@@ -29,7 +29,9 @@
     {
       "id": "background",
       "type": "background",
-      "paint": {"background-color": "rgba(253, 229, 207, 1)"}
+      "paint": {
+        "background-opacity": 0
+      }
     },
     {
       "id": "landcover_grass_fill",
@@ -392,7 +394,7 @@
       "id": "boundary_county",
       "type": "line",
       "source": "us_counties",
-      "minzoom": 4.5,
+      "minzoom": 3.8,
       "maxzoom": 24,
       "layout": {
         "line-cap": "round",
@@ -401,11 +403,22 @@
       },
       "paint": {
         "line-color": "#000000",
-        "line-opacity": 0.6,
-        "line-width": {
-          "base": 1.1,
-          "stops": [[4.5, 0.45], [7, 0.85], [12, 1.8]]
-        }
+        "line-opacity": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          3.8, 0.35,
+          6, 0.65,
+          9, 0.8
+        ],
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          3.8, 0.35,
+          6, 0.75,
+          10, 1.5
+        ]
       }
     },
     {
