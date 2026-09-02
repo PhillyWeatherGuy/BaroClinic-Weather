@@ -2,7 +2,7 @@
 import { 
     radarState, 
     buildRadarTimeline, 
-    loadRadarImage, 
+    loadRadarBitmap, 
     preloadAllRadarFrames, 
     purgeRadarMemory 
 } from '../core/radarLoader.js';
@@ -57,8 +57,8 @@ export async function initRadarMode(mapInstance) {
 
     // 3. Load and display LIVE scan immediately
     try {
-        const liveImg = await loadRadarImage(liveIndex, radarState.loadGeneration);
-        radarShaderLayer.preloadRadarTexture(liveIndex, liveImg);
+        const liveBmp = await loadRadarBitmap(liveIndex, radarState.loadGeneration);
+        radarShaderLayer.preloadRadarTexture(liveIndex, liveBmp);
         syncRadarTimelineUI();
         setRadarFrame(liveIndex);
     } catch (err) {
@@ -66,9 +66,9 @@ export async function initRadarMode(mapInstance) {
     }
 
     // 4. Preload remaining 23 historical frames in background
-    preloadAllRadarFrames((idx, img) => {
+    preloadAllRadarFrames((idx, bmp) => {
         if (radarShaderLayer) {
-            radarShaderLayer.preloadRadarTexture(idx, img);
+            radarShaderLayer.preloadRadarTexture(idx, bmp);
         }
         updateRadarSliderTrack();
     });
@@ -87,9 +87,9 @@ export async function setRadarFrame(frameIndex) {
 
     if (!radarShaderLayer?.frameTextures[frameIndex]) {
         try {
-            const img = await loadRadarImage(frameIndex, radarState.loadGeneration);
+            const bmp = await loadRadarBitmap(frameIndex, radarState.loadGeneration);
             if (radarShaderLayer) {
-                radarShaderLayer.preloadRadarTexture(frameIndex, img);
+                radarShaderLayer.preloadRadarTexture(frameIndex, bmp);
             }
         } catch (e) {
             return;
@@ -191,7 +191,7 @@ function updateRadarSliderTrack() {
     if (!slider || !radarState.frames || radarState.frames.length === 0) return;
 
     const total = radarState.frames.length - 1;
-    const loadedCount = Object.keys(radarState.loadedImages).length;
+    const loadedCount = Object.keys(radarState.loadedBitmaps).length;
     const percent = total > 0 ? (loadedCount / total) * 100 : 0;
 
     slider.style.background = `linear-gradient(to right, 
