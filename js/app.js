@@ -20,9 +20,6 @@ import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThr
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
 
-// 🛰️ Real-Time Radar Engine
-import { initRadarMode, destroyRadarMode } from './components/radarUI.js';
-
 import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
 import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.js';
 
@@ -356,17 +353,12 @@ export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
-    // 1. Destroy any active radar or forecast model state
-    destroyRadarMode(map);
+    // 1. Completely wipe previous model memory and weather layers
     purgeAllAppMemory(customShaderLayer);
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
     }
-    if (map.getLayer('radar-gpu-shader')) {
-        map.removeLayer('radar-gpu-shader');
-    }
 
-    // 2. Launch selected mode
     if (targetMode === 'radar') {
         showToast("Loading Real-Time Radar...");
         const modelBtn = document.getElementById('btn-model-menu');
@@ -374,7 +366,7 @@ export async function switchAppMode(targetMode) {
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
         if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
         
-        await initRadarMode(map);
+        // (Next files will attach the radarLoader and radarShader here!)
         hideToast();
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
