@@ -316,8 +316,69 @@ export async function preloadRemainingChunks(currentGen) {
     }
 }
 
-// 🌟 Initialize Splash Transition & Viewer UI immediately
-initHubTransition();
+/**
+ * 🌟 LOAD INITIAL MODEL FORECAST DATA
+ */
+async function loadInitialModelData() {
+    const thisGen = stateManager.loadGeneration;
+    try {
+        await fetchManifest(null, 'ecmwf', '2t');
+        initLayer();
+        syncModelRunDropdown();
+
+        if (stateManager.manifest && stateManager.manifest.chunks) {
+            const bitmap0 = await loadChunkBitmap(0, thisGen);
+            if (customShaderLayer && thisGen === stateManager.loadGeneration) {
+                customShaderLayer.preloadChunkTexture(0, bitmap0);
+            }
+
+            syncTimelineWithManifest();
+            await renderFrame(0);
+            hideToast();
+
+            preloadRemainingChunks(thisGen);
+            preloadAllContours(thisGen);
+        }
+    } catch (err) {
+        if (err.message !== "Load cancelled") {
+            showToast('❌ ' + err.message);
+        }
+    }
+}
+
+/**
+ * 🌟 DYNAMIC APP MODE SWITCHER (Models vs Radar vs Satellite)
+ */
+export async function switchAppMode(targetMode) {
+    stateManager.activeMode = targetMode;
+    console.log(`[App] Switching app mode to: ${targetMode}`);
+
+    // 1. Completely wipe previous model memory and weather layers
+    purgeAllAppMemory(customShaderLayer);
+    if (map.getLayer('weather-gpu-shader')) {
+        map.removeLayer('weather-gpu-shader');
+    }
+
+    if (targetMode === 'radar') {
+        showToast("Loading Real-Time Radar...");
+        const modelBtn = document.getElementById('btn-model-menu');
+        const paramBtn = document.getElementById('btn-param-menu');
+        if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
+        if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
+        
+        // (Next files will attach the radarLoader and radarShader here!)
+        hideToast();
+    } else if (targetMode === 'modelViewer') {
+        showToast("Loading Global Models...");
+        await loadInitialModelData();
+        hideToast();
+    }
+}
+
+// 🌟 Initialize Splash Transition with Mode Handler
+initHubTransition((selectedMode) => {
+    switchAppMode(selectedMode);
+});
 
 initViewerUI(
     (stepIndex) => {
@@ -335,39 +396,8 @@ map.on('error', (e) => {
 
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
-
-    // 🌟 1. Fetch initial parameter manifest (instant)
-    try {
-        await fetchManifest(null, 'ecmwf', '2t');
-    } catch (err) {
-        showToast('❌ ' + err.message);
-    }
-
-    // 🌟 2. Initialize active 2D layers immediately
-    try { initLayer(); } catch (err) {}
     try { initVectorContours(map); } catch (err) {}
     try { initCityOverlay(map); } catch (err) {}
-    try { syncModelRunDropdown(); } catch (err) {}
-
-    // 🌟 3. Load only Chunk 0 and render F000 in <300ms
-    if (stateManager.manifest && stateManager.manifest.chunks) {
-        try {
-            const bitmap0 = await loadChunkBitmap(0, stateManager.loadGeneration);
-            if (customShaderLayer) {
-                customShaderLayer.preloadChunkTexture(0, bitmap0);
-            }
-
-            syncTimelineWithManifest();
-            await renderFrame(0);
-            hideToast();
-
-            // Background preloading begins after first frame is already on screen
-            preloadRemainingChunks(stateManager.loadGeneration);
-            preloadAllContours(stateManager.loadGeneration);
-        } catch (err) {
-            showToast('❌ ' + err.message);
-        }
-    }
 });
 
 // 🌟 Unified Bilinear Inspection on Click
