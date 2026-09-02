@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "name": "Toner",
+  "name": "Toner Light",
   "metadata": {
     "mapbox:autocomposite": false,
     "mapbox:type": "template",
@@ -30,6 +30,13 @@
       "id": "background",
       "type": "background",
       "paint": {"background-color": "rgba(253, 229, 207, 1)"}
+    },
+    {
+      "id": "WaterColor",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "water",
+      "paint": {"fill-color": "#E7F1F4"}
     },
     {
       "id": "landcover_grass_fill",
@@ -461,7 +468,7 @@
         "line-opacity": 1,
         "line-width": {
           "base": 1.3,
-          "stops": [[5, 1], [6, 1.2], [7, 1.6], [14, 5]]
+          "stops": [[5, 1.6], [7, 2.0], [14, 5]]
         }
       }
     },
@@ -504,7 +511,7 @@
       },
       "paint": {
         "line-blur": 0,
-        "line-color": "rgba(0, 0, 0, 1)",
+        "line-color": "#000000",
         "line-opacity": 1,
         "line-width": {"base": 1.1, "stops": [[2, 1], [22, 20]]}
       }
