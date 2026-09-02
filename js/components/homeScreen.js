@@ -1,7 +1,8 @@
+// js/components/homeScreen.js
 const startTime = performance.now();
 
 // Renamed this to reflect its new job
-export function initHubTransition() {
+export function initHubTransition(onSelectMode = null) {
     const splash = document.getElementById('splash-screen');
     const grid = document.getElementById('home-menu-grid');
     const splashText = document.getElementById('splash-text');
@@ -40,7 +41,10 @@ export function initHubTransition() {
                     splash.remove();
                     console.log(`Entering view: ${targetView}. Map is interactive.`);
                     
-                    // Note: Later, you'll tell stateManager.js to load the satellite/radar here!
+                    // 🌟 Notify app to switch modes and unload previous weather data
+                    if (typeof onSelectMode === 'function') {
+                        onSelectMode(targetView);
+                    }
                 }, 600);
             }, 700); 
         });
