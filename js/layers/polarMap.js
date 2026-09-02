@@ -1050,7 +1050,7 @@ export function initPolarMap() {
             u_paletteTexture: { value: paletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
-            u_opacity: { value: 0.85 },
+            u_opacity: { value: 1 },
             u_centralLon: { value: NORTH_CENTRAL_LON },
             u_poleSign: { value: 1.0 },
             u_texResolution: { value: new THREE.Vector2(2880.0, 1442.0) }
