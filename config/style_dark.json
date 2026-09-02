@@ -17,6 +17,10 @@
     "openmaptiles": {
       "type": "vector",
       "url": "https://tiles.openfreemap.org/planet"
+    },
+    "us_counties": {
+      "type": "geojson",
+      "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson"
     }
   },
   "sprite": "https://openmaptiles.github.io/maptiler-toner-gl-style/sprite",
@@ -415,6 +419,37 @@
           "base": 1.3,
           "stops": [[5, 2], [6, 2], [7, 2], [14, 5]]
         }
+      }
+    },
+    {
+      "id": "boundary_county",
+      "type": "line",
+      "source": "us_counties",
+      "minzoom": 3.8,
+      "maxzoom": 24,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "visible"
+      },
+      "paint": {
+        "line-color": "#ffffff",
+        "line-opacity": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          3.8, 0.35,
+          6, 0.65,
+          9, 0.8
+        ],
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          3.8, 0.35,
+          6, 0.75,
+          10, 1.5
+        ]
       }
     },
     {
