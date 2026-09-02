@@ -2,7 +2,7 @@
 import { 
     radarState, 
     buildRadarTimeline, 
-    loadRadarBitmap, 
+    loadRadarImage, 
     preloadAllRadarFrames, 
     purgeRadarMemory 
 } from '../core/radarLoader.js';
@@ -16,7 +16,7 @@ import {
 let radarShaderLayer = null;
 let radarPlayInterval = null;
 let isRadarPlaying = false;
-const RADAR_PLAYBACK_SPEED_MS = 160; // 160ms per frame = smooth 2-hour loop
+const RADAR_PLAYBACK_SPEED_MS = 160;
 
 /**
  * 🌟 1. Launch Radar Mode & Initialize Map Layers
@@ -57,8 +57,8 @@ export async function initRadarMode(mapInstance) {
 
     // 3. Load and display LIVE scan immediately
     try {
-        const liveBitmap = await loadRadarBitmap(liveIndex, radarState.loadGeneration);
-        radarShaderLayer.preloadRadarTexture(liveIndex, liveBitmap);
+        const liveImg = await loadRadarImage(liveIndex, radarState.loadGeneration);
+        radarShaderLayer.preloadRadarTexture(liveIndex, liveImg);
         syncRadarTimelineUI();
         setRadarFrame(liveIndex);
     } catch (err) {
@@ -66,9 +66,9 @@ export async function initRadarMode(mapInstance) {
     }
 
     // 4. Preload remaining 23 historical frames in background
-    preloadAllRadarFrames((idx, bitmap) => {
+    preloadAllRadarFrames((idx, img) => {
         if (radarShaderLayer) {
-            radarShaderLayer.preloadRadarTexture(idx, bitmap);
+            radarShaderLayer.preloadRadarTexture(idx, img);
         }
         updateRadarSliderTrack();
     });
@@ -85,12 +85,11 @@ export async function setRadarFrame(frameIndex) {
     radarState.activeFrameIndex = frameIndex;
     const frameInfo = radarState.frames[frameIndex];
 
-    // If bitmap not in GPU texture yet, load it on demand
     if (!radarShaderLayer?.frameTextures[frameIndex]) {
         try {
-            const bitmap = await loadRadarBitmap(frameIndex, radarState.loadGeneration);
+            const img = await loadRadarImage(frameIndex, radarState.loadGeneration);
             if (radarShaderLayer) {
-                radarShaderLayer.preloadRadarTexture(frameIndex, bitmap);
+                radarShaderLayer.preloadRadarTexture(frameIndex, img);
             }
         } catch (e) {
             return;
@@ -192,7 +191,7 @@ function updateRadarSliderTrack() {
     if (!slider || !radarState.frames || radarState.frames.length === 0) return;
 
     const total = radarState.frames.length - 1;
-    const loadedCount = Object.keys(radarState.loadedBitmaps).length;
+    const loadedCount = Object.keys(radarState.loadedImages).length;
     const percent = total > 0 ? (loadedCount / total) * 100 : 0;
 
     slider.style.background = `linear-gradient(to right, 
