@@ -49,71 +49,7 @@ export function buildRadarTimeline(numFrames = TOTAL_RADAR_FRAMES) {
 }
 
 /**
- * 🌟 2. Fast Raw dBZ Decoder
- * Converts IEM N0Q composite colors back into true 0..255 physical dBZ scalar values
- */
-async function decodeIemRadarToScalar(blob) {
-    const imgBitmap = await createImageBitmap(blob);
-    const w = imgBitmap.width;
-    const h = imgBitmap.height;
-
-    const offscreen = document.createElement('canvas');
-    offscreen.width = w;
-    offscreen.height = h;
-    const ctx = offscreen.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(imgBitmap, 0, 0);
-    imgBitmap.close();
-
-    const imgData = ctx.getImageData(0, 0, w, h);
-    const rgba = imgData.data;
-    const totalPixels = w * h;
-
-    const scalarBuffer = new ArrayBuffer(totalPixels * 4);
-    const scalar32 = new Uint32Array(scalarBuffer);
-
-    for (let i = 0; i < totalPixels; i++) {
-        const idx = i * 4;
-        const a = rgba[idx + 3];
-
-        if (a < 10) {
-            scalar32[i] = 0x00000000; // Transparent
-            continue;
-        }
-
-        const r = rgba[idx];
-        const g = rgba[idx + 1];
-        const b = rgba[idx + 2];
-
-        // Approximate physical dBZ scalar from NWS/IEM RGB palette (-30 dBZ to +75 dBZ -> byte 0 to 255)
-        let dbzByte = 0;
-
-        if (r > 200 && g > 200 && b > 200) {
-            dbzByte = 240; // White (75+ dBZ)
-        } else if (r > 150 && b > 150 && g < 100) {
-            dbzByte = 210 + Math.round((r / 255) * 25); // Purple / Magenta (60-70 dBZ)
-        } else if (r > 180 && g < 80 && b < 80) {
-            dbzByte = 175 + Math.round((r / 255) * 30); // Red (50-60 dBZ)
-        } else if (r > 200 && g > 100 && b < 50) {
-            dbzByte = 145 + Math.round((r / 255) * 25); // Orange (40-50 dBZ)
-        } else if (r > 200 && g > 200 && b < 50) {
-            dbzByte = 125 + Math.round((g / 255) * 15); // Yellow (35-40 dBZ)
-        } else if (g > 100 && r < 100 && b < 100) {
-            dbzByte = 75 + Math.round((g / 255) * 45);  // Green (20-35 dBZ)
-        } else if (b > 100 && r < 120) {
-            dbzByte = 35 + Math.round((b / 255) * 35);  // Blue / Teal / Cyan (5-20 dBZ)
-        } else {
-            dbzByte = Math.max(r, Math.max(g, b));
-        }
-
-        scalar32[i] = 0xFF000000 | (dbzByte << 16) | (dbzByte << 8) | dbzByte;
-    }
-
-    const processedData = new ImageData(new Uint8ClampedArray(scalarBuffer), w, h);
-    return await createImageBitmap(processedData);
-}
-
-/**
- * 🌟 3. Load & Decode Radar Frame
+ * 🌟 2. Fast Native GPU-Ready Bitmap Loader (<15ms)
  */
 export async function loadRadarBitmap(frameIndex, currentGen = null) {
     if (currentGen !== null && currentGen !== radarState.loadGeneration) {
@@ -136,19 +72,19 @@ export async function loadRadarBitmap(frameIndex, currentGen = null) {
     }
 
     const blob = await resp.blob();
-    const scalarBitmap = await decodeIemRadarToScalar(blob);
+    const bitmap = await createImageBitmap(blob);
 
     if (currentGen !== null && currentGen !== radarState.loadGeneration) {
-        scalarBitmap.close();
+        bitmap.close();
         throw new Error("Radar load cancelled");
     }
 
-    radarState.loadedBitmaps[frameIndex] = scalarBitmap;
-    return scalarBitmap;
+    radarState.loadedBitmaps[frameIndex] = bitmap;
+    return bitmap;
 }
 
 /**
- * 🌟 4. Background Preloader (Past 2 Hours @ 60 FPS)
+ * 🌟 3. Background Preloader (Past 2 Hours @ 60 FPS)
  */
 export async function preloadAllRadarFrames(onFrameLoaded = null) {
     const thisGen = radarState.loadGeneration;
@@ -176,7 +112,7 @@ export async function preloadAllRadarFrames(onFrameLoaded = null) {
 }
 
 /**
- * 🌟 5. Memory Purge
+ * 🌟 4. Memory Purge
  */
 export function purgeRadarMemory(shaderRef = null) {
     radarState.loadGeneration++;
