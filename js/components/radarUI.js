@@ -1,82 +1,105 @@
 // js/components/radarUI.js
 import { 
     radarState, 
-    fetchLiveRadarTimeline, 
-    getRadarTileUrl, 
+    buildRadarTimeline, 
+    loadRadarBitmap, 
+    preloadAllRadarFrames, 
     purgeRadarMemory 
 } from '../core/radarLoader.js';
+import { createRadarShaderLayer } from '../shaders/radarShader.js';
+import { 
+    WXTOOLS_PALETTE_256, 
+    RADARSCOPE_PRO_PALETTE_256, 
+    NWS_CLASSIC_PALETTE_256 
+} from '../config/radarPalettes.js';
 
+let radarShaderLayer = null;
 let radarPlayInterval = null;
 let isRadarPlaying = false;
-let currentMap = null;
-const RADAR_PLAYBACK_SPEED_MS = 500; // 500ms per frame for a smooth loop
+const RADAR_PLAYBACK_SPEED_MS = 160; // 160ms per frame = smooth 2-hour loop
 
 /**
- * 🌟 1. Launch Live Radar on MapLibre
+ * 🌟 1. Launch Radar Mode & Initialize Map Layers
  */
 export async function initRadarMode(mapInstance) {
     if (!mapInstance) return;
-    currentMap = mapInstance;
 
-    // 1. Fetch live radar frames from open API
-    const frames = await fetchLiveRadarTimeline();
-    const liveIndex = radarState.activeFrameIndex;
+    // 1. Build 2-hour live timeline (24 frames)
+    const frames = buildRadarTimeline(24);
+    const liveIndex = frames.length - 1;
 
-    // 2. Remove any old radar layers
-    cleanupRadarLayers();
+    // 2. Create and attach WebGL Radar Shader Layer
+    if (mapInstance.getLayer('radar-gpu-shader')) {
+        mapInstance.removeLayer('radar-gpu-shader');
+    }
+    if (radarShaderLayer) {
+        radarShaderLayer.clearTextures();
+        radarShaderLayer = null;
+    }
 
-    // 3. Find first border/label layer to place radar underneath
-    const firstOverlayId = getFirstOverlayId();
+    radarShaderLayer = createRadarShaderLayer(mapInstance);
 
-    // 4. Add all radar frame tile sources to MapLibre for instant 0ms switching
-    frames.forEach((frame) => {
-        const sourceId = `radar-src-${frame.index}`;
-        const layerId = `radar-lyr-${frame.index}`;
-
-        if (!mapInstance.getSource(sourceId)) {
-            mapInstance.addSource(sourceId, {
-                type: 'raster',
-                tiles: [getRadarTileUrl(frame.index, 4)],
-                tileSize: 512
-            });
-
-            mapInstance.addLayer({
-                id: layerId,
-                type: 'raster',
-                source: sourceId,
-                paint: {
-                    'raster-opacity': (frame.index === liveIndex) ? 0.85 : 0,
-                    'raster-fade-duration': 150
-                }
-            }, firstOverlayId);
+    // Place radar under boundary lines, county lines, and text labels
+    let firstOverlayId = null;
+    const layers = mapInstance.getStyle().layers || [];
+    for (const layer of layers) {
+        const id = layer.id.toLowerCase();
+        const type = layer.type;
+        if (type === 'symbol' || type === 'line' || id.includes('admin') || id.includes('boundary') || id.includes('border') || id.includes('road')) {
+            firstOverlayId = layer.id;
+            break;
         }
+    }
+
+    if (!mapInstance.getLayer('radar-gpu-shader')) {
+        mapInstance.addLayer(radarShaderLayer, firstOverlayId);
+    }
+
+    // 3. Load and display LIVE scan immediately
+    try {
+        const liveBitmap = await loadRadarBitmap(liveIndex, radarState.loadGeneration);
+        radarShaderLayer.preloadRadarTexture(liveIndex, liveBitmap);
+        syncRadarTimelineUI();
+        setRadarFrame(liveIndex);
+    } catch (err) {
+        console.warn("Could not load initial live radar frame:", err);
+    }
+
+    // 4. Preload remaining 23 historical frames in background
+    preloadAllRadarFrames((idx, bitmap) => {
+        if (radarShaderLayer) {
+            radarShaderLayer.preloadRadarTexture(idx, bitmap);
+        }
+        updateRadarSliderTrack();
     });
 
-    syncRadarTimelineUI();
-    setRadarFrame(liveIndex);
     bindRadarControls();
 }
 
 /**
- * 🌟 2. Set Active Radar Frame (Instant 0ms Layer Opacity Toggle)
+ * 🌟 2. Set Active Radar Frame & Update UI
  */
-export function setRadarFrame(frameIndex) {
-    if (!currentMap || !radarState.frames || frameIndex < 0 || frameIndex >= radarState.frames.length) return;
+export async function setRadarFrame(frameIndex) {
+    if (!radarState.frames || frameIndex < 0 || frameIndex >= radarState.frames.length) return;
 
     radarState.activeFrameIndex = frameIndex;
     const frameInfo = radarState.frames[frameIndex];
 
-    // Show active frame layer, hide all other frames
-    radarState.frames.forEach((f) => {
-        const layerId = `radar-lyr-${f.index}`;
-        if (currentMap.getLayer(layerId)) {
-            currentMap.setPaintProperty(
-                layerId, 
-                'raster-opacity', 
-                (f.index === frameIndex) ? 0.85 : 0
-            );
+    // If bitmap not in GPU texture yet, load it on demand
+    if (!radarShaderLayer?.frameTextures[frameIndex]) {
+        try {
+            const bitmap = await loadRadarBitmap(frameIndex, radarState.loadGeneration);
+            if (radarShaderLayer) {
+                radarShaderLayer.preloadRadarTexture(frameIndex, bitmap);
+            }
+        } catch (e) {
+            return;
         }
-    });
+    }
+
+    if (radarShaderLayer) {
+        radarShaderLayer.updateFrame(frameIndex);
+    }
 
     // Update Slider Value
     const slider = document.getElementById('timeline-slider');
@@ -104,7 +127,7 @@ export function setRadarFrame(frameIndex) {
 }
 
 /**
- * 🌟 3. Playback Controller
+ * 🌟 3. Timeline Playback Controller (Looping)
  */
 export function toggleRadarPlayback() {
     if (isRadarPlaying) pauseRadarPlayback();
@@ -147,7 +170,7 @@ function updateRadarPlayPauseUI() {
 }
 
 /**
- * 🌟 4. UI Bindings
+ * 🌟 4. Sync Slider and Control Buttons
  */
 function syncRadarTimelineUI() {
     const slider = document.getElementById('timeline-slider');
@@ -159,7 +182,7 @@ function syncRadarTimelineUI() {
     slider.value = radarState.activeFrameIndex.toString();
 
     const runLabel = document.getElementById('current-run-label');
-    if (runLabel) runLabel.textContent = 'Live Radar Loop';
+    if (runLabel) runLabel.textContent = 'Live Loop (2h)';
 
     updateRadarSliderTrack();
 }
@@ -169,7 +192,8 @@ function updateRadarSliderTrack() {
     if (!slider || !radarState.frames || radarState.frames.length === 0) return;
 
     const total = radarState.frames.length - 1;
-    const percent = total > 0 ? (radarState.activeFrameIndex / total) * 100 : 0;
+    const loadedCount = Object.keys(radarState.loadedBitmaps).length;
+    const percent = total > 0 ? (loadedCount / total) * 100 : 0;
 
     slider.style.background = `linear-gradient(to right, 
         rgba(56, 189, 248, 0.6) 0%, 
@@ -212,43 +236,31 @@ function bindRadarControls() {
     }
 }
 
-function getFirstOverlayId() {
-    if (!currentMap) return null;
-    let firstOverlayId = null;
-    const layers = currentMap.getStyle().layers || [];
-    for (const layer of layers) {
-        const id = layer.id.toLowerCase();
-        const type = layer.type;
-        if (type === 'symbol' || (type === 'line' && id !== 'waterway') || id.includes('admin') || id.includes('boundary') || id.includes('border') || id.includes('road')) {
-            firstOverlayId = layer.id;
-            break;
-        }
-    }
-    return firstOverlayId;
-}
+/**
+ * 🌟 5. Dynamic Colormap Palette Switcher
+ */
+export function setRadarPalette(presetName = 'wxtools') {
+    if (!radarShaderLayer) return;
 
-function cleanupRadarLayers() {
-    if (!currentMap) return;
-    const layers = currentMap.getStyle()?.layers || [];
-    layers.forEach(l => {
-        if (l.id.startsWith('radar-lyr-')) {
-            try { currentMap.removeLayer(l.id); } catch(e) {}
-        }
-    });
-    for (let i = 0; i < 40; i++) {
-        const sourceId = `radar-src-${i}`;
-        if (currentMap.getSource(sourceId)) {
-            try { currentMap.removeSource(sourceId); } catch(e) {}
-        }
+    if (presetName === 'nws') {
+        radarShaderLayer.updatePalette(NWS_CLASSIC_PALETTE_256);
+    } else if (presetName === 'radarscope') {
+        radarShaderLayer.updatePalette(RADARSCOPE_PRO_PALETTE_256);
+    } else {
+        radarShaderLayer.updatePalette(WXTOOLS_PALETTE_256);
     }
 }
 
 /**
- * 🌟 5. Teardown
+ * 🌟 6. Teardown Radar Mode
  */
 export function destroyRadarMode(mapInstance) {
     pauseRadarPlayback();
-    cleanupRadarLayers();
-    purgeRadarMemory();
-    currentMap = null;
+
+    if (mapInstance && mapInstance.getLayer('radar-gpu-shader')) {
+        try { mapInstance.removeLayer('radar-gpu-shader'); } catch (e) {}
+    }
+
+    purgeRadarMemory(radarShaderLayer);
+    radarShaderLayer = null;
 }
