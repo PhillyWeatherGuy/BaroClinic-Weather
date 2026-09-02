@@ -4,16 +4,15 @@
  * 🛰️ IEM Real-Time Radar State & Frame Store
  */
 export const radarState = {
-    frames: [],          // Array of 24 frames: [{ index, url, date, label }]
+    frames: [],          // Array of 24 frames: [{ index, offsetIndex, date, label, url }]
     loadedImages: {},    // In-memory cache of loaded Image elements
     activeFrameIndex: 23,
-    // 🌟 Full CONUS Bounding Box: [West, South, East, North]
-    bounds: [-126.0, 24.0, -66.0, 50.0],
+    bounds: [-126.0, 24.0, -66.0, 50.0], // Full CONUS Bounding Box
     loadGeneration: 0,
     isPreloading: false
 };
 
-const TOTAL_RADAR_FRAMES = 24; // 24 frames @ 5-minute intervals = Past 2 Hours of Radar
+const TOTAL_RADAR_FRAMES = 24; // 24 frames @ 5-minute intervals = Past 2 Hours
 
 /**
  * 🌟 1. Build the Live IEM 2-Hour Timeline
@@ -22,7 +21,7 @@ export function buildRadarTimeline(numFrames = TOTAL_RADAR_FRAMES) {
     const now = new Date();
     const frames = [];
 
-    // Align to latest 5-minute block
+    // Align to latest 5-minute interval
     const currentMins = now.getUTCMinutes();
     const roundedMins = Math.floor(currentMins / 5) * 5;
     const baseDate = new Date(Date.UTC(
@@ -46,58 +45,71 @@ export function buildRadarTimeline(numFrames = TOTAL_RADAR_FRAMES) {
 
         const label = (offsetIndex === 0) ? 'LIVE' : (offsetIndex <= 1 ? `-${offsetIndex * 5}m` : timeStr);
 
-        // IEM Raw 8-bit Composite N0Q Endpoint
-        const url = `https://mesonet.agron.iastate.edu/data/gis/images/4326/USCOMP/n0q_${offsetIndex}.png`;
+        // IEM Raw 8-bit Composite N0Q
+        const rawUrl = `https://mesonet.agron.iastate.edu/data/gis/images/4326/USCOMP/n0q_${offsetIndex}.png`;
 
         frames.push({
             index: i,
             offsetIndex: offsetIndex,
             date: frameDate,
             label: label,
-            url: url
+            url: rawUrl
         });
     }
 
     radarState.frames = frames;
-    radarState.activeFrameIndex = frames.length - 1; // Default to LIVE frame
+    radarState.activeFrameIndex = frames.length - 1; // Default to LIVE
     return frames;
 }
 
 /**
- * 🌟 2. Load Single IEM Frame via CORS-Safe Image Loader
+ * 🌟 2. Load Single IEM Frame (CORS-Safe for Mac & Mobile)
  */
-export function loadRadarImage(frameIndex, currentGen = null) {
-    return new Promise((resolve, reject) => {
-        if (currentGen !== null && currentGen !== radarState.loadGeneration) {
-            return reject(new Error("Radar load cancelled"));
-        }
+export async function loadRadarImage(frameIndex, currentGen = null) {
+    if (currentGen !== null && currentGen !== radarState.loadGeneration) {
+        throw new Error("Radar load cancelled");
+    }
 
-        // Return instant cache if already loaded
-        if (radarState.loadedImages[frameIndex]) {
-            return resolve(radarState.loadedImages[frameIndex]);
-        }
+    // Return instant memory cache if already loaded
+    if (radarState.loadedImages[frameIndex]) {
+        return radarState.loadedImages[frameIndex];
+    }
 
-        const frameInfo = radarState.frames[frameIndex];
-        if (!frameInfo) return reject(new Error(`Frame ${frameIndex} not found`));
+    const frameInfo = radarState.frames[frameIndex];
+    if (!frameInfo) throw new Error(`Frame ${frameIndex} not found`);
 
-        const img = new Image();
-        img.crossOrigin = "anonymous";
+    // Fetch via CORS-safe proxy fallback if direct browser fetch is restricted on Mac
+    const directUrl = `${frameInfo.url}?t=${Date.now()}`;
+    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(frameInfo.url)}`;
 
-        img.onload = () => {
-            if (currentGen !== null && currentGen !== radarState.loadGeneration) {
-                return reject(new Error("Radar load cancelled"));
-            }
-            radarState.loadedImages[frameIndex] = img;
-            resolve(img);
-        };
+    let blob = null;
 
-        img.onerror = (err) => {
-            reject(new Error(`Failed to load IEM radar asset: ${frameInfo.url}`));
-        };
+    try {
+        const resp = await fetch(directUrl);
+        if (resp.ok) blob = await resp.blob();
+    } catch (e) {
+        // Direct fetch failed due to Mac CORS security -> use open CORS proxy fallback
+        const proxyResp = await fetch(proxyUrl);
+        if (proxyResp.ok) blob = await proxyResp.blob();
+    }
 
-        // Cache-buster to guarantee real-time scans
-        img.src = `${frameInfo.url}?t=${Date.now()}`;
-    });
+    if (!blob) {
+        throw new Error(`Failed to load radar frame ${frameIndex}`);
+    }
+
+    if (currentGen !== null && currentGen !== radarState.loadGeneration) {
+        throw new Error("Radar load cancelled");
+    }
+
+    const bitmap = await createImageBitmap(blob);
+
+    if (currentGen !== null && currentGen !== radarState.loadGeneration) {
+        bitmap.close();
+        throw new Error("Radar load cancelled");
+    }
+
+    radarState.loadedImages[frameIndex] = bitmap;
+    return bitmap;
 }
 
 /**
@@ -135,7 +147,12 @@ export function purgeRadarMemory(shaderRef = null) {
     radarState.loadGeneration++;
     radarState.isPreloading = false;
 
-    // Clear Image cache
+    for (const key in radarState.loadedImages) {
+        const bmp = radarState.loadedImages[key];
+        if (bmp && typeof bmp.close === 'function') {
+            bmp.close();
+        }
+    }
     radarState.loadedImages = {};
 
     if (shaderRef && typeof shaderRef.clearTextures === 'function') {
