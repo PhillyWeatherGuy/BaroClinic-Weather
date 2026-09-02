@@ -39,7 +39,7 @@ const fsRadar = `
         // 4. Sample raw input texel
         vec4 src = texture2D(u_dataTexture, radarUV);
 
-        // 5. Discard transparent / black pixels (clear air)
+        // 5. Discard transparent / clear air pixels
         if (src.a < 0.05 || (src.r < 0.02 && src.g < 0.02 && src.b < 0.02)) {
             discard;
         }
@@ -115,7 +115,8 @@ export function createRadarShaderLayer(mapInstance) {
             gl.compileShader(vs);
 
             const fs = gl.createShader(gl.FRAGMENT_SHADER);
-            gl.shaderSource(fs, fsSource || fsRadar);
+            // 🌟 Fixed: compile fsRadar directly
+            gl.shaderSource(fs, fsRadar);
             gl.compileShader(fs);
 
             this.program = gl.createProgram();
