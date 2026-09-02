@@ -9,6 +9,7 @@ let cityMarkers = {};
 let isLoaded = false;
 let mapInstance = null;
 let listenersAttached = false;
+let isUpdating = false;
 
 const style = document.createElement('style');
 style.textContent = `
@@ -47,7 +48,6 @@ document.head.appendChild(style);
 
 /**
  * 🌟 100% DYNAMIC PIXEL DECODER
- * Dynamically converts raw 8-bit bytes to physical values using models.json or manifest scaling
  */
 export function decodePixelValue(rawVal, manifest) {
     if (rawVal === undefined) return 0.0;
@@ -55,10 +55,8 @@ export function decodePixelValue(rawVal, manifest) {
     const val = Number(rawVal);
     if (isNaN(val)) return 0.0;
 
-    // 🌟 Read scaling dynamically from models.json or the manifest
     const scaling = manifest?.scaling || stateManager.paramConfig?.scaling || stateManager.manifest?.scaling;
 
-    // Piecewise Breakpoint Interpolation (PWAT, TP, PVA)
     if (scaling && scaling.mode === 'piecewise' && scaling.val_points && scaling.byte_points) {
         const vp = scaling.val_points.map(Number);
         const bp = scaling.byte_points.map(Number);
@@ -73,7 +71,6 @@ export function decodePixelValue(rawVal, manifest) {
         return vp[vp.length - 1];
     }
 
-    // Linear Scaling (2m Temperature, Wind, Pressure)
     const minVal = Number(scaling?.min_val ?? manifest?.min_val ?? manifest?.temp_min_k ?? 0.0);
     const maxVal = Number(scaling?.max_val ?? manifest?.max_val ?? manifest?.temp_max_k ?? 255.0);
     return minVal + (val / 255.0) * (maxVal - minVal);
@@ -148,12 +145,10 @@ export function formatParameterValue(decodedVal, manifest) {
 
     const unit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim();
 
-    // 1. Inches (Precipitation, Precipitable Water, Snow)
     if (unit === 'in' || unit.toLowerCase().includes('inch')) {
         return `${decodedVal.toFixed(2)}"`;
     }
 
-    // 2. Degrees Temperature (°F / °C)
     if (unit.includes('°') || unit.toLowerCase().includes('f') || unit.toLowerCase().includes('c')) {
         let tempVal = decodedVal;
         if (decodedVal > 150 && (unit.includes('F') || unit.includes('f'))) {
@@ -164,12 +159,10 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(tempVal)}°`;
     }
 
-    // 3. Percentage (%)
     if (unit === '%') {
         return `${Math.round(decodedVal)}%`;
     }
 
-    // 4. Any other unit (kts, mph, hPa, mb, J/kg, 10⁻⁵ s⁻¹)
     if (unit.length > 0) {
         return `${Math.round(decodedVal)} ${unit}`;
     }
@@ -216,17 +209,21 @@ export async function initCityOverlay(map) {
     hideBasemapCityLabels(map);
 
     if (!listenersAttached) {
-        map.on('move', updateCityPositions);
-        map.on('zoom', updateCityPositions);
+        let timer = null;
+        const throttledUpdate = () => {
+            if (timer) cancelAnimationFrame(timer);
+            timer = requestAnimationFrame(() => {
+                updateCityPositions();
+            });
+        };
+        map.on('move', throttledUpdate);
+        map.on('zoom', throttledUpdate);
         listenersAttached = true;
     }
 
     if (allGlobalCities.length > 0) {
         isLoaded = true;
         updateCityPositions();
-        if (window.lastActiveFrameState && window.lastManifest) {
-            updateCityCallouts(mapInstance, window.lastActiveFrameState, window.lastManifest);
-        }
         return;
     }
 
@@ -256,19 +253,14 @@ export async function initCityOverlay(map) {
 
         isLoaded = true;
         updateCityPositions();
-
-        if (window.lastActiveFrameState && window.lastManifest) {
-            updateCityCallouts(mapInstance, window.lastActiveFrameState, window.lastManifest);
-        }
     } catch (err) {
         console.error("Failed to load global cities dataset:", err);
     }
 }
 
 export function updateCityPositions() {
-    if (!mapInstance || !isLoaded) return;
-
-    hideBasemapCityLabels(mapInstance);
+    if (!mapInstance || !isLoaded || isUpdating) return;
+    isUpdating = true;
 
     const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || stateManager.manifest?.suppress_city_overlay;
     if (isSuppressed) {
@@ -276,6 +268,7 @@ export function updateCityPositions() {
             cityMarkers[name].getElement().style.display = 'none';
         }
         activeCities = [];
+        isUpdating = false;
         return;
     }
 
@@ -284,8 +277,8 @@ export function updateCityPositions() {
 
     const west = bounds.getWest();
     const east = bounds.getEast();
-    const south = bounds.getSouth();
-    const north = bounds.getNorth();
+    const south = Math.max(-85.0, bounds.getSouth());
+    const north = Math.min(85.0, bounds.getNorth());
 
     let visible = allGlobalCities.filter(c => {
         if (zoom < c.minZoom) return false;
@@ -343,29 +336,14 @@ export function updateCityPositions() {
     }
 
     if (window.lastActiveFrameState && window.lastManifest) {
-        updateCityCallouts(mapInstance, window.lastActiveFrameState, window.lastManifest);
+        renderCityValues(window.lastActiveFrameState, window.lastManifest);
     }
+
+    isUpdating = false;
 }
 
-export function updateCityCallouts(map, activeFrameState, manifest) {
-    if (!activeFrameState || !isLoaded) return;
-
-    hideBasemapCityLabels(map);
-
-    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || manifest?.suppress_city_overlay;
-    if (isSuppressed) {
-        for (const name in cityMarkers) {
-            cityMarkers[name].getElement().style.display = 'none';
-        }
-        return;
-    }
-
-    window.lastActiveFrameState = activeFrameState;
-    window.lastManifest = manifest || stateManager.manifest;
-
-    if (activeCities.length === 0) {
-        updateCityPositions();
-    }
+function renderCityValues(activeFrameState, manifest) {
+    if (!activeFrameState) return;
 
     const activeUnit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim().toLowerCase();
     const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch');
@@ -379,10 +357,26 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
         const formattedText = formatParameterValue(decodedVal, manifest);
 
         const valEl = marker.getElement().querySelector('.city-callout-val');
-        marker.getElement().style.display = 'flex';
         if (valEl) {
             valEl.className = isPrecipType ? 'city-callout-val precip-val' : 'city-callout-val';
             valEl.textContent = formattedText;
         }
     }
+}
+
+export function updateCityCallouts(map, activeFrameState, manifest) {
+    if (!isLoaded) return;
+
+    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || manifest?.suppress_city_overlay;
+    if (isSuppressed) {
+        for (const name in cityMarkers) {
+            cityMarkers[name].getElement().style.display = 'none';
+        }
+        return;
+    }
+
+    window.lastActiveFrameState = activeFrameState;
+    window.lastManifest = manifest || stateManager.manifest;
+
+    renderCityValues(activeFrameState, manifest);
 }
