@@ -19,55 +19,12 @@ const fsRadar = `
     uniform float u_opacity;
     uniform vec2 u_texResolution;
 
-    // 🌟 C^2 Continuous Cubic B-Spline Filter
-    vec4 cubicBSpline(float f) {
-        float f2 = f * f;
-        float f3 = f2 * f;
-        return vec4(
-            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
-            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
-            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
-            f3 / 6.0
-        );
-    }
-
-    // 🌟 2D Cubic Spline Evaluation on Radar Grid
-    float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
-        vec2 pos = uv * texRes - 0.5;
-        vec2 f = fract(pos);
-        vec2 i = floor(pos);
-
-        vec4 wx = cubicBSpline(f.x);
-        vec4 wy = cubicBSpline(f.y);
-
-        vec2 invTex = 1.0 / texRes;
-        float x0 = (i.x - 0.5) * invTex.x;
-        float x1 = (i.x + 0.5) * invTex.x;
-        float x2 = (i.x + 1.5) * invTex.x;
-        float x3 = (i.x + 2.5) * invTex.x;
-
-        float total = 0.0;
-        for (int y = -1; y <= 2; y++) {
-            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
-            
-            float rowVal = wx.x * texture2D(tex, vec2(x0, yCoord)).r +
-                           wx.y * texture2D(tex, vec2(x1, yCoord)).r +
-                           wx.z * texture2D(tex, vec2(x2, yCoord)).r +
-                           wx.w * texture2D(tex, vec2(x3, yCoord)).r;
-
-            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
-            total += w_y * rowVal;
-        }
-
-        return clamp(total, 0.0, 1.0);
-    }
-
     void main() {
         // 1. Convert Mercator UV to Geographic Coordinates (Lng/Lat)
         float lng = fract(v_texcoord.x) * 360.0 - 180.0;
         float mercY = clamp((0.5 - v_texcoord.y) * 6.28318530718, -12.0, 12.0);
         float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
-        float lat = latRad * 57.29577951308232; // In degrees
+        float lat = latRad * 57.29577951308232;
 
         // 2. CONUS Radar Bounding Box: West -126.0, East -66.0, South 24.0, North 50.0
         if (lng < -126.0 || lng > -66.0 || lat < 24.0 || lat > 50.0) {
@@ -79,18 +36,40 @@ const fsRadar = `
         float v = (50.0 - lat) / (50.0 - 24.0);
         vec2 radarUV = vec2(clamp(u, 0.0, 1.0), clamp(v, 0.0, 1.0));
 
-        // 4. Sample smooth spline reflectivity value
-        float rawVal = sampleSmoothSpline(u_dataTexture, radarUV, u_texResolution);
+        // 4. Sample raw input texel
+        vec4 src = texture2D(u_dataTexture, radarUV);
 
-        // 5. Discard zero/clear air echoes (< 5 dBZ)
-        if (rawVal < 0.005) {
+        // 5. Discard transparent / black pixels (clear air)
+        if (src.a < 0.05 || (src.r < 0.02 && src.g < 0.02 && src.b < 0.02)) {
             discard;
         }
 
-        // 6. Map dBZ value to dynamic Custom 1D Palette Texture
-        float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
-        float palU = (palIndex + 0.5) / 256.0;
-        vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
+        float r = src.r * 255.0;
+        float g = src.g * 255.0;
+        float b = src.b * 255.0;
+        float dbzNorm = 0.0;
+
+        // 🌟 6. Parallel GPU dBZ Scalar Decoder
+        if (r > 200.0 && g > 200.0 && b > 200.0) {
+            dbzNorm = 0.95; // 75+ dBZ (White / Giant Hail)
+        } else if (r > 140.0 && b > 140.0 && g < 120.0) {
+            dbzNorm = 0.80 + (r / 255.0) * 0.12; // 60-70 dBZ (Purple / Magenta)
+        } else if (r > 160.0 && g < 90.0 && b < 90.0) {
+            dbzNorm = 0.65 + (r / 255.0) * 0.13; // 50-60 dBZ (Red)
+        } else if (r > 190.0 && g > 80.0 && b < 60.0) {
+            dbzNorm = 0.52 + (g / 255.0) * 0.10; // 40-50 dBZ (Orange)
+        } else if (r > 190.0 && g > 190.0 && b < 60.0) {
+            dbzNorm = 0.42 + (g / 255.0) * 0.08; // 35-40 dBZ (Yellow)
+        } else if (g > 80.0 && r < 120.0 && b < 120.0) {
+            dbzNorm = 0.22 + (g / 255.0) * 0.18; // 20-35 dBZ (Green)
+        } else if (b > 80.0 && r < 140.0) {
+            dbzNorm = 0.06 + (b / 255.0) * 0.14; // 5-20 dBZ (Teal / Cyan)
+        } else {
+            dbzNorm = max(r, max(g, b)) / 255.0;
+        }
+
+        // 7. Map to your custom WxTools 1D Palette
+        vec4 color = texture2D(u_paletteTexture, vec2(clamp(dbzNorm, 0.0, 1.0), 0.5));
 
         if (color.a < 0.01) {
             discard;
@@ -107,7 +86,7 @@ export function createRadarShaderLayer(mapInstance) {
         frameTextures: {},
         activeTex: null,
         paletteTex: null,
-        texResolution: [2000.0, 1000.0],
+        texResolution: [6000.0, 2600.0],
 
         clearTextures: function () {
             if (!this.gl) return;
@@ -136,7 +115,7 @@ export function createRadarShaderLayer(mapInstance) {
             gl.compileShader(vs);
 
             const fs = gl.createShader(gl.FRAGMENT_SHADER);
-            gl.shaderSource(fs, fsRadar);
+            gl.shaderSource(fs, fsSource || fsRadar);
             gl.compileShader(fs);
 
             this.program = gl.createProgram();
@@ -220,7 +199,6 @@ export function createRadarShaderLayer(mapInstance) {
             gl.enableVertexAttribArray(this.aPos);
             gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0);
 
-            // 🌟 Disable depth test so radar paints over ocean and land
             gl.disable(gl.DEPTH_TEST);
 
             gl.enable(gl.BLEND);
