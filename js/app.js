@@ -48,17 +48,6 @@ const map = new maplibregl.Map({
 });
 
 /**
- * 🌟 Helper: Guarantee style is 100% loaded before attaching layers
- */
-function whenStyleReady(callback) {
-    if (map.isStyleLoaded()) {
-        callback();
-    } else {
-        map.once('style.load', callback);
-    }
-}
-
-/**
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
 export function updateBasemapStyle(styleUrl) {
@@ -67,23 +56,26 @@ export function updateBasemapStyle(styleUrl) {
     console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
 
-    // 🌟 Wait for style to fully load before re-attaching layers (prevents blank map crashes)
-    map.once('style.load', () => {
-        console.log("✅ New basemap style loaded. Re-attaching weather layers...");
+    const onStyleData = () => {
+        if (map.isStyleLoaded()) {
+            map.off('styledata', onStyleData);
+            console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
-        if (stateManager.activeMode === 'radar') {
-            initRadarMode(map);
-        } else {
-            try { initLayer(); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
+            if (stateManager.activeMode === 'radar') {
+                initRadarMode(map);
+            } else {
+                try { initLayer(); } catch (e) {}
+                try { initVectorContours(map); } catch (e) {}
+                try { initCityOverlay(map); } catch (e) {}
 
-            if (stateManager.currentStepIndex !== undefined) {
-                renderFrame(stateManager.currentStepIndex);
+                if (stateManager.currentStepIndex !== undefined) {
+                    renderFrame(stateManager.currentStepIndex);
+                }
             }
         }
-    });
+    };
 
+    map.on('styledata', onStyleData);
     map.setStyle(styleUrl);
 }
 
@@ -179,8 +171,8 @@ export async function applyTheme(theme) {
             const paramConfig = data?.parameters?.[stateManager.activeParam];
             if (paramConfig) {
                 const targetStyle = theme === 'dark'
-                    ? (paramConfig.map_style_dark || paramConfig.map_style || './config/style_dark.json')
-                    : (paramConfig.map_style_light || paramConfig.map_style || './config/style_default.json');
+                    ? (paramConfig.map_style_dark || paramConfig.map_style)
+                    : (paramConfig.map_style_light || paramConfig.map_style);
                 if (targetStyle) {
                     updateBasemapStyle(targetStyle);
                 }
@@ -363,7 +355,7 @@ async function loadInitialModelData() {
 }
 
 /**
- * 🌟 DYNAMIC APP MODE SWITCHER (Models vs Radar vs Satellite)
+ * 🌟 DYNAMIC APP MODE SWITCHER
  */
 export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
@@ -378,33 +370,32 @@ export async function switchAppMode(targetMode) {
         map.removeLayer('radar-gpu-shader');
     }
 
-    if (targetMode === 'radar') {
-        showToast("Loading Real-Time Radar...");
-        const modelBtn = document.getElementById('btn-model-menu');
-        const paramBtn = document.getElementById('btn-param-menu');
-        if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
-        if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
-        
-        destroyCityOverlay();
-
-        // 🌟 Ensure style is 100% loaded before attaching radar layers
-        whenStyleReady(async () => {
+    const startMode = async () => {
+        if (targetMode === 'radar') {
+            showToast("Loading Real-Time Radar...");
+            const modelBtn = document.getElementById('btn-model-menu');
+            const paramBtn = document.getElementById('btn-param-menu');
+            if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
+            if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
+            
+            destroyCityOverlay();
             await initRadarMode(map);
             hideToast();
-        });
-    } else if (targetMode === 'modelViewer') {
-        showToast("Loading Global Models...");
-        try { initCityOverlay(map); } catch (e) {}
-
-        // 🌟 Ensure style is 100% loaded before attaching model layers
-        whenStyleReady(async () => {
+        } else if (targetMode === 'modelViewer') {
+            showToast("Loading Global Models...");
+            try { initCityOverlay(map); } catch (e) {}
             await loadInitialModelData();
             hideToast();
-        });
+        }
+    };
+
+    if (map.loaded()) {
+        await startMode();
+    } else {
+        map.once('load', startMode);
     }
 }
 
-// 🌟 Initialize Splash Transition with Mode Handler
 initHubTransition((selectedMode) => {
     switchAppMode(selectedMode);
 });
@@ -428,7 +419,6 @@ map.on('load', async () => {
     try { initVectorContours(map); } catch (err) {}
 });
 
-// 🌟 Unified Bilinear Inspection on Click
 map.on('click', (e) => {
     if (stateManager.activeMode === 'radar') return;
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
