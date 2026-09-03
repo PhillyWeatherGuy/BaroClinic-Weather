@@ -170,10 +170,15 @@ export function formatParameterValue(decodedVal, manifest) {
     return `${Math.round(decodedVal)}`;
 }
 
-export function hideBasemapCityLabels(map) {
+/**
+ * 🌟 Toggle Basemap Native City & State Labels (Visible for Radar, Hidden for Models)
+ */
+export function setBasemapLabelsVisibility(map, isVisible) {
     if (!map) return;
     const style = map.getStyle();
     if (!style || !style.layers) return;
+
+    const visibilityVal = isVisible ? 'visible' : 'none';
 
     style.layers.forEach(layer => {
         const id = layer.id.toLowerCase();
@@ -189,7 +194,7 @@ export function hideBasemapCityLabels(map) {
             sourceLayer.includes('label')
         )) {
             try {
-                map.setLayoutProperty(layer.id, 'visibility', 'none');
+                map.setLayoutProperty(layer.id, 'visibility', visibilityVal);
             } catch (e) {}
         }
     });
@@ -206,7 +211,12 @@ export async function initCityOverlay(map) {
     cityMarkers = {};
     activeCities = [];
 
-    hideBasemapCityLabels(map);
+    // In radar mode, keep native basemap labels ON. In model mode, hide them for custom callouts.
+    if (stateManager.activeMode === 'radar') {
+        setBasemapLabelsVisibility(map, true);
+    } else {
+        setBasemapLabelsVisibility(map, false);
+    }
 
     if (!listenersAttached) {
         let timer = null;
