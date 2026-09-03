@@ -262,7 +262,11 @@ export function updateCityPositions() {
     if (!mapInstance || !isLoaded || isUpdating) return;
     isUpdating = true;
 
-    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || stateManager.manifest?.suppress_city_overlay;
+    // 🌟 Auto-suppress in radar mode or if explicitly flagged
+    const isSuppressed = stateManager.activeMode === 'radar'
+                      || stateManager.paramConfig?.suppress_city_overlay 
+                      || stateManager.manifest?.suppress_city_overlay;
+
     if (isSuppressed) {
         for (const name in cityMarkers) {
             cityMarkers[name].getElement().style.display = 'none';
@@ -367,7 +371,11 @@ function renderCityValues(activeFrameState, manifest) {
 export function updateCityCallouts(map, activeFrameState, manifest) {
     if (!isLoaded) return;
 
-    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay || manifest?.suppress_city_overlay;
+    // 🌟 Auto-suppress in radar mode or if explicitly flagged
+    const isSuppressed = stateManager.activeMode === 'radar'
+                      || stateManager.paramConfig?.suppress_city_overlay 
+                      || manifest?.suppress_city_overlay;
+
     if (isSuppressed) {
         for (const name in cityMarkers) {
             cityMarkers[name].getElement().style.display = 'none';
