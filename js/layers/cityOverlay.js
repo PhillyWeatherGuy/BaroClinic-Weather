@@ -46,8 +46,12 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+/**
+ * 🌟 100% DYNAMIC PIXEL DECODER
+ */
 export function decodePixelValue(rawVal, manifest) {
     if (rawVal === undefined) return 0.0;
+
     const val = Number(rawVal);
     if (isNaN(val)) return 0.0;
 
@@ -72,6 +76,9 @@ export function decodePixelValue(rawVal, manifest) {
     return minVal + (val / 255.0) * (maxVal - minVal);
 }
 
+/**
+ * 🌟 GENERIC BILINEAR SAMPLER
+ */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameState = activeFrameState || stateManager.activeFrameState;
     if (!frameState) return 0.0;
@@ -130,6 +137,9 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     return top * (1.0 - fracY) + bottom * fracY;
 }
 
+/**
+ * 🌟 DYNAMIC UNIT FORMATTER
+ */
 export function formatParameterValue(decodedVal, manifest) {
     if (decodedVal === undefined || isNaN(decodedVal)) return "--";
 
@@ -154,6 +164,33 @@ export function formatParameterValue(decodedVal, manifest) {
     return `${Math.round(decodedVal)}`;
 }
 
+/**
+ * 🌟 Toggle Basemap Native City & Town Labels (Hidden for Model Viewer, Visible for Radar)
+ */
+export function setBasemapLabelsVisibility(map, isVisible) {
+    if (!map) return;
+    const style = map.getStyle();
+    if (!style || !style.layers) return;
+
+    const visibilityVal = isVisible ? 'visible' : 'none';
+
+    style.layers.forEach(layer => {
+        const id = layer.id.toLowerCase();
+        const sourceLayer = (layer['source-layer'] || '').toLowerCase();
+        if (layer.type === 'symbol' && (
+            id.includes('place_label_city') ||
+            id.includes('place_label_town') ||
+            id.includes('place_label_village') ||
+            id.includes('settlement') ||
+            sourceLayer.includes('place')
+        )) {
+            try {
+                map.setLayoutProperty(layer.id, 'visibility', visibilityVal);
+            } catch (e) {}
+        }
+    });
+}
+
 export async function initCityOverlay(map) {
     mapInstance = map;
 
@@ -162,6 +199,13 @@ export async function initCityOverlay(map) {
     }
     cityMarkers = {};
     activeCities = [];
+
+    // 🌟 Model Viewer hides duplicate basemap city labels; Radar keeps them visible
+    if (stateManager.activeMode === 'radar') {
+        setBasemapLabelsVisibility(map, true);
+    } else {
+        setBasemapLabelsVisibility(map, false);
+    }
 
     if (!listenersAttached) {
         let timer = null;
@@ -216,7 +260,7 @@ export function updateCityPositions() {
     if (!mapInstance || !isLoaded || isUpdating) return;
     isUpdating = true;
 
-    // 🌟 In Radar mode, automatically hide all blue temperature badges
+    // 🌟 Auto-suppress in radar mode or if explicitly flagged
     const isSuppressed = stateManager.activeMode === 'radar'
                       || stateManager.paramConfig?.suppress_city_overlay 
                       || stateManager.manifest?.suppress_city_overlay;
