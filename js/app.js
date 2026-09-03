@@ -228,7 +228,8 @@ export function initLayer(shaderType = null) {
 
     // 🌟 Place weather layer above water/land fills, but UNDER boundary lines, county lines, and labels
     let firstOverlayId = null;
-    const layers = map.getStyle()?.layers || [];
+    const style = map.getStyle();
+    const layers = style?.layers || [];
     for (const layer of layers) {
         const id = layer.id.toLowerCase();
         const type = layer.type;
@@ -355,12 +356,13 @@ async function loadInitialModelData() {
 }
 
 /**
- * 🌟 DYNAMIC APP MODE SWITCHER
+ * 🌟 DYNAMIC APP MODE SWITCHER (Direct Instant Execution)
  */
 export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
+    // 1. Destroy any active radar or forecast model state
     destroyRadarMode(map);
     purgeAllAppMemory(customShaderLayer);
     if (map.getLayer('weather-gpu-shader')) {
@@ -370,32 +372,26 @@ export async function switchAppMode(targetMode) {
         map.removeLayer('radar-gpu-shader');
     }
 
-    const startMode = async () => {
-        if (targetMode === 'radar') {
-            showToast("Loading Real-Time Radar...");
-            const modelBtn = document.getElementById('btn-model-menu');
-            const paramBtn = document.getElementById('btn-param-menu');
-            if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
-            if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
-            
-            destroyCityOverlay();
-            await initRadarMode(map);
-            hideToast();
-        } else if (targetMode === 'modelViewer') {
-            showToast("Loading Global Models...");
-            try { initCityOverlay(map); } catch (e) {}
-            await loadInitialModelData();
-            hideToast();
-        }
-    };
-
-    if (map.loaded()) {
-        await startMode();
-    } else {
-        map.once('load', startMode);
+    // 2. Launch selected mode directly
+    if (targetMode === 'radar') {
+        showToast("Loading Real-Time Radar...");
+        const modelBtn = document.getElementById('btn-model-menu');
+        const paramBtn = document.getElementById('btn-param-menu');
+        if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
+        if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
+        
+        destroyCityOverlay();
+        await initRadarMode(map);
+        hideToast();
+    } else if (targetMode === 'modelViewer') {
+        showToast("Loading Global Models...");
+        try { initCityOverlay(map); } catch (e) {}
+        await loadInitialModelData();
+        hideToast();
     }
 }
 
+// 🌟 Initialize Splash Transition with Mode Handler
 initHubTransition((selectedMode) => {
     switchAppMode(selectedMode);
 });
@@ -419,6 +415,7 @@ map.on('load', async () => {
     try { initVectorContours(map); } catch (err) {}
 });
 
+// 🌟 Unified Bilinear Inspection on Click
 map.on('click', (e) => {
     if (stateManager.activeMode === 'radar') return;
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
