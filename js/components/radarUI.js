@@ -4,6 +4,7 @@ import { radarState, buildRadarTimeline, purgeRadarMemory } from '../core/radarL
 let radarMapInstance = null;
 let radarPlayInterval = null;
 let isRadarPlaying = false;
+let currentVisibleIndex = -1;
 const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 
 /**
@@ -16,6 +17,7 @@ export async function initRadarMode(mapInstance) {
     // 1. Build 12-frame real-time timeline
     const frames = buildRadarTimeline();
     const liveIndex = frames.length - 1;
+    currentVisibleIndex = liveIndex;
 
     // 2. Find layer to place radar under (boundaries, county lines, text labels)
     let firstOverlayId = null;
@@ -29,7 +31,7 @@ export async function initRadarMode(mapInstance) {
         }
     }
 
-    // 3. Add IEM tile sources and layers for each time step
+    // 3. Add IEM tile sources and layers (Keep ALL layers 'visible' so GPU preloads tiles)
     frames.forEach((frame) => {
         const sourceId = `iem-radar-src-${frame.index}`;
         const layerId = `iem-radar-layer-${frame.index}`;
@@ -48,13 +50,13 @@ export async function initRadarMode(mapInstance) {
                 type: 'raster',
                 source: sourceId,
                 layout: {
-                    // 🌟 Hard binary on/off visibility (0ms transition)
-                    'visibility': (frame.index === liveIndex) ? 'visible' : 'none'
+                    // 🌟 MUST stay 'visible' so MapLibre buffers all 12 frames in GPU memory!
+                    'visibility': 'visible'
                 },
                 paint: {
-                    'raster-opacity': 1.0,
+                    'raster-opacity': (frame.index === liveIndex) ? 1.0 : 0.0,
                     'raster-fade-duration': 0,
-                    // 🌟 Kills MapLibre's internal 300ms paint transition
+                    // 🌟 Zero transition delay
                     'raster-opacity-transition': { duration: 0, delay: 0 },
                     'raster-resampling': 'linear'
                 }
@@ -68,26 +70,31 @@ export async function initRadarMode(mapInstance) {
 }
 
 /**
- * 🌟 2. Instant 0ms Binary Frame Snap
+ * 🌟 2. Instant Zero-Blink GPU Frame Swapping
  */
 export function setRadarFrame(frameIndex) {
     if (!radarState.frames || frameIndex < 0 || frameIndex >= radarState.frames.length) return;
 
+    const prevIndex = currentVisibleIndex;
+    currentVisibleIndex = frameIndex;
     radarState.activeFrameIndex = frameIndex;
     const frameInfo = radarState.frames[frameIndex];
 
     if (radarMapInstance) {
-        // Instant hard-switch visibility across all layers
-        radarState.frames.forEach((f) => {
-            const layerId = `iem-radar-layer-${f.index}`;
-            if (radarMapInstance.getLayer(layerId)) {
-                radarMapInstance.setLayoutProperty(
-                    layerId,
-                    'visibility',
-                    f.index === frameIndex ? 'visible' : 'none'
-                );
+        const newLayerId = `iem-radar-layer-${frameIndex}`;
+
+        // 1. Turn ON new frame (already warm in GPU memory)
+        if (radarMapInstance.getLayer(newLayerId)) {
+            radarMapInstance.setPaintProperty(newLayerId, 'raster-opacity', 1.0);
+        }
+
+        // 2. Turn OFF previous frame (instant swap, zero blackout)
+        if (prevIndex >= 0 && prevIndex !== frameIndex) {
+            const prevLayerId = `iem-radar-layer-${prevIndex}`;
+            if (radarMapInstance.getLayer(prevLayerId)) {
+                radarMapInstance.setPaintProperty(prevLayerId, 'raster-opacity', 0.0);
             }
-        });
+        }
     }
 
     // Update Slider Value
@@ -230,6 +237,7 @@ function bindRadarControls() {
  */
 export function destroyRadarMode(mapInstance) {
     pauseRadarPlayback();
+    currentVisibleIndex = -1;
 
     if (mapInstance && radarState.frames) {
         radarState.frames.forEach((frame) => {
