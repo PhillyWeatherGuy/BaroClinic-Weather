@@ -6,7 +6,7 @@ export const radarState = {
     isPlaying: false
 };
 
-const MINUTE_OFFSETS = [100, 95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5, 0];
+const MINUTE_OFFSETS = [55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5, 0];
 
 /**
  * 🌟 1. Build the Live IEM NEXRAD 12-Frame Loop
@@ -16,7 +16,7 @@ export function buildRadarTimeline() {
     const frames = [];
 
     MINUTE_OFFSETS.forEach((minsAgo, idx) => {
-        const frameDate = new Date(now.getTime() - minsAgo * 100 * 1000);
+        const frameDate = new Date(now.getTime() - minsAgo * 60 * 1000);
         const tag = minsAgo === 0 ? '900913' : `900913-m${String(minsAgo).padStart(2, '0')}m`;
         const label = minsAgo === 0 ? 'LIVE' : `-${minsAgo}m`;
 
