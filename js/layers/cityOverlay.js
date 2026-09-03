@@ -47,11 +47,10 @@ style.textContent = `
 document.head.appendChild(style);
 
 /**
- * 🌟 100% DYNAMIC PIXEL DECODER
+ * 🌟 DYNAMIC PIXEL DECODER
  */
 export function decodePixelValue(rawVal, manifest) {
     if (rawVal === undefined) return 0.0;
-
     const val = Number(rawVal);
     if (isNaN(val)) return 0.0;
 
@@ -159,19 +158,13 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(tempVal)}°`;
     }
 
-    if (unit === '%') {
-        return `${Math.round(decodedVal)}%`;
-    }
-
-    if (unit.length > 0) {
-        return `${Math.round(decodedVal)} ${unit}`;
-    }
-
+    if (unit === '%') return `${Math.round(decodedVal)}%`;
+    if (unit.length > 0) return `${Math.round(decodedVal)} ${unit}`;
     return `${Math.round(decodedVal)}`;
 }
 
 /**
- * 🌟 Toggle Basemap Native City & State Labels (Visible for Radar, Hidden for Models)
+ * 🌟 Toggle Basemap Native City Labels (Hidden for Models to prevent badge overlap)
  */
 export function setBasemapLabelsVisibility(map, isVisible) {
     if (!map) return;
@@ -184,14 +177,11 @@ export function setBasemapLabelsVisibility(map, isVisible) {
         const id = layer.id.toLowerCase();
         const sourceLayer = (layer['source-layer'] || '').toLowerCase();
         if (layer.type === 'symbol' && (
-            id.includes('place') || 
-            id.includes('settlement') || 
-            id.includes('city') || 
-            id.includes('town') || 
-            id.includes('village') ||
-            id.includes('label') ||
-            sourceLayer.includes('place') ||
-            sourceLayer.includes('label')
+            id.includes('place_label_city') ||
+            id.includes('place_label_town') ||
+            id.includes('place_label_village') ||
+            id.includes('settlement') ||
+            sourceLayer.includes('place')
         )) {
             try {
                 map.setLayoutProperty(layer.id, 'visibility', visibilityVal);
@@ -200,9 +190,10 @@ export function setBasemapLabelsVisibility(map, isVisible) {
     });
 }
 
-export async function initCityOverlay(map) {
-    mapInstance = map;
-
+/**
+ * 🌟 Shut down and completely remove all city callouts (Radar Mode)
+ */
+export function destroyCityOverlay() {
     for (const name in cityMarkers) {
         if (cityMarkers[name]) {
             cityMarkers[name].remove();
@@ -210,17 +201,26 @@ export async function initCityOverlay(map) {
     }
     cityMarkers = {};
     activeCities = [];
+    isUpdating = false;
+}
 
-    // In radar mode, keep native basemap labels ON. In model mode, hide them for custom callouts.
-    if (stateManager.activeMode === 'radar') {
+export async function initCityOverlay(map) {
+    mapInstance = map;
+
+    // 🛑 Hard shutdown if not in Model Viewer
+    if (stateManager.activeMode !== 'modelViewer') {
+        destroyCityOverlay();
         setBasemapLabelsVisibility(map, true);
-    } else {
-        setBasemapLabelsVisibility(map, false);
+        return;
     }
+
+    destroyCityOverlay();
+    setBasemapLabelsVisibility(map, false);
 
     if (!listenersAttached) {
         let timer = null;
         const throttledUpdate = () => {
+            if (stateManager.activeMode !== 'modelViewer') return;
             if (timer) cancelAnimationFrame(timer);
             timer = requestAnimationFrame(() => {
                 updateCityPositions();
@@ -244,7 +244,6 @@ export async function initCityOverlay(map) {
 
         allGlobalCities = data.features.map((f, i) => {
             const pop = f.properties.POP_MAX || f.properties.pop_max || 0;
-            
             let minZoom = 6;
             if (pop >= 2000000) minZoom = 2;
             else if (pop >= 500000) minZoom = 4;
@@ -269,20 +268,20 @@ export async function initCityOverlay(map) {
 }
 
 export function updateCityPositions() {
+    // 🛑 100% OFF during Radar mode
+    if (stateManager.activeMode !== 'modelViewer') {
+        destroyCityOverlay();
+        return;
+    }
+
     if (!mapInstance || !isLoaded || isUpdating) return;
     isUpdating = true;
 
-    // 🌟 Auto-suppress in radar mode or if explicitly flagged
-    const isSuppressed = stateManager.activeMode === 'radar'
-                      || stateManager.paramConfig?.suppress_city_overlay 
+    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay 
                       || stateManager.manifest?.suppress_city_overlay;
 
     if (isSuppressed) {
-        for (const name in cityMarkers) {
-            cityMarkers[name].getElement().style.display = 'none';
-        }
-        activeCities = [];
-        isUpdating = false;
+        destroyCityOverlay();
         return;
     }
 
@@ -357,7 +356,7 @@ export function updateCityPositions() {
 }
 
 function renderCityValues(activeFrameState, manifest) {
-    if (!activeFrameState) return;
+    if (!activeFrameState || stateManager.activeMode !== 'modelViewer') return;
 
     const activeUnit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim().toLowerCase();
     const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch');
@@ -379,17 +378,14 @@ function renderCityValues(activeFrameState, manifest) {
 }
 
 export function updateCityCallouts(map, activeFrameState, manifest) {
-    if (!isLoaded) return;
+    // 🛑 100% OFF during Radar mode
+    if (!isLoaded || stateManager.activeMode !== 'modelViewer') return;
 
-    // 🌟 Auto-suppress in radar mode or if explicitly flagged
-    const isSuppressed = stateManager.activeMode === 'radar'
-                      || stateManager.paramConfig?.suppress_city_overlay 
+    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay 
                       || manifest?.suppress_city_overlay;
 
     if (isSuppressed) {
-        for (const name in cityMarkers) {
-            cityMarkers[name].getElement().style.display = 'none';
-        }
+        destroyCityOverlay();
         return;
     }
 
