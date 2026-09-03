@@ -8,10 +8,17 @@ let currentVisibleIndex = -1;
 const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 
 /**
- * 🌟 1. Launch Real-Time IEM Radar on Map
+ * 🌟 1. Launch Real-Time IEM Radar on Map (With Style Guard)
  */
 export async function initRadarMode(mapInstance) {
     if (!mapInstance) return;
+
+    // 🛑 CRUCIAL: If basemap style is still loading, wait so we don't place radar on top of basemap!
+    if (!mapInstance.isStyleLoaded()) {
+        mapInstance.once('load', () => initRadarMode(mapInstance));
+        return;
+    }
+
     radarMapInstance = mapInstance;
 
     // 1. Build 12-frame real-time timeline
@@ -21,17 +28,18 @@ export async function initRadarMode(mapInstance) {
 
     // 2. Find layer to place radar under (boundaries, county lines, text labels)
     let firstOverlayId = null;
-    const layers = mapInstance.getStyle().layers || [];
+    const style = mapInstance.getStyle();
+    const layers = style?.layers || [];
     for (const layer of layers) {
         const id = layer.id.toLowerCase();
         const type = layer.type;
-        if (type === 'symbol' || type === 'line' || id.includes('admin') || id.includes('boundary') || id.includes('border') || id.includes('road')) {
+        if (type === 'symbol' || (type === 'line' && id !== 'water_outline' && id !== 'waterway') || id.includes('admin') || id.includes('boundary') || id.includes('border') || id.includes('road')) {
             firstOverlayId = layer.id;
             break;
         }
     }
 
-    // 3. Add IEM tile sources and layers (Keep ALL layers 'visible' so GPU preloads tiles)
+    // 3. Add IEM tile sources and layers (Locked UNDER basemap overlay)
     frames.forEach((frame) => {
         const sourceId = `iem-radar-src-${frame.index}`;
         const layerId = `iem-radar-layer-${frame.index}`;
@@ -50,17 +58,15 @@ export async function initRadarMode(mapInstance) {
                 type: 'raster',
                 source: sourceId,
                 layout: {
-                    // 🌟 MUST stay 'visible' so MapLibre buffers all 12 frames in GPU memory!
                     'visibility': 'visible'
                 },
                 paint: {
                     'raster-opacity': (frame.index === liveIndex) ? 1.0 : 0.0,
                     'raster-fade-duration': 0,
-                    // 🌟 Zero transition delay
                     'raster-opacity-transition': { duration: 0, delay: 0 },
                     'raster-resampling': 'linear'
                 }
-            }, firstOverlayId);
+            }, firstOverlayId); // 👈 Always inserted UNDER firstOverlayId
         }
     });
 
@@ -83,12 +89,12 @@ export function setRadarFrame(frameIndex) {
     if (radarMapInstance) {
         const newLayerId = `iem-radar-layer-${frameIndex}`;
 
-        // 1. Turn ON new frame (already warm in GPU memory)
+        // 1. Turn ON new frame
         if (radarMapInstance.getLayer(newLayerId)) {
             radarMapInstance.setPaintProperty(newLayerId, 'raster-opacity', 1.0);
         }
 
-        // 2. Turn OFF previous frame (instant swap, zero blackout)
+        // 2. Turn OFF previous frame (instant swap)
         if (prevIndex >= 0 && prevIndex !== frameIndex) {
             const prevLayerId = `iem-radar-layer-${prevIndex}`;
             if (radarMapInstance.getLayer(prevLayerId)) {
