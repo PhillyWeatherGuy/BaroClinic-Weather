@@ -4,6 +4,7 @@ import { radarState, buildRadarTimeline, purgeRadarMemory } from '../core/radarL
 let radarMapInstance = null;
 let radarPlayInterval = null;
 let isRadarPlaying = false;
+let currentVisibleIndex = -1;
 const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 
 /**
@@ -16,6 +17,7 @@ export async function initRadarMode(mapInstance) {
     // 1. Build 12-frame real-time timeline
     const frames = buildRadarTimeline();
     const liveIndex = frames.length - 1;
+    currentVisibleIndex = liveIndex;
 
     // 2. Find layer to place radar under (boundaries, county lines, text labels)
     let firstOverlayId = null;
@@ -49,8 +51,8 @@ export async function initRadarMode(mapInstance) {
                 source: sourceId,
                 paint: {
                     'raster-opacity': (frame.index === liveIndex) ? 1.0 : 0.0,
-                    // 🌟 Set to 0 to eliminate all fade in / fade out pulsing
-                    'raster-fade-duration': 0
+                    'raster-fade-duration': 0,
+                    'raster-resampling': 'linear'
                 }
             }, firstOverlayId);
         }
@@ -62,26 +64,31 @@ export async function initRadarMode(mapInstance) {
 }
 
 /**
- * 🌟 2. Set Active Radar Frame & Instant Frame Snap
+ * 🌟 2. Double-Buffered Zero-Blink Frame Swapping
  */
 export function setRadarFrame(frameIndex) {
     if (!radarState.frames || frameIndex < 0 || frameIndex >= radarState.frames.length) return;
 
+    const prevIndex = currentVisibleIndex;
+    currentVisibleIndex = frameIndex;
     radarState.activeFrameIndex = frameIndex;
     const frameInfo = radarState.frames[frameIndex];
 
-    // Instant toggle between frames with zero fading
     if (radarMapInstance) {
-        radarState.frames.forEach((f) => {
-            const layerId = `iem-radar-layer-${f.index}`;
-            if (radarMapInstance.getLayer(layerId)) {
-                radarMapInstance.setPaintProperty(
-                    layerId,
-                    'raster-opacity',
-                    f.index === frameIndex ? 1.0 : 0.0
-                );
+        const newLayerId = `iem-radar-layer-${frameIndex}`;
+
+        // 1. Turn ON the new frame first (draws immediately over the old one)
+        if (radarMapInstance.getLayer(newLayerId)) {
+            radarMapInstance.setPaintProperty(newLayerId, 'raster-opacity', 1.0);
+        }
+
+        // 2. Turn OFF the previous frame (eliminates the black flash completely)
+        if (prevIndex >= 0 && prevIndex !== frameIndex) {
+            const prevLayerId = `iem-radar-layer-${prevIndex}`;
+            if (radarMapInstance.getLayer(prevLayerId)) {
+                radarMapInstance.setPaintProperty(prevLayerId, 'raster-opacity', 0.0);
             }
-        });
+        }
     }
 
     // Update Slider Value
@@ -224,6 +231,7 @@ function bindRadarControls() {
  */
 export function destroyRadarMode(mapInstance) {
     pauseRadarPlayback();
+    currentVisibleIndex = -1;
 
     if (mapInstance && radarState.frames) {
         radarState.frames.forEach((frame) => {
