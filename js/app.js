@@ -15,7 +15,13 @@ import {
 } from './components/viewerUI.js';
 
 // 🌟 Universal overlays
-import { initCityOverlay, updateCityCallouts, sampleBilinearValue, formatParameterValue } from './layers/cityOverlay.js'; 
+import { 
+    initCityOverlay, 
+    updateCityCallouts, 
+    sampleBilinearValue, 
+    formatParameterValue,
+    setBasemapLabelsVisibility // 👈 Mode-aware basemap label controller
+} from './layers/cityOverlay.js'; 
 import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe, clearThreeGlobeTextures } from './layers/threeGlobe.js';
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
@@ -374,10 +380,17 @@ export async function switchAppMode(targetMode) {
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
         if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
         
+        // 🌟 Turn native basemap city and state labels ON in radar mode
+        setBasemapLabelsVisibility(map, true);
+
         await initRadarMode(map);
         hideToast();
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
+        
+        // 🌟 Turn native labels OFF so custom temperature badges display cleanly
+        setBasemapLabelsVisibility(map, false);
+
         await loadInitialModelData();
         hideToast();
     }
