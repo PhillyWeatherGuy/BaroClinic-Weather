@@ -15,7 +15,13 @@ import {
 } from './components/viewerUI.js';
 
 // 🌟 Universal overlays
-import { initCityOverlay, updateCityCallouts, sampleBilinearValue, formatParameterValue } from './layers/cityOverlay.js'; 
+import { 
+    initCityOverlay, 
+    updateCityCallouts, 
+    sampleBilinearValue, 
+    formatParameterValue,
+    destroyCityOverlay 
+} from './layers/cityOverlay.js'; 
 import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe, clearThreeGlobeTextures } from './layers/threeGlobe.js';
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
@@ -54,12 +60,17 @@ export function updateBasemapStyle(styleUrl) {
         if (map.isStyleLoaded()) {
             map.off('styledata', onStyleLoaded);
             console.log("✅ New basemap style loaded. Re-attaching weather layers...");
-            try { initLayer(); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
 
-            if (stateManager.currentStepIndex !== undefined) {
-                renderFrame(stateManager.currentStepIndex);
+            if (stateManager.activeMode === 'radar') {
+                initRadarMode(map);
+            } else {
+                try { initLayer(); } catch (e) {}
+                try { initVectorContours(map); } catch (e) {}
+                try { initCityOverlay(map); } catch (e) {}
+
+                if (stateManager.currentStepIndex !== undefined) {
+                    renderFrame(stateManager.currentStepIndex);
+                }
             }
         }
     };
@@ -374,10 +385,17 @@ export async function switchAppMode(targetMode) {
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
         if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
         
+        // 🛑 Complete shutdown of city callout badges in Radar mode
+        destroyCityOverlay();
+
         await initRadarMode(map);
         hideToast();
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
+        
+        // 🌟 Wake up city overlay for Model Viewer
+        try { initCityOverlay(map); } catch (e) {}
+
         await loadInitialModelData();
         hideToast();
     }
@@ -405,11 +423,11 @@ map.on('error', (e) => {
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
     try { initVectorContours(map); } catch (err) {}
-    try { initCityOverlay(map); } catch (err) {}
 });
 
 // 🌟 Unified Bilinear Inspection on Click
 map.on('click', (e) => {
+    if (stateManager.activeMode === 'radar') return;
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
     const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
