@@ -370,25 +370,16 @@ export async function switchAppMode(targetMode) {
     // 1. Destroy any active radar or forecast model state
     destroyRadarMode(map);
     purgeAllAppMemory(customShaderLayer);
-    
-    // Guard against calling getLayer when style is not yet ready
-    if (map.isStyleLoaded()) {
-        if (map.getLayer('weather-gpu-shader')) {
-            map.removeLayer('weather-gpu-shader');
-        }
-        if (map.getLayer('radar-gpu-shader')) {
-            map.removeLayer('radar-gpu-shader');
-        }
+    if (map.getLayer('weather-gpu-shader')) {
+        map.removeLayer('weather-gpu-shader');
+    }
+    if (map.getLayer('radar-gpu-shader')) {
+        map.removeLayer('radar-gpu-shader');
     }
 
     // 2. Launch selected mode
     if (targetMode === 'radar') {
         showToast("Loading Real-Time Radar...");
-
-        // Ensure 2D projection is active and map fits laptop screen
-        applyView('2d');
-        map.resize();
-
         const modelBtn = document.getElementById('btn-model-menu');
         const paramBtn = document.getElementById('btn-param-menu');
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
