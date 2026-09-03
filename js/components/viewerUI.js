@@ -47,6 +47,7 @@ function initKeyboardControls(zoomCallback = null) {
     function handleStep(delta) {
         if (stateManager.activeMode === 'radar') {
             pauseRadarPlayback();
+            if (!radarState.frames || radarState.frames.length === 0) return;
             let nextIdx = radarState.activeFrameIndex + delta;
             if (nextIdx < 0) nextIdx = radarState.frames.length - 1;
             if (nextIdx >= radarState.frames.length) nextIdx = 0;
@@ -154,6 +155,13 @@ export function initViewSelector(viewCallback = null) {
             e.stopPropagation();
             const targetView = btn.getAttribute('data-view');
             if (!targetView) return;
+
+            // 🌟 Guard: Radar is strictly 2D. Prevent desktop pill clicks from breaking radar mode
+            if (stateManager.activeMode === 'radar' && targetView !== '2d') {
+                showToast('3D & Polar projections are disabled in Radar mode');
+                setTimeout(() => hideToast(), 1800);
+                return;
+            }
 
             optionBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -358,6 +366,11 @@ export function initModelCategoryBar() {
     modelBtn.addEventListener('click', (e) => {
         e.stopPropagation();
 
+        // Guard: In radar mode, clicking this button shouldn't open model categories
+        if (stateManager.activeMode === 'radar') {
+            return;
+        }
+
         const paramBar = document.getElementById('param-category-bar');
         const paramBtn = document.getElementById('btn-param-menu');
         if (paramBar) paramBar.style.display = 'none';
@@ -380,7 +393,7 @@ export function initModelCategoryBar() {
             e.currentTarget.classList.add('active');
             
             const category = e.currentTarget.getAttribute('data-category');
-            renderCategoryParameters(category);
+            renderCategoryModels(category);
         });
     });
 
@@ -546,6 +559,11 @@ export function initParameterCategoryBar() {
     paramBtn.addEventListener('click', (e) => {
         e.stopPropagation();
 
+        // Guard: In radar mode, clicking this button shouldn't open parameter categories
+        if (stateManager.activeMode === 'radar') {
+            return;
+        }
+
         const modelBar = document.getElementById('model-category-bar');
         const modelBtn = document.getElementById('btn-model-menu');
         if (modelBar) modelBar.style.display = 'none';
@@ -663,6 +681,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
         prevBtn.addEventListener('click', () => {
             if (stateManager.activeMode === 'radar') {
                 pauseRadarPlayback();
+                if (!radarState.frames || radarState.frames.length === 0) return;
                 let prevIdx = radarState.activeFrameIndex - 1;
                 if (prevIdx < 0) prevIdx = radarState.frames.length - 1;
                 setRadarFrame(prevIdx);
@@ -678,6 +697,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
         nextBtn.addEventListener('click', () => {
             if (stateManager.activeMode === 'radar') {
                 pauseRadarPlayback();
+                if (!radarState.frames || radarState.frames.length === 0) return;
                 let nextIdx = radarState.activeFrameIndex + 1;
                 if (nextIdx >= radarState.frames.length) nextIdx = 0;
                 setRadarFrame(nextIdx);
@@ -815,6 +835,12 @@ function initModelRunDropdown() {
 
     toggleBtn.onclick = (e) => {
         e.stopPropagation();
+
+        // Guard: Radar does not have forecast run times; do not open menu
+        if (stateManager.activeMode === 'radar') {
+            return;
+        }
+
         const isVisible = menu.style.display === 'block';
         menu.style.display = isVisible ? 'none' : 'block';
     };
