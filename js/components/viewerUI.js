@@ -5,6 +5,14 @@ import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 import { updatePolarPalette } from '../layers/polarMap.js';
 
+// 🛰️ Radar Controller Hooks
+import { 
+    radarState, 
+    setRadarFrame, 
+    toggleRadarPlayback, 
+    pauseRadarPlayback 
+} from './radarUI.js';
+
 let onStepChangeCallback = null;
 let onThemeChangeCallback = null;
 let onViewChangeCallback = null;
@@ -37,6 +45,15 @@ function initKeyboardControls(zoomCallback = null) {
     const HOLD_DELAY_MS = 250;
 
     function handleStep(delta) {
+        if (stateManager.activeMode === 'radar') {
+            pauseRadarPlayback();
+            let nextIdx = radarState.activeFrameIndex + delta;
+            if (nextIdx < 0) nextIdx = radarState.frames.length - 1;
+            if (nextIdx >= radarState.frames.length) nextIdx = 0;
+            setRadarFrame(nextIdx);
+            return;
+        }
+
         if (isPlaying) pausePlayback();
         stepRelative(delta);
     }
@@ -77,7 +94,11 @@ function initKeyboardControls(zoomCallback = null) {
             }
         } else if (e.key === ' ' || e.code === 'Space') {
             e.preventDefault();
-            togglePlayback();
+            if (stateManager.activeMode === 'radar') {
+                toggleRadarPlayback();
+            } else {
+                togglePlayback();
+            }
         }
     });
 
@@ -190,7 +211,7 @@ export function initThemeToggle() {
 }
 
 /**
- * 🌟 MEMORY-AWARE STEP INDEX CHECKER (Monotonic sliding window support)
+ * 🌟 MEMORY-AWARE STEP INDEX CHECKER (For Model Viewer)
  */
 export function getMaxLoadedStepIndex() {
     if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) {
@@ -599,12 +620,22 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
     initViewSelector(viewCallback);
     initKeyboardControls(zoomCallback);
 
+    // 🌟 Unified Slider Input (Auto-routes between Model Viewer and Radar)
     if (slider) {
         slider.addEventListener('input', (e) => {
+            const targetVal = parseInt(e.target.value, 10);
+
+            if (stateManager.activeMode === 'radar') {
+                pauseRadarPlayback();
+                setRadarFrame(targetVal);
+                return;
+            }
+
+            // Model Viewer mode:
             if (isPlaying) pausePlayback();
 
             const maxLoadedIdx = getMaxLoadedStepIndex();
-            let targetIndex = parseInt(e.target.value, 10);
+            let targetIndex = targetVal;
 
             if (targetIndex > maxLoadedIdx) {
                 targetIndex = maxLoadedIdx;
@@ -616,19 +647,44 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
         });
     }
 
-    if (playBtn) playBtn.addEventListener('click', togglePlayback);
-
-    if (prevBtn) {
-        prevBtn.addEventListener('click', () => {
-            if (isPlaying) pausePlayback();
-            stepRelative(-1);
+    // 🌟 Unified Play/Pause Button
+    if (playBtn) {
+        playBtn.addEventListener('click', () => {
+            if (stateManager.activeMode === 'radar') {
+                toggleRadarPlayback();
+            } else {
+                togglePlayback();
+            }
         });
     }
 
+    // 🌟 Unified Previous Frame Button
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            if (stateManager.activeMode === 'radar') {
+                pauseRadarPlayback();
+                let prevIdx = radarState.activeFrameIndex - 1;
+                if (prevIdx < 0) prevIdx = radarState.frames.length - 1;
+                setRadarFrame(prevIdx);
+            } else {
+                if (isPlaying) pausePlayback();
+                stepRelative(-1);
+            }
+        });
+    }
+
+    // 🌟 Unified Next Frame Button
     if (nextBtn) {
         nextBtn.addEventListener('click', () => {
-            if (isPlaying) pausePlayback();
-            stepRelative(1);
+            if (stateManager.activeMode === 'radar') {
+                pauseRadarPlayback();
+                let nextIdx = radarState.activeFrameIndex + 1;
+                if (nextIdx >= radarState.frames.length) nextIdx = 0;
+                setRadarFrame(nextIdx);
+            } else {
+                if (isPlaying) pausePlayback();
+                stepRelative(1);
+            }
         });
     }
 
