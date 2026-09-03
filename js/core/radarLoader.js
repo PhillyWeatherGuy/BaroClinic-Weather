@@ -1,42 +1,48 @@
 // js/core/radarLoader.js
 
 export const radarState = {
-    frames: [],
+    frames: [],          // [{ index, tag, label, date, tileUrl }]
     activeFrameIndex: 0,
     isPlaying: false
 };
 
-// 5-minute steps back to 120 minutes ago (25 frames)
-const MINUTE_OFFSETS = Array.from({ length: 25 }, (_, i) => 120 - (i * 5));
+const MINUTE_OFFSETS = [55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5, 0];
 
 /**
- * 🌟 Build IEM WMS Radar Loop (Supports 120+ minutes)
+ * 🌟 1. Build the Live IEM NEXRAD 12-Frame Loop
  */
 export function buildRadarTimeline() {
     const now = new Date();
     const frames = [];
 
     MINUTE_OFFSETS.forEach((minsAgo, idx) => {
-        // Floor to 5-minute intervals
-        const frameTime = new Date(now.getTime() - minsAgo * 60 * 1000);
-        frameTime.setUTCMinutes(Math.floor(frameTime.getUTCMinutes() / 5) * 5, 0, 0);
-
-        const isoTime = frameTime.toISOString().substring(0, 19) + 'Z'; // e.g., "2026-09-02T21:05:00Z"
+        const frameDate = new Date(now.getTime() - minsAgo * 60 * 1000);
+        const tag = minsAgo === 0 ? '900913' : `900913-m${String(minsAgo).padStart(2, '0')}m`;
         const label = minsAgo === 0 ? 'LIVE' : `-${minsAgo}m`;
 
-        // IEM WMS endpoint using TIME parameter
-        const tileUrl = `https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q-t.cgi?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=TRUE&LAYERS=nexrad-n0q-t&TIME=${isoTime}&SRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}`;
+        // Official IEM High-Speed Tile Service
+        const tileUrl = `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-${tag}/{z}/{x}/{y}.png`;
 
         frames.push({
             index: idx,
             minsAgo: minsAgo,
+            tag: tag,
             label: label,
-            date: frameTime,
+            date: frameDate,
             tileUrl: tileUrl
         });
     });
 
     radarState.frames = frames;
-    radarState.activeFrameIndex = frames.length - 1;
+    radarState.activeFrameIndex = frames.length - 1; // Default to LIVE frame
     return frames;
+}
+
+/**
+ * 🌟 2. Purge Radar State
+ */
+export function purgeRadarMemory() {
+    radarState.frames = [];
+    radarState.activeFrameIndex = 0;
+    radarState.isPlaying = false;
 }
