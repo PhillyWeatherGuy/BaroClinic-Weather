@@ -49,7 +49,8 @@ export async function initRadarMode(mapInstance) {
                 source: sourceId,
                 paint: {
                     'raster-opacity': (frame.index === liveIndex) ? 1.0 : 0.0,
-                    'raster-fade-duration': 100
+                    // 🌟 Set to 0 to eliminate all fade in / fade out pulsing
+                    'raster-fade-duration': 0
                 }
             }, firstOverlayId);
         }
@@ -61,7 +62,7 @@ export async function initRadarMode(mapInstance) {
 }
 
 /**
- * 🌟 2. Set Active Radar Frame & Instant Cross-fade
+ * 🌟 2. Set Active Radar Frame & Instant Frame Snap
  */
 export function setRadarFrame(frameIndex) {
     if (!radarState.frames || frameIndex < 0 || frameIndex >= radarState.frames.length) return;
@@ -69,7 +70,7 @@ export function setRadarFrame(frameIndex) {
     radarState.activeFrameIndex = frameIndex;
     const frameInfo = radarState.frames[frameIndex];
 
-    // Toggle layer opacities for instant 60 FPS loop
+    // Instant toggle between frames with zero fading
     if (radarMapInstance) {
         radarState.frames.forEach((f) => {
             const layerId = `iem-radar-layer-${f.index}`;
