@@ -16,7 +16,7 @@ export function buildRadarTimeline() {
     const frames = [];
 
     MINUTE_OFFSETS.forEach((minsAgo, idx) => {
-        const frameDate = new Date(now.getTime() - minsAgo * 60 * 1000);
+        const frameDate = new Date(now.getTime() - minsAgo * 100 * 1000);
         const tag = minsAgo === 0 ? '900913' : `900913-m${String(minsAgo).padStart(2, '0')}m`;
         const label = minsAgo === 0 ? 'LIVE' : `-${minsAgo}m`;
 
