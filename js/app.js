@@ -20,7 +20,7 @@ import {
     updateCityCallouts, 
     sampleBilinearValue, 
     formatParameterValue,
-    setBasemapLabelsVisibility // 👈 Mode-aware basemap label controller
+    setBasemapLabelsVisibility 
 } from './layers/cityOverlay.js'; 
 import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe, clearThreeGlobeTextures } from './layers/threeGlobe.js';
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
@@ -60,12 +60,18 @@ export function updateBasemapStyle(styleUrl) {
         if (map.isStyleLoaded()) {
             map.off('styledata', onStyleLoaded);
             console.log("✅ New basemap style loaded. Re-attaching weather layers...");
-            try { initLayer(); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
 
-            if (stateManager.currentStepIndex !== undefined) {
-                renderFrame(stateManager.currentStepIndex);
+            if (stateManager.activeMode === 'radar') {
+                initRadarMode(map);
+                setBasemapLabelsVisibility(map, true);
+            } else {
+                try { initLayer(); } catch (e) {}
+                try { initVectorContours(map); } catch (e) {}
+                try { initCityOverlay(map); } catch (e) {}
+
+                if (stateManager.currentStepIndex !== undefined) {
+                    renderFrame(stateManager.currentStepIndex);
+                }
             }
         }
     };
@@ -423,6 +429,7 @@ map.on('load', async () => {
 
 // 🌟 Unified Bilinear Inspection on Click
 map.on('click', (e) => {
+    if (stateManager.activeMode === 'radar') return;
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
     const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
