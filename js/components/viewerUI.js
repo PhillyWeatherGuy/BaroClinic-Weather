@@ -5,9 +5,9 @@ import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 import { updatePolarPalette } from '../layers/polarMap.js';
 
-// 🛰️ Radar Controller Hooks
+// 🛰️ Radar Imports (Fixed Path)
+import { radarState } from '../core/radarLoader.js';
 import { 
-    radarState, 
     setRadarFrame, 
     toggleRadarPlayback, 
     pauseRadarPlayback 
@@ -380,7 +380,7 @@ export function initModelCategoryBar() {
             e.currentTarget.classList.add('active');
             
             const category = e.currentTarget.getAttribute('data-category');
-            renderCategoryModels(category);
+            renderCategoryParameters(category);
         });
     });
 
