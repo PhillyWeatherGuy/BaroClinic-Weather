@@ -159,13 +159,19 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(tempVal)}°`;
     }
 
-    if (unit === '%') return `${Math.round(decodedVal)}%`;
-    if (unit.length > 0) return `${Math.round(decodedVal)} ${unit}`;
+    if (unit === '%') {
+        return `${Math.round(decodedVal)}%`;
+    }
+
+    if (unit.length > 0) {
+        return `${Math.round(decodedVal)} ${unit}`;
+    }
+
     return `${Math.round(decodedVal)}`;
 }
 
 /**
- * 🌟 Toggle Basemap Native City & Town Labels (Hidden for Model Viewer, Visible for Radar)
+ * 🌟 Toggle Basemap Native City & State Labels (Visible for Radar, Hidden for Models)
  */
 export function setBasemapLabelsVisibility(map, isVisible) {
     if (!map) return;
@@ -178,11 +184,14 @@ export function setBasemapLabelsVisibility(map, isVisible) {
         const id = layer.id.toLowerCase();
         const sourceLayer = (layer['source-layer'] || '').toLowerCase();
         if (layer.type === 'symbol' && (
-            id.includes('place_label_city') ||
-            id.includes('place_label_town') ||
-            id.includes('place_label_village') ||
-            id.includes('settlement') ||
-            sourceLayer.includes('place')
+            id.includes('place') || 
+            id.includes('settlement') || 
+            id.includes('city') || 
+            id.includes('town') || 
+            id.includes('village') ||
+            id.includes('label') ||
+            sourceLayer.includes('place') ||
+            sourceLayer.includes('label')
         )) {
             try {
                 map.setLayoutProperty(layer.id, 'visibility', visibilityVal);
@@ -195,12 +204,14 @@ export async function initCityOverlay(map) {
     mapInstance = map;
 
     for (const name in cityMarkers) {
-        if (cityMarkers[name]) cityMarkers[name].remove();
+        if (cityMarkers[name]) {
+            cityMarkers[name].remove();
+        }
     }
     cityMarkers = {};
     activeCities = [];
 
-    // 🌟 Model Viewer hides duplicate basemap city labels; Radar keeps them visible
+    // In radar mode, keep native basemap labels ON. In model mode, hide them for custom callouts.
     if (stateManager.activeMode === 'radar') {
         setBasemapLabelsVisibility(map, true);
     } else {
@@ -233,6 +244,7 @@ export async function initCityOverlay(map) {
 
         allGlobalCities = data.features.map((f, i) => {
             const pop = f.properties.POP_MAX || f.properties.pop_max || 0;
+            
             let minZoom = 6;
             if (pop >= 2000000) minZoom = 2;
             else if (pop >= 500000) minZoom = 4;
@@ -369,6 +381,7 @@ function renderCityValues(activeFrameState, manifest) {
 export function updateCityCallouts(map, activeFrameState, manifest) {
     if (!isLoaded) return;
 
+    // 🌟 Auto-suppress in radar mode or if explicitly flagged
     const isSuppressed = stateManager.activeMode === 'radar'
                       || stateManager.paramConfig?.suppress_city_overlay 
                       || manifest?.suppress_city_overlay;
