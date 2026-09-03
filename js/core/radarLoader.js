@@ -1,12 +1,14 @@
 // js/core/radarLoader.js
 
 export const radarState = {
-    frames: [],          // [{ index, tag, label, date, tileUrl }]
+    frames: [],          // [{ index, tag, label, date, tileUrl, tiles }]
     activeFrameIndex: 0,
     isPlaying: false
 };
 
 const MINUTE_OFFSETS = [55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5, 0];
+// 🌟 Official IEM DNS aliases to bypass the browser's 6-connection limit per domain
+const IEM_HOSTS = ['mesonet1', 'mesonet2', 'mesonet3', 'www'];
 
 /**
  * 🌟 1. Build the Live IEM NEXRAD 12-Frame Loop
@@ -20,8 +22,10 @@ export function buildRadarTimeline() {
         const tag = minsAgo === 0 ? '900913' : `900913-m${String(minsAgo).padStart(2, '0')}m`;
         const label = minsAgo === 0 ? 'LIVE' : `-${minsAgo}m`;
 
-        // Official IEM High-Speed Tile Service
-        const tileUrl = `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-${tag}/{z}/{x}/{y}.png`;
+        // Distribute frames across IEM host aliases to prevent connection throttling on desktop
+        const host = IEM_HOSTS[idx % IEM_HOSTS.length];
+        const tileUrl = `https://${host}.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-${tag}/{z}/{x}/{y}.png`;
+        const tiles = IEM_HOSTS.map(h => `https://${h}.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-${tag}/{z}/{x}/{y}.png`);
 
         frames.push({
             index: idx,
@@ -29,7 +33,8 @@ export function buildRadarTimeline() {
             tag: tag,
             label: label,
             date: frameDate,
-            tileUrl: tileUrl
+            tileUrl: tileUrl,
+            tiles: tiles
         });
     });
 
