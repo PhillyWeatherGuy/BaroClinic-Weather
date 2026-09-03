@@ -8,43 +8,20 @@ let currentVisibleIndex = -1;
 const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 
 /**
- * 🌟 Helper: Ensure MapLibre style is completely loaded before mutating layers
- */
-function ensureStyleLoaded(map) {
-    if (map.isStyleLoaded()) return Promise.resolve();
-    return new Promise((resolve) => {
-        const onStyleData = () => {
-            if (map.isStyleLoaded()) {
-                map.off('styledata', onStyleData);
-                resolve();
-            }
-        };
-        map.on('styledata', onStyleData);
-        map.once('load', () => resolve());
-    });
-}
-
-/**
  * 🌟 1. Launch Real-Time IEM Radar on Map
  */
 export async function initRadarMode(mapInstance) {
     if (!mapInstance) return;
     radarMapInstance = mapInstance;
 
-    // 1. Wait for basemap style to finish loading (prevents undefined getStyle() crash on desktop)
-    await ensureStyleLoaded(mapInstance);
-
-    // 2. Ensure canvas dimensions match viewport (fixes unrendered/blank viewport on laptop)
-    mapInstance.resize();
-
-    // 3. Build 12-frame real-time timeline
+    // 1. Build 12-frame real-time timeline
     const frames = buildRadarTimeline();
     const liveIndex = frames.length - 1;
+    currentVisibleIndex = liveIndex;
 
-    // 4. Find valid layer to place radar under (boundaries, county lines, text labels)
+    // 2. Find layer to place radar under (boundaries, county lines, text labels)
     let firstOverlayId = null;
-    const style = mapInstance.getStyle();
-    const layers = (style && style.layers) || [];
+    const layers = mapInstance.getStyle().layers || [];
     for (const layer of layers) {
         const id = layer.id.toLowerCase();
         const type = layer.type;
@@ -54,10 +31,7 @@ export async function initRadarMode(mapInstance) {
         }
     }
 
-    // Guard beforeId to ensure the layer exists in the runtime style
-    const beforeId = (firstOverlayId && mapInstance.getLayer(firstOverlayId)) ? firstOverlayId : undefined;
-
-    // 5. Add IEM tile sources and layers
+    // 3. Add IEM tile sources and layers (Keep ALL layers 'visible' so GPU preloads tiles)
     frames.forEach((frame) => {
         const sourceId = `iem-radar-src-${frame.index}`;
         const layerId = `iem-radar-layer-${frame.index}`;
@@ -76,21 +50,23 @@ export async function initRadarMode(mapInstance) {
                 type: 'raster',
                 source: sourceId,
                 layout: {
+                    // 🌟 MUST stay 'visible' so MapLibre buffers all 12 frames in GPU memory!
                     'visibility': 'visible'
                 },
                 paint: {
                     'raster-opacity': (frame.index === liveIndex) ? 1.0 : 0.0,
                     'raster-fade-duration': 0,
+                    // 🌟 Zero transition delay
                     'raster-opacity-transition': { duration: 0, delay: 0 },
                     'raster-resampling': 'linear'
                 }
-            }, beforeId);
+            }, firstOverlayId);
         }
     });
 
     syncRadarTimelineUI();
     setRadarFrame(liveIndex);
-    // Note: Controls are already bound centrally in viewerUI.js
+    bindRadarControls();
 }
 
 /**
@@ -104,7 +80,7 @@ export function setRadarFrame(frameIndex) {
     radarState.activeFrameIndex = frameIndex;
     const frameInfo = radarState.frames[frameIndex];
 
-    if (radarMapInstance && radarMapInstance.isStyleLoaded()) {
+    if (radarMapInstance) {
         const newLayerId = `iem-radar-layer-${frameIndex}`;
 
         // 1. Turn ON new frame (already warm in GPU memory)
@@ -220,6 +196,40 @@ function updateRadarSliderTrack() {
         rgba(56, 189, 248, 0.6) ${percent}%, 
         rgba(255, 255, 255, 0.15) ${percent}%, 
         rgba(255, 255, 255, 0.15) 100%)`;
+}
+
+function bindRadarControls() {
+    const slider = document.getElementById('timeline-slider');
+    const playBtn = document.getElementById('btn-play');
+    const prevBtn = document.getElementById('btn-prev');
+    const nextBtn = document.getElementById('btn-next');
+
+    if (slider) {
+        slider.oninput = (e) => {
+            if (isRadarPlaying) pauseRadarPlayback();
+            setRadarFrame(parseInt(e.target.value, 10));
+        };
+    }
+
+    if (playBtn) playBtn.onclick = toggleRadarPlayback;
+
+    if (prevBtn) {
+        prevBtn.onclick = () => {
+            if (isRadarPlaying) pauseRadarPlayback();
+            let prevIdx = radarState.activeFrameIndex - 1;
+            if (prevIdx < 0) prevIdx = radarState.frames.length - 1;
+            setRadarFrame(prevIdx);
+        };
+    }
+
+    if (nextBtn) {
+        nextBtn.onclick = () => {
+            if (isRadarPlaying) pauseRadarPlayback();
+            let nextIdx = radarState.activeFrameIndex + 1;
+            if (nextIdx >= radarState.frames.length) nextIdx = 0;
+            setRadarFrame(nextIdx);
+        };
+    }
 }
 
 /**
