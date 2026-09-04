@@ -51,30 +51,25 @@ const map = new maplibregl.Map({
 /**
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
-export function updateBasemapStyle(styleUrl) {
-    if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
+export function updateBasemapStyle(styleUrl, onLoaded = null) {
+    if (!map || !styleUrl) return;
+
+    if (stateManager.currentMapStyle === styleUrl && map.isStyleLoaded()) {
+        if (typeof onLoaded === 'function') onLoaded();
+        return;
+    }
 
     console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
 
-    const onStyleLoaded = () => {
-        if (map.isStyleLoaded()) {
-            map.off('styledata', onStyleLoaded);
-            console.log("✅ New basemap style loaded. Re-attaching weather layers...");
-
-            if (stateManager.activeMode === 'radar') {
-                setBasemapLabelsVisibility(map, true);
-                initRadarMode(map);
-                hideToast();
-            } else {
-                setBasemapLabelsVisibility(map, false);
-                try { initCityOverlay(map); } catch (e) {}
-                loadInitialModelData();
-            }
+    // 🌟 Register 'style.load' BEFORE setStyle() so it cannot be missed
+    map.once('style.load', () => {
+        console.log("✅ New basemap style loaded:", styleUrl);
+        if (typeof onLoaded === 'function') {
+            onLoaded();
         }
-    };
+    });
 
-    map.on('styledata', onStyleLoaded);
     map.setStyle(styleUrl);
 }
 
@@ -387,32 +382,26 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 Switch to dedicated Radar basemap
-        if (stateManager.currentMapStyle === './config/style_radar.json' && map.isStyleLoaded()) {
+        // 🌟 Switch to dedicated Radar basemap and initialize radar once style is ready
+        updateBasemapStyle('./config/style_radar.json', async () => {
             setBasemapLabelsVisibility(map, true);
             await initRadarMode(map);
             hideToast();
-        } else {
-            updateBasemapStyle('./config/style_radar.json');
-        }
+        });
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
-        // 🌟 Turn OFF native basemap labels for Model Viewer
-        setBasemapLabelsVisibility(map, false);
-
         // 🌟 Revert to Model Viewer basemap style
         const targetStyle = stateManager.currentTheme === 'dark'
             ? (stateManager.paramConfig?.map_style_dark || './config/style_default.json')
             : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
 
-        if (stateManager.currentMapStyle !== targetStyle) {
-            updateBasemapStyle(targetStyle);
-        } else {
+        updateBasemapStyle(targetStyle, async () => {
+            setBasemapLabelsVisibility(map, false);
             try { initCityOverlay(map); } catch (e) {}
             await loadInitialModelData();
             hideToast();
-        }
+        });
     }
 }
 
@@ -437,7 +426,6 @@ map.on('error', (e) => {
 
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
-    // 🌟 Ensure basemap labels start hidden by default for Model Viewer
     setBasemapLabelsVisibility(map, false);
     try { initVectorContours(map); } catch (err) {}
 });
