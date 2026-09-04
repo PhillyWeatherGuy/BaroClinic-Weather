@@ -1,5 +1,6 @@
 // js/components/radarUI.js
 import { radarState, buildRadarTimeline, purgeRadarMemory } from '../core/radarLoader.js';
+import { setBasemapLabelsVisibility } from '../layers/cityOverlay.js';
 
 let radarMapInstance = null;
 let radarPlayInterval = null;
@@ -67,6 +68,9 @@ export async function initRadarMode(mapInstance) {
     syncRadarTimelineUI();
     setRadarFrame(liveIndex);
     bindRadarControls();
+
+    // 🌟 Ensure native basemap labels (cities, towns, states) are visible in Radar mode
+    setBasemapLabelsVisibility(mapInstance, true);
 }
 
 /**
