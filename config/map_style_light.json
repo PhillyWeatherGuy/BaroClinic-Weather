@@ -132,7 +132,7 @@
       "type": "fill",
       "source": "openmaptiles",
       "source-layer": "water",
-      "minzoom": 7,
+      "minzoom": 0,
       "maxzoom": 24,
       "filter": [
         "all",
@@ -141,7 +141,7 @@
         ["!=", "intermittent", 1]
       ],
       "layout": {"visibility": "visible"},
-      "paint": {"fill-antialias": true, "fill-color": "rgba(0, 0, 0, 0)"}
+      "paint": {"fill-antialias": true, "fill-color": "#E7F1F4"}
     },
     {
       "id": "waterway",
@@ -306,69 +306,9 @@
       }
     },
     {
-      "id": "road_highway_casing",
-      "type": "line",
-      "metadata": {},
-      "source": "openmaptiles",
-      "source-layer": "transportation",
-      "minzoom": 8,
-      "filter": [
-        "all",
-        ["==", "$type", "LineString"],
-        ["!in", "class", "pier", "path", "rail"],
-        ["in", "class", "motorway", "trunk"]
-      ],
-      "layout": {
-        "line-cap": "round",
-        "line-join": "round",
-        "visibility": "visible"
-      },
-      "paint": {
-        "line-color": {
-          "stops": [
-            [6, "rgba(219, 219, 219, 1)"],
-            [10, "rgba(255, 255, 255, 1)"],
-            [16, "rgba(255, 255, 255, 1)"]
-          ]
-        },
-        "line-opacity": 1,
-        "line-width": {"stops": [[10, 4], [16, 16]]}
-      }
-    },
-    {
-      "id": "road_highway",
-      "type": "line",
-      "metadata": {},
-      "source": "openmaptiles",
-      "source-layer": "transportation",
-      "minzoom": 6,
-      "filter": [
-        "all",
-        ["==", "$type", "LineString"],
-        ["!in", "class", "pier", "path", "rail"],
-        ["in", "class", "motorway", "trunk"]
-      ],
-      "layout": {
-        "line-cap": "round",
-        "line-join": "round",
-        "visibility": "visible"
-      },
-      "paint": {
-        "line-color": {
-          "stops": [
-            [6, "rgba(0, 0, 0, 0.02)"],
-            [10, "rgba(0, 0, 0, 0.6)"],
-            [16, "rgba(0, 0, 0, 1)"]
-          ]
-        },
-        "line-opacity": 1,
-        "line-width": {"stops": [[7, 1], [10, 2], [16, 8]]}
-      }
-    },
-    {
       "id": "building_fill",
       "type": "fill",
-      "metadata": {"mapbox:group": "1444849364238.8171"},
+      "metadata": {"mapbox:group": "1444849388993.3071"},
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 16,
@@ -383,7 +323,7 @@
     {
       "id": "building_pattern",
       "type": "fill",
-      "metadata": {"mapbox:group": "1444849364238.8171"},
+      "metadata": {"mapbox:group": "1444849388993.3071"},
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 14,
@@ -517,89 +457,6 @@
       }
     },
     {
-      "id": "water_name_lakeline",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "water_name",
-      "minzoom": 7,
-      "filter": ["all", ["==", "$type", "LineString"], ["has", "name"]],
-      "layout": {
-        "symbol-placement": "line",
-        "symbol-spacing": 350,
-        "text-field": "{name:latin} {name:nonlatin}",
-        "text-font": ["Noto Sans Italic"],
-        "text-letter-spacing": 0.2,
-        "text-max-width": 5,
-        "text-rotation-alignment": "map",
-        "text-size": 14,
-        "visibility": "visible"
-      },
-      "paint": {"text-color": "rgba(255, 255, 255, 1)"}
-    },
-    {
-      "id": "water_name_way",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "waterway",
-      "minzoom": 14,
-      "filter": ["all", ["==", "$type", "LineString"], ["has", "name"]],
-      "layout": {
-        "symbol-placement": "line",
-        "symbol-spacing": 200,
-        "text-field": "{name:latin} {name:nonlatin}",
-        "text-font": ["Noto Sans Bold Italic"],
-        "text-max-width": 9,
-        "text-rotation-alignment": "map",
-        "text-size": {"stops": [[14, 12], [18, 19]]},
-        "visibility": "visible"
-      },
-      "paint": {"text-color": "rgba(255, 255, 255, 1)"}
-    },
-    {
-      "id": "water_name_sea",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "water_name",
-      "minzoom": 4,
-      "filter": [
-        "all",
-        ["==", "$type", "Point"],
-        ["!in", "class", "ocean", "lake"]
-      ],
-      "layout": {
-        "symbol-placement": "point",
-        "symbol-spacing": 250,
-        "text-field": "{name:latin} {name:nonlatin}",
-        "text-font": ["Noto Sans Italic"],
-        "text-letter-spacing": 0.1,
-        "text-max-width": 6,
-        "text-rotation-alignment": "map",
-        "text-size": 14,
-        "text-transform": "none"
-      },
-      "paint": {"text-color": "rgba(255, 255, 255, 1)"}
-    },
-    {
-      "id": "water_name_ocean",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "water_name",
-      "minzoom": 2,
-      "filter": ["all", ["==", "$type", "Point"], ["==", "class", "ocean"]],
-      "layout": {
-        "symbol-placement": "point",
-        "symbol-spacing": 350,
-        "text-field": "{name:latin} {name:nonlatin}",
-        "text-font": ["Noto Sans Italic"],
-        "text-letter-spacing": 0.2,
-        "text-max-width": 5,
-        "text-rotation-alignment": "map",
-        "text-size": 14,
-        "text-transform": "uppercase"
-      },
-      "paint": {"text-color": "rgba(255, 255, 255, 1)"}
-    },
-    {
       "id": "road_label_primary",
       "type": "symbol",
       "source": "openmaptiles",
@@ -689,7 +546,7 @@
         "text-anchor": "center",
         "text-field": "{name:latin} {name:nonlatin}",
         "text-font": {
-          "stops": [[12, ["Nunito Regular"]], [16, ["Nunito Semi Bold"]]]
+          "stops": [[12, ["Noto Sans Regular"]], [16, ["Noto Sans Bold"]]]
         },
         "text-max-width": 10,
         "text-size": {"stops": [[12, 12], [16, 18]]},
@@ -713,7 +570,7 @@
       "layout": {
         "icon-anchor": "center",
         "text-field": "{name:latin}",
-        "text-font": {"stops": [[4, ["Nunito Regular"]], [7, ["Nunito Bold"]]]},
+        "text-font": {"stops": [[4, ["Noto Sans Regular"]], [7, ["Noto Sans Bold"]]]},
         "text-max-width": 10,
         "text-size": {"stops": [[4, 14], [7, 15], [8, 19], [16, 22]]},
         "visibility": "visible"
@@ -738,7 +595,7 @@
         "icon-anchor": "center",
         "text-field": "{name:latin}",
         "text-font": {
-          "stops": [[8, ["Nunito Regular"]], [14, ["Nunito Bold"]]]
+          "stops": [[8, ["Noto Sans Regular"]], [14, ["Noto Sans Bold"]]]
         },
         "text-max-width": 10,
         "text-size": {"stops": [[8, 15], [16, 18]]},
@@ -762,7 +619,7 @@
       "filter": ["all", ["==", "class", "state"]],
       "layout": {
         "text-field": "{name:latin} {name:nonlatin}",
-        "text-font": ["Nunito Semi Bold"],
+        "text-font": ["Noto Sans Bold"],
         "text-max-width": 10,
         "text-size": 13,
         "text-transform": "uppercase",
@@ -780,7 +637,7 @@
       "layout": {
         "text-allow-overlap": false,
         "text-field": "{name:latin}",
-        "text-font": {"stops": [[3, ["Nunito Regular"]], [4, ["Nunito Bold"]]]},
+        "text-font": {"stops": [[3, ["Noto Sans Regular"]], [4, ["Noto Sans Bold"]]]},
         "text-ignore-placement": false,
         "text-max-width": 10,
         "text-padding": 2,
@@ -805,7 +662,7 @@
       "filter": ["==", "class", "continent"],
       "layout": {
         "text-field": "{name:latin}",
-        "text-font": ["Nunito Extra Bold"],
+        "text-font": ["Noto Sans Bold"],
         "text-line-height": 1.1,
         "text-max-width": 10,
         "text-size": {"stops": [[3, 18], [4, 24]]},
