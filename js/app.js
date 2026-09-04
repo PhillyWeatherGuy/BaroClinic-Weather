@@ -51,23 +51,7 @@ const map = new maplibregl.Map({
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
 export function updateBasemapStyle(styleUrl) {
-    if (!map || !styleUrl) return;
-
-    if (stateManager.currentMapStyle === styleUrl && map.isStyleLoaded()) {
-        if (stateManager.activeMode === 'radar') {
-            initRadarMode(map);
-            hideToast();
-        } else {
-            try { initLayer(); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
-            if (stateManager.currentStepIndex !== undefined) {
-                renderFrame(stateManager.currentStepIndex);
-            }
-            hideToast();
-        }
-        return;
-    }
+    if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
     console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
@@ -79,7 +63,6 @@ export function updateBasemapStyle(styleUrl) {
 
             if (stateManager.activeMode === 'radar') {
                 initRadarMode(map);
-                hideToast();
             } else {
                 try { initLayer(); } catch (e) {}
                 try { initVectorContours(map); } catch (e) {}
@@ -88,7 +71,6 @@ export function updateBasemapStyle(styleUrl) {
                 if (stateManager.currentStepIndex !== undefined) {
                     renderFrame(stateManager.currentStepIndex);
                 }
-                hideToast();
             }
         }
     };
@@ -406,18 +388,11 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 Switch to dark basemap. updateBasemapStyle will automatically call initRadarMode & hideToast when loaded!
-        updateBasemapStyle('./config/style_dark.json');
+        await initRadarMode(map);
+        hideToast();
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
-        // 🌟 Revert basemap style to the model parameter's style
-        const targetStyle = stateManager.currentTheme === 'dark'
-            ? (stateManager.paramConfig?.map_style_dark || './config/style_default.json')
-            : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
-
-        updateBasemapStyle(targetStyle);
-
         // 🌟 Wake up city overlay for Model Viewer
         try { initCityOverlay(map); } catch (e) {}
 
