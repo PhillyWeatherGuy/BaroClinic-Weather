@@ -52,20 +52,18 @@ const map = new maplibregl.Map({
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
 export function updateBasemapStyle(styleUrl) {
-    if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
+    if (!map || !styleUrl) return;
 
     console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
 
-    let loaded = false;
     const onStyleReady = () => {
-        if (loaded) return;
-        loaded = true;
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
         if (stateManager.activeMode === 'radar') {
             setBasemapLabelsVisibility(map, true);
             initRadarMode(map);
+            hideToast();
         } else {
             setBasemapLabelsVisibility(map, false);
             try { initLayer(); } catch (e) {}
@@ -78,9 +76,8 @@ export function updateBasemapStyle(styleUrl) {
         }
     };
 
-    // 🌟 Register 'style.load' before setStyle so the completion event is never missed
+    // 🌟 Wait for the style to load, then re-attach layers
     map.once('style.load', onStyleReady);
-    setTimeout(onStyleReady, 2000); // Fail-safe
     map.setStyle(styleUrl);
 }
 
@@ -172,7 +169,7 @@ export function handleKeyboardZoom(direction, x, y) {
  */
 export async function applyTheme(theme) {
     try {
-        // 🌟 1. Read active paramConfig directly from memory to prevent lookup mismatches
+        // 🌟 1. Prioritize active paramConfig from memory to avoid network lookups
         let paramConfig = stateManager.paramConfig;
 
         if (!paramConfig) {
@@ -186,14 +183,12 @@ export async function applyTheme(theme) {
             }
         }
 
-        if (paramConfig) {
-            const targetStyle = theme === 'dark'
-                ? (paramConfig.map_style_dark || './config/style_dark.json')
-                : (paramConfig.map_style_light || './config/style_default.json');
+        const targetStyle = theme === 'dark'
+            ? (paramConfig?.map_style_dark || './config/style_dark.json')
+            : (paramConfig?.map_style_light || './config/style_default.json');
 
-            if (targetStyle) {
-                updateBasemapStyle(targetStyle);
-            }
+        if (targetStyle) {
+            updateBasemapStyle(targetStyle);
         }
     } catch (err) {
         console.warn("Could not resolve theme basemap URL:", err);
@@ -404,7 +399,7 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 Load style_radar.json, then run radar when style is ready
+        // 🌟 Switch to dedicated Radar basemap
         if (stateManager.currentMapStyle !== './config/style_radar.json') {
             stateManager.currentMapStyle = './config/style_radar.json';
             
@@ -417,9 +412,7 @@ export async function switchAppMode(targetMode) {
                 hideToast();
             };
 
-            // Register completion event BEFORE setStyle
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000); // Fail-safe: radar will NEVER hang
             map.setStyle('./config/style_radar.json');
         } else {
             setBasemapLabelsVisibility(map, true);
@@ -451,7 +444,6 @@ export async function switchAppMode(targetMode) {
             };
 
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000); // Fail-safe
             map.setStyle(targetStyle);
         } else {
             try { initCityOverlay(map); } catch (e) {}
