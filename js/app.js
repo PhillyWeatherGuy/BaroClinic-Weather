@@ -51,16 +51,11 @@ const map = new maplibregl.Map({
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
 export function updateBasemapStyle(styleUrl) {
-    if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
+    return new Promise((resolve) => {
+        if (!map || !styleUrl) return resolve();
 
-    console.log(`[Map] Switching basemap style to: ${styleUrl}`);
-    stateManager.currentMapStyle = styleUrl;
-
-    const onStyleLoaded = () => {
-        if (map.isStyleLoaded()) {
-            map.off('styledata', onStyleLoaded);
-            console.log("✅ New basemap style loaded. Re-attaching weather layers...");
-
+        // If the style is already loaded, re-attach appropriate layers immediately
+        if (stateManager.currentMapStyle === styleUrl && map.isStyleLoaded()) {
             if (stateManager.activeMode === 'radar') {
                 initRadarMode(map);
             } else {
@@ -72,11 +67,35 @@ export function updateBasemapStyle(styleUrl) {
                     renderFrame(stateManager.currentStepIndex);
                 }
             }
+            return resolve();
         }
-    };
 
-    map.on('styledata', onStyleLoaded);
-    map.setStyle(styleUrl);
+        console.log(`[Map] Switching basemap style to: ${styleUrl}`);
+        stateManager.currentMapStyle = styleUrl;
+
+        const onStyleLoaded = () => {
+            if (map.isStyleLoaded()) {
+                map.off('styledata', onStyleLoaded);
+                console.log("✅ New basemap style loaded. Re-attaching weather layers...");
+
+                if (stateManager.activeMode === 'radar') {
+                    initRadarMode(map);
+                } else {
+                    try { initLayer(); } catch (e) {}
+                    try { initVectorContours(map); } catch (e) {}
+                    try { initCityOverlay(map); } catch (e) {}
+
+                    if (stateManager.currentStepIndex !== undefined) {
+                        renderFrame(stateManager.currentStepIndex);
+                    }
+                }
+                resolve();
+            }
+        };
+
+        map.on('styledata', onStyleLoaded);
+        map.setStyle(styleUrl);
+    });
 }
 
 /**
@@ -388,11 +407,19 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        await initRadarMode(map);
+        // 🌟 Switch directly to Toner Dark basemap for Radar
+        await updateBasemapStyle('./config/style_dark.json');
         hideToast();
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
+        // 🌟 Switch back to the active parameter's style (style_default.json for 2t)
+        const targetStyle = stateManager.currentTheme === 'dark'
+            ? (stateManager.paramConfig?.map_style_dark || './config/style_default.json')
+            : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
+
+        await updateBasemapStyle(targetStyle);
+
         // 🌟 Wake up city overlay for Model Viewer
         try { initCityOverlay(map); } catch (e) {}
 
