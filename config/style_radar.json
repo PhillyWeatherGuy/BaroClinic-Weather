@@ -25,7 +25,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "rgb(12,12,12)"
+        "background-color": "rgb(59, 51, 59, 1)"
       }
     },
     {
