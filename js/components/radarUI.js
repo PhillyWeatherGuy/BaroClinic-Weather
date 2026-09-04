@@ -20,13 +20,18 @@ export async function initRadarMode(mapInstance) {
     const liveIndex = frames.length - 1;
     currentVisibleIndex = liveIndex;
 
-    // 2. Find layer to place radar under (boundaries, county lines, text labels)
+    // 2. Find layer to place radar under (above fills, but beneath county lines, borders & labels)
     let firstOverlayId = null;
     const layers = mapInstance.getStyle().layers || [];
     for (const layer of layers) {
         const id = layer.id.toLowerCase();
-        const type = layer.type;
-        if (type === 'symbol' || type === 'line' || id.includes('admin') || id.includes('boundary') || id.includes('border') || id.includes('road')) {
+        if (
+            id.includes('boundary_county') ||
+            id.includes('boundary_state') ||
+            id.includes('admin') ||
+            id.startsWith('boundary_') ||
+            id.startsWith('place_')
+        ) {
             firstOverlayId = layer.id;
             break;
         }
