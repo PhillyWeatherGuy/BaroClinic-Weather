@@ -65,15 +65,11 @@ export function updateBasemapStyle(styleUrl) {
             if (stateManager.activeMode === 'radar') {
                 setBasemapLabelsVisibility(map, true);
                 initRadarMode(map);
+                hideToast();
             } else {
                 setBasemapLabelsVisibility(map, false);
-                try { initLayer(); } catch (e) {}
-                try { initVectorContours(map); } catch (e) {}
                 try { initCityOverlay(map); } catch (e) {}
-
-                if (stateManager.currentStepIndex !== undefined) {
-                    renderFrame(stateManager.currentStepIndex);
-                }
+                loadInitialModelData();
             }
         }
     };
@@ -391,22 +387,32 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 Ensure native labels are visible for Radar
-        setBasemapLabelsVisibility(map, true);
-
-        await initRadarMode(map);
-        hideToast();
+        // 🌟 Switch to dedicated Radar basemap
+        if (stateManager.currentMapStyle === './config/style_radar.json' && map.isStyleLoaded()) {
+            setBasemapLabelsVisibility(map, true);
+            await initRadarMode(map);
+            hideToast();
+        } else {
+            updateBasemapStyle('./config/style_radar.json');
+        }
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
         // 🌟 Turn OFF native basemap labels for Model Viewer
         setBasemapLabelsVisibility(map, false);
 
-        // 🌟 Wake up city overlay for Model Viewer
-        try { initCityOverlay(map); } catch (e) {}
+        // 🌟 Revert to Model Viewer basemap style
+        const targetStyle = stateManager.currentTheme === 'dark'
+            ? (stateManager.paramConfig?.map_style_dark || './config/style_default.json')
+            : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
 
-        await loadInitialModelData();
-        hideToast();
+        if (stateManager.currentMapStyle !== targetStyle) {
+            updateBasemapStyle(targetStyle);
+        } else {
+            try { initCityOverlay(map); } catch (e) {}
+            await loadInitialModelData();
+            hideToast();
+        }
     }
 }
 
