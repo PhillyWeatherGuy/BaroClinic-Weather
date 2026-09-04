@@ -20,7 +20,8 @@ import {
     updateCityCallouts, 
     sampleBilinearValue, 
     formatParameterValue,
-    destroyCityOverlay 
+    destroyCityOverlay,
+    setBasemapLabelsVisibility 
 } from './layers/cityOverlay.js'; 
 import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe, clearThreeGlobeTextures } from './layers/threeGlobe.js';
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
@@ -62,8 +63,10 @@ export function updateBasemapStyle(styleUrl) {
             console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
             if (stateManager.activeMode === 'radar') {
+                setBasemapLabelsVisibility(map, true);
                 initRadarMode(map);
             } else {
+                setBasemapLabelsVisibility(map, false);
                 try { initLayer(); } catch (e) {}
                 try { initVectorContours(map); } catch (e) {}
                 try { initCityOverlay(map); } catch (e) {}
@@ -388,11 +391,17 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
+        // 🌟 Ensure native labels are visible for Radar
+        setBasemapLabelsVisibility(map, true);
+
         await initRadarMode(map);
         hideToast();
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
+        // 🌟 Turn OFF native basemap labels for Model Viewer
+        setBasemapLabelsVisibility(map, false);
+
         // 🌟 Wake up city overlay for Model Viewer
         try { initCityOverlay(map); } catch (e) {}
 
@@ -422,6 +431,8 @@ map.on('error', (e) => {
 
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
+    // 🌟 Ensure basemap labels start hidden by default for Model Viewer
+    setBasemapLabelsVisibility(map, false);
     try { initVectorContours(map); } catch (err) {}
 });
 
