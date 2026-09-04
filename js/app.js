@@ -57,28 +57,30 @@ export function updateBasemapStyle(styleUrl) {
     console.log(`[Map] Switching basemap style to: ${styleUrl}`);
     stateManager.currentMapStyle = styleUrl;
 
-    const onStyleLoaded = () => {
-        if (map.isStyleLoaded()) {
-            map.off('styledata', onStyleLoaded);
-            console.log("✅ New basemap style loaded. Re-attaching weather layers...");
+    let loaded = false;
+    const onStyleReady = () => {
+        if (loaded) return;
+        loaded = true;
+        console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
-            if (stateManager.activeMode === 'radar') {
-                setBasemapLabelsVisibility(map, true);
-                initRadarMode(map);
-            } else {
-                setBasemapLabelsVisibility(map, false);
-                try { initLayer(); } catch (e) {}
-                try { initVectorContours(map); } catch (e) {}
-                try { initCityOverlay(map); } catch (e) {}
+        if (stateManager.activeMode === 'radar') {
+            setBasemapLabelsVisibility(map, true);
+            initRadarMode(map);
+        } else {
+            setBasemapLabelsVisibility(map, false);
+            try { initLayer(); } catch (e) {}
+            try { initVectorContours(map); } catch (e) {}
+            try { initCityOverlay(map); } catch (e) {}
 
-                if (stateManager.currentStepIndex !== undefined) {
-                    renderFrame(stateManager.currentStepIndex);
-                }
+            if (stateManager.currentStepIndex !== undefined) {
+                renderFrame(stateManager.currentStepIndex);
             }
         }
     };
 
-    map.on('styledata', onStyleLoaded);
+    // 🌟 Register 'style.load' before setStyle so the completion event is never missed
+    map.once('style.load', onStyleReady);
+    setTimeout(onStyleReady, 2000); // Fail-safe
     map.setStyle(styleUrl);
 }
 
