@@ -172,25 +172,36 @@ export function handleKeyboardZoom(direction, x, y) {
  */
 export async function applyTheme(theme) {
     try {
-        const resp = await fetch('./config/models.json');
-        if (resp.ok) {
-            const data = await resp.json();
-            const paramConfig = data?.parameters?.[stateManager.activeParam];
-            if (paramConfig) {
-                const targetStyle = theme === 'dark'
-                    ? (paramConfig.map_style_dark || paramConfig.map_style)
-                    : (paramConfig.map_style_light || paramConfig.map_style);
-                if (targetStyle) {
-                    updateBasemapStyle(targetStyle);
-                }
+        // 🌟 1. Read active paramConfig directly from memory to prevent lookup mismatches
+        let paramConfig = stateManager.paramConfig;
+
+        if (!paramConfig) {
+            const resp = await fetch('./config/models.json');
+            if (resp.ok) {
+                const data = await resp.json();
+                const params = data?.parameters || {};
+                paramConfig = params[stateManager.activeParam] ||
+                    Object.values(params).find(p => p.id === stateManager.activeParam || p.name === stateManager.activeParam) ||
+                    params['2t'];
+            }
+        }
+
+        if (paramConfig) {
+            const targetStyle = theme === 'dark'
+                ? (paramConfig.map_style_dark || './config/style_dark.json')
+                : (paramConfig.map_style_light || './config/style_default.json');
+
+            if (targetStyle) {
+                updateBasemapStyle(targetStyle);
             }
         }
     } catch (err) {
         console.warn("Could not resolve theme basemap URL:", err);
     }
 
+    const paramId = stateManager.paramConfig?.palette || stateManager.paramConfig?.id || stateManager.activeParam;
     const paletteFunc = (theme === 'dark') ? getDarkPalette : getLightPalette;
-    const newPalette = paletteFunc(stateManager.activeParam);
+    const newPalette = paletteFunc(paramId);
 
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
         customShaderLayer.updatePalette(newPalette);
@@ -423,7 +434,7 @@ export async function switchAppMode(targetMode) {
         setBasemapLabelsVisibility(map, false);
 
         const targetStyle = stateManager.currentTheme === 'dark'
-            ? (stateManager.paramConfig?.map_style_dark || './config/style_default.json')
+            ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
             : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
 
         // 🌟 Switch back to model basemap if coming from radar
