@@ -40,7 +40,7 @@
       ],
       "paint": {
         "fill-antialias": false,
-        "fill-color": "rgb(2, 20, 37, 1)"
+        "fill-color": "rgba(59, 51, 59, 1)"
       }
     },
     {
@@ -920,7 +920,7 @@
       "layout": {
         "icon-image": ["step", ["zoom"], "circle-11", 9, ""],
         "icon-size": 0.4,
-        "text-anchor": ["step", ["zoom"], "left", 8, "center"],
+        "text-anchor":["step", ["zoom"], "left", 8, "center"],
         "text-field": [
           "case",
           ["has", "name:nonlatin"],
