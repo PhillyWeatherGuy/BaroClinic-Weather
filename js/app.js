@@ -52,48 +52,19 @@ const map = new maplibregl.Map({
  */
 export function updateBasemapStyle(styleUrl) {
     return new Promise((resolve) => {
-        if (!map || !styleUrl) return resolve();
-
-        // If the style is already loaded, re-attach appropriate layers immediately
-        if (stateManager.currentMapStyle === styleUrl && map.isStyleLoaded()) {
-            if (stateManager.activeMode === 'radar') {
-                initRadarMode(map);
-            } else {
-                try { initLayer(); } catch (e) {}
-                try { initVectorContours(map); } catch (e) {}
-                try { initCityOverlay(map); } catch (e) {}
-
-                if (stateManager.currentStepIndex !== undefined) {
-                    renderFrame(stateManager.currentStepIndex);
-                }
-            }
+        if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) {
             return resolve();
         }
 
         console.log(`[Map] Switching basemap style to: ${styleUrl}`);
         stateManager.currentMapStyle = styleUrl;
 
-        const onStyleLoaded = () => {
-            if (map.isStyleLoaded()) {
-                map.off('styledata', onStyleLoaded);
-                console.log("✅ New basemap style loaded. Re-attaching weather layers...");
+        // In MapLibre, 'style.load' fires as soon as the new style is parsed and ready
+        map.once('style.load', () => {
+            console.log("✅ New basemap style loaded.");
+            resolve();
+        });
 
-                if (stateManager.activeMode === 'radar') {
-                    initRadarMode(map);
-                } else {
-                    try { initLayer(); } catch (e) {}
-                    try { initVectorContours(map); } catch (e) {}
-                    try { initCityOverlay(map); } catch (e) {}
-
-                    if (stateManager.currentStepIndex !== undefined) {
-                        renderFrame(stateManager.currentStepIndex);
-                    }
-                }
-                resolve();
-            }
-        };
-
-        map.on('styledata', onStyleLoaded);
         map.setStyle(styleUrl);
     });
 }
@@ -195,7 +166,17 @@ export async function applyTheme(theme) {
                     ? (paramConfig.map_style_dark || paramConfig.map_style)
                     : (paramConfig.map_style_light || paramConfig.map_style);
                 if (targetStyle) {
-                    updateBasemapStyle(targetStyle);
+                    await updateBasemapStyle(targetStyle);
+                    if (stateManager.activeMode === 'radar') {
+                        await initRadarMode(map);
+                    } else {
+                        initLayer();
+                        try { initVectorContours(map); } catch (e) {}
+                        try { initCityOverlay(map); } catch (e) {}
+                        if (stateManager.currentStepIndex !== undefined) {
+                            renderFrame(stateManager.currentStepIndex);
+                        }
+                    }
                 }
             }
         }
@@ -407,13 +388,16 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 Switch directly to Toner Dark basemap for Radar
+        // 🌟 1. Switch to dark basemap
         await updateBasemapStyle('./config/style_dark.json');
+
+        // 🌟 2. Initialize radar layers on top of the newly loaded style
+        await initRadarMode(map);
         hideToast();
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
-        // 🌟 Switch back to the active parameter's style (style_default.json for 2t)
+        // 🌟 Revert basemap style to the model parameter's style
         const targetStyle = stateManager.currentTheme === 'dark'
             ? (stateManager.paramConfig?.map_style_dark || './config/style_default.json')
             : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
