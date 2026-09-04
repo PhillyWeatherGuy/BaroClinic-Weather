@@ -51,22 +51,50 @@ const map = new maplibregl.Map({
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
 export function updateBasemapStyle(styleUrl) {
-    return new Promise((resolve) => {
-        if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) {
-            return resolve();
+    if (!map || !styleUrl) return;
+
+    if (stateManager.currentMapStyle === styleUrl && map.isStyleLoaded()) {
+        if (stateManager.activeMode === 'radar') {
+            initRadarMode(map);
+            hideToast();
+        } else {
+            try { initLayer(); } catch (e) {}
+            try { initVectorContours(map); } catch (e) {}
+            try { initCityOverlay(map); } catch (e) {}
+            if (stateManager.currentStepIndex !== undefined) {
+                renderFrame(stateManager.currentStepIndex);
+            }
+            hideToast();
         }
+        return;
+    }
 
-        console.log(`[Map] Switching basemap style to: ${styleUrl}`);
-        stateManager.currentMapStyle = styleUrl;
+    console.log(`[Map] Switching basemap style to: ${styleUrl}`);
+    stateManager.currentMapStyle = styleUrl;
 
-        // In MapLibre, 'style.load' fires as soon as the new style is parsed and ready
-        map.once('style.load', () => {
-            console.log("✅ New basemap style loaded.");
-            resolve();
-        });
+    const onStyleLoaded = () => {
+        if (map.isStyleLoaded()) {
+            map.off('styledata', onStyleLoaded);
+            console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
-        map.setStyle(styleUrl);
-    });
+            if (stateManager.activeMode === 'radar') {
+                initRadarMode(map);
+                hideToast();
+            } else {
+                try { initLayer(); } catch (e) {}
+                try { initVectorContours(map); } catch (e) {}
+                try { initCityOverlay(map); } catch (e) {}
+
+                if (stateManager.currentStepIndex !== undefined) {
+                    renderFrame(stateManager.currentStepIndex);
+                }
+                hideToast();
+            }
+        }
+    };
+
+    map.on('styledata', onStyleLoaded);
+    map.setStyle(styleUrl);
 }
 
 /**
@@ -166,17 +194,7 @@ export async function applyTheme(theme) {
                     ? (paramConfig.map_style_dark || paramConfig.map_style)
                     : (paramConfig.map_style_light || paramConfig.map_style);
                 if (targetStyle) {
-                    await updateBasemapStyle(targetStyle);
-                    if (stateManager.activeMode === 'radar') {
-                        await initRadarMode(map);
-                    } else {
-                        initLayer();
-                        try { initVectorContours(map); } catch (e) {}
-                        try { initCityOverlay(map); } catch (e) {}
-                        if (stateManager.currentStepIndex !== undefined) {
-                            renderFrame(stateManager.currentStepIndex);
-                        }
-                    }
+                    updateBasemapStyle(targetStyle);
                 }
             }
         }
@@ -388,12 +406,8 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 1. Switch to dark basemap
-        await updateBasemapStyle('./config/style_dark.json');
-
-        // 🌟 2. Initialize radar layers on top of the newly loaded style
-        await initRadarMode(map);
-        hideToast();
+        // 🌟 Switch to dark basemap. updateBasemapStyle will automatically call initRadarMode & hideToast when loaded!
+        updateBasemapStyle('./config/style_dark.json');
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
@@ -402,7 +416,7 @@ export async function switchAppMode(targetMode) {
             ? (stateManager.paramConfig?.map_style_dark || './config/style_default.json')
             : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
 
-        await updateBasemapStyle(targetStyle);
+        updateBasemapStyle(targetStyle);
 
         // 🌟 Wake up city overlay for Model Viewer
         try { initCityOverlay(map); } catch (e) {}
