@@ -132,7 +132,7 @@
       "type": "fill",
       "source": "openmaptiles",
       "source-layer": "water",
-      "minzoom": 7,
+      "minzoom": 0,
       "maxzoom": 24,
       "filter": [
         "all",
@@ -141,7 +141,7 @@
         ["!=", "intermittent", 1]
       ],
       "layout": {"visibility": "visible"},
-      "paint": {"fill-antialias": true, "fill-color": "rgba(0, 0, 0, 0)"}
+      "paint": {"fill-antialias": true, "fill-color": "rgba(2, 20, 37, 1)"}
     },
     {
       "id": "waterway",
@@ -268,9 +268,9 @@
       "paint": {
         "line-color": {
           "stops": [
-            [10, "rgba(0, 0, 0, 0.3)"],
-            [12, "rgba(0, 0, 0, 0.5)"],
-            [15, "rgba(0, 0, 0, 1)"]
+            [10, "rgba(255, 255, 255, 0.15)"],
+            [12, "rgba(255, 255, 255, 0.3)"],
+            [15, "rgba(255, 255, 255, 0.6)"]
           ]
         },
         "line-width": {"stops": [[13, 0.5], [15, 3], [17, 8]]}
@@ -297,9 +297,9 @@
       "paint": {
         "line-color": {
           "stops": [
-            [8, "rgba(0, 0, 0, 0.19)"],
-            [10, "rgba(0, 0, 0, 0.6)"],
-            [17, "rgba(0, 0, 0, 1)"]
+            [8, "rgba(255, 255, 255, 0.25)"],
+            [10, "rgba(255, 255, 255, 0.5)"],
+            [17, "rgba(255, 255, 255, 0.85)"]
           ]
         },
         "line-width": {"stops": [[12, 0.75], [15, 6], [17, 8]]}
@@ -311,7 +311,7 @@
       "metadata": {},
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 8,
+      "minzoom": 6,
       "filter": [
         "all",
         ["==", "$type", "LineString"],
@@ -326,13 +326,13 @@
       "paint": {
         "line-color": {
           "stops": [
-            [6, "rgba(219, 219, 219, 1)"],
-            [10, "rgba(255, 255, 255, 1)"],
-            [16, "rgba(255, 255, 255, 1)"]
+            [6, "rgba(0, 0, 0, 0.4)"],
+            [10, "rgba(0, 0, 0, 0.6)"],
+            [16, "rgba(0, 0, 0, 0.8)"]
           ]
         },
         "line-opacity": 1,
-        "line-width": {"stops": [[10, 4], [16, 16]]}
+        "line-width": {"stops": [[6, 2], [10, 4], [16, 16]]}
       }
     },
     {
@@ -356,19 +356,19 @@
       "paint": {
         "line-color": {
           "stops": [
-            [6, "rgba(0, 0, 0, 0.02)"],
-            [10, "rgba(0, 0, 0, 0.6)"],
-            [16, "rgba(0, 0, 0, 1)"]
+            [6, "rgba(255, 255, 255, 0.35)"],
+            [10, "rgba(255, 255, 255, 0.65)"],
+            [16, "rgba(255, 255, 255, 0.95)"]
           ]
         },
         "line-opacity": 1,
-        "line-width": {"stops": [[7, 1], [10, 2], [16, 8]]}
+        "line-width": {"stops": [[6, 1], [7, 1.2], [10, 2], [16, 8]]}
       }
     },
     {
       "id": "building_fill",
       "type": "fill",
-      "metadata": {"mapbox:group": "1444849364238.8171"},
+      "metadata": {"mapbox:group": "1444849388993.3071"},
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 16,
@@ -383,7 +383,7 @@
     {
       "id": "building_pattern",
       "type": "fill",
-      "metadata": {"mapbox:group": "1444849364238.8171"},
+      "metadata": {"mapbox:group": "1444849388993.3071"},
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 14,
@@ -698,7 +698,7 @@
         "text-anchor": "center",
         "text-field": "{name:latin} {name:nonlatin}",
         "text-font": {
-          "stops": [[12, ["Nunito Regular"]], [16, ["Nunito Semi Bold"]]]
+          "stops": [[12, ["Noto Sans Regular"]], [16, ["Noto Sans Bold"]]]
         },
         "text-max-width": 10,
         "text-size": {"stops": [[12, 12], [16, 18]]},
@@ -722,7 +722,7 @@
       "layout": {
         "icon-anchor": "center",
         "text-field": "{name:latin}",
-        "text-font": {"stops": [[4, ["Nunito Regular"]], [7, ["Nunito Bold"]]]},
+        "text-font": {"stops": [[4, ["Noto Sans Regular"]], [7, ["Noto Sans Bold"]]]},
         "text-max-width": 10,
         "text-size": {"stops": [[4, 14], [7, 15], [8, 19], [16, 22]]},
         "visibility": "visible"
@@ -747,7 +747,7 @@
         "icon-anchor": "center",
         "text-field": "{name:latin}",
         "text-font": {
-          "stops": [[8, ["Nunito Regular"]], [14, ["Nunito Bold"]]]
+          "stops": [[8, ["Noto Sans Regular"]], [14, ["Noto Sans Bold"]]]
         },
         "text-max-width": 10,
         "text-size": {"stops": [[8, 15], [16, 18]]},
@@ -771,13 +771,17 @@
       "filter": ["all", ["==", "class", "state"]],
       "layout": {
         "text-field": "{name:latin} {name:nonlatin}",
-        "text-font": ["Nunito Semi Bold"],
+        "text-font": ["Noto Sans Bold"],
         "text-max-width": 10,
         "text-size": 13,
         "text-transform": "uppercase",
         "visibility": "visible"
       },
-      "paint": {"text-color": "rgba(255, 255, 255, 1)"}
+      "paint": {
+        "text-color": "rgba(255, 255, 255, 1)",
+        "text-halo-color": "rgba(0, 0, 0, 1)",
+        "text-halo-width": 2
+      }
     },
     {
       "id": "place_label_country",
@@ -789,7 +793,7 @@
       "layout": {
         "text-allow-overlap": false,
         "text-field": "{name:latin}",
-        "text-font": {"stops": [[3, ["Nunito Regular"]], [4, ["Nunito Bold"]]]},
+        "text-font": {"stops": [[3, ["Noto Sans Regular"]], [4, ["Noto Sans Bold"]]]},
         "text-ignore-placement": false,
         "text-max-width": 10,
         "text-padding": 2,
@@ -814,7 +818,7 @@
       "filter": ["==", "class", "continent"],
       "layout": {
         "text-field": "{name:latin}",
-        "text-font": ["Nunito Extra Bold"],
+        "text-font": ["Noto Sans Bold"],
         "text-line-height": 1.1,
         "text-max-width": 10,
         "text-size": {"stops": [[3, 18], [4, 24]]},
