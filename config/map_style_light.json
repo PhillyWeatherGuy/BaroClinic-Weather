@@ -21,6 +21,10 @@
     "us_counties": {
       "type": "geojson",
       "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson"
+    },
+    "ne_coastlines": {
+      "type": "geojson",
+      "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson"
     }
   },
   "sprite": "https://openmaptiles.github.io/maptiler-toner-gl-style/sprite",
@@ -579,11 +583,22 @@
       }
     },
     {
+      "id": "coastline_far",
+      "type": "line",
+      "source": "ne_coastlines",
+      "minzoom": 0,
+      "maxzoom": 5,
+      "paint": {
+        "line-color": "#000000",
+        "line-width": 1.5
+      }
+    },
+    {
       "id": "water_outline",
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "water",
-      "minzoom": 0,
+      "minzoom": 5,
       "maxzoom": 24,
       "paint": {
         "line-color": "#000000",
