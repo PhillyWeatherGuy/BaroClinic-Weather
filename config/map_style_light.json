@@ -587,7 +587,7 @@
       "type": "line",
       "source": "ne_coastlines",
       "minzoom": 0,
-      "maxzoom": 5,
+      "maxzoom": 2,
       "paint": {
         "line-color": "#000000",
         "line-width": 1.5
@@ -598,7 +598,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "water",
-      "minzoom": 5,
+      "minzoom": 2,
       "maxzoom": 24,
       "paint": {
         "line-color": "#000000",
