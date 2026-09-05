@@ -16,6 +16,14 @@
     "us_counties": {
       "type": "geojson",
       "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson"
+    },
+    "ne_ocean": {
+      "type": "geojson",
+      "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_ocean.geojson"
+    },
+    "ne_coastlines": {
+      "type": "geojson",
+      "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson"
     }
   },
   "sprite": "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
@@ -26,6 +34,16 @@
       "type": "background",
       "paint": {
         "background-color": "rgb(59, 51, 59, 1)"
+      }
+    },
+    {
+      "id": "ocean_far",
+      "type": "fill",
+      "source": "ne_ocean",
+      "maxzoom": 6,
+      "paint": {
+        "fill-antialias": true,
+        "fill-color": "rgba(2, 20, 37, 1)"
       }
     },
     {
@@ -44,11 +62,23 @@
       }
     },
     {
+      "id": "coastline_far",
+      "type": "line",
+      "source": "ne_coastlines",
+      "minzoom": 0,
+      "maxzoom": 2,
+      "paint": {
+        "line-color": "#ffffff",
+        "line-opacity": 0.85,
+        "line-width": 1.5
+      }
+    },
+    {
       "id": "water_outline",
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "water",
-      "minzoom": 0,
+      "minzoom": 2,
       "maxzoom": 24,
       "filter": ["match", ["geometry-type"], ["MultiPolygon", "Polygon"], true, false],
       "paint": {
