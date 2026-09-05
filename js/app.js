@@ -104,6 +104,7 @@ export function applyView(targetView) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
             try { updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest); } catch (e) {}
             if (stateManager.globalSteps && stateManager.globalSteps[stateManager.currentStepIndex]) {
+                try { initVectorContours(map); } catch (e) {}
                 updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
             }
         }
@@ -306,6 +307,9 @@ async function renderFrame(globalIdx) {
         try {
             updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
         } catch (e) {}
+
+        // 🌟 Ensure vector contours source and layer exist before updating data
+        try { initVectorContours(map); } catch (e) {}
         updateVectorContours(frameInfo.step);
     } else if (activeView === '3d' && threeGlobeLoaded) {
         updateThreeGlobeFrame(stateManager.activeFrameState);
@@ -354,6 +358,7 @@ async function loadInitialModelData() {
     try {
         await fetchManifest(null, 'ecmwf', '2t');
         initLayer();
+        try { initVectorContours(map); } catch (e) {}
         syncModelRunDropdown();
 
         if (stateManager.manifest && stateManager.manifest.chunks) {
@@ -446,6 +451,7 @@ export async function switchAppMode(targetMode) {
                 if (loaded) return;
                 loaded = true;
                 try { initCityOverlay(map); } catch (e) {}
+                try { initVectorContours(map); } catch (e) {}
                 await loadInitialModelData();
                 hideToast();
             };
@@ -455,6 +461,7 @@ export async function switchAppMode(targetMode) {
             map.setStyle(targetStyle);
         } else {
             try { initCityOverlay(map); } catch (e) {}
+            try { initVectorContours(map); } catch (e) {}
             await loadInitialModelData();
             hideToast();
         }
