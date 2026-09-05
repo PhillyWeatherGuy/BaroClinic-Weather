@@ -30,13 +30,13 @@ export function initVectorContours(map) {
                 'line-cap': 'round'
             },
             paint: {
-                'line-color': ['coalesce', ['get', 'color'], '#4169E1'],
+                'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
                 'line-width': ['coalesce', ['get', 'width'], 2.0],
                 'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
             }
         });
 
-        // 2. Inline Contour Labels ("32°F Freezing Line", "1052", etc.)
+        // 2. Inline Contour Labels ("32°F Freezing Line", "540", etc.)
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
@@ -45,7 +45,8 @@ export function initVectorContours(map) {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
                 'text-size': 11,
-                'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
+                'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
                 'text-padding': 12
             },
@@ -76,10 +77,12 @@ export function clearVectorContours() {
  * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
  */
 async function loadMasterContourFile() {
-    const model = stateManager.manifest?.model || 'ecmwf';
-    const param = stateManager.manifest?.parameter || '2t';
-    const targetDate = stateManager.manifest?.date;
-    const runCycle = stateManager.manifest?.run ? stateManager.manifest.run.toLowerCase() : null;
+    const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
+    
+    // 🌟 Use clean parameter ID (e.g. '2t', 'pva') instead of long display names
+    const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
+    const targetDate = stateManager.manifest?.date || stateManager.currentDate;
+    const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
 
     const currentKey = `${model}_${param}_${targetDate}_${runCycle}`;
 
@@ -98,7 +101,9 @@ async function loadMasterContourFile() {
         urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?t=${Date.now()}`);
     }
     urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?t=${Date.now()}`);
-    urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?t=${Date.now()}`);
+    if (param === '2t' || param.includes('temp')) {
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?t=${Date.now()}`);
+    }
 
     fetchPromise = (async () => {
         for (const contourUrl of urlsToTry) {
@@ -130,20 +135,27 @@ export async function updateVectorContours(step) {
     if (!source) return;
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
-    const stepKey = String(stepNum);
 
     const masterData = await loadMasterContourFile();
 
-    if (masterData && masterData.steps && masterData.steps[stepKey]) {
-        source.setData(masterData.steps[stepKey]);
-    } else {
-        source.setData(EMPTY_GEOJSON);
+    if (masterData && masterData.steps) {
+        // 🌟 Support all common step key formats ("0", "000", "F000", 0)
+        const stepData = masterData.steps[String(stepNum)] ||
+                         masterData.steps[String(stepNum).padStart(3, '0')] ||
+                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
+                         masterData.steps[stepNum] ||
+                         masterData.steps[step];
+
+        if (stepData) {
+            source.setData(stepData);
+            return;
+        }
     }
+    source.setData(EMPTY_GEOJSON);
 }
 
 /**
  * 🌟 BACKGROUND CONTOUR PRELOADER
- * Pre-fetches the 1 Master Contour JSON file into RAM on page load
  */
 export async function preloadAllContours() {
     await loadMasterContourFile();
