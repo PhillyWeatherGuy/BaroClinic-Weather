@@ -23,7 +23,7 @@
         "max_val": 327.5944
       },
       "map_style_light": "./config/style_default.json",
-      "map_style_dark": "./config/style_default.json"
+      "map_style_dark": "./config/style_dark.json"
     },
     "tp": {
       "id": "tp",
