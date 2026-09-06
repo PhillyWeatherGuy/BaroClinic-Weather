@@ -15,12 +15,17 @@ export async function initRadarMode(mapInstance) {
     if (!mapInstance) return;
     radarMapInstance = mapInstance;
 
+    // 🌟 1. Expand tile cache so desktop screens can hold all 12 frames in memory without purging
+    if (typeof mapInstance.setMaxTileCacheSize === 'function') {
+        mapInstance.setMaxTileCacheSize(1200);
+    }
+
     // 1. Build 12-frame real-time timeline
     const frames = buildRadarTimeline();
     const liveIndex = frames.length - 1;
     currentVisibleIndex = liveIndex;
 
-    // 2. Find layer to place radar under (above fills, but beneath county lines, borders & labels)
+    // 2. Place radar ABOVE all land/building fills, but BENEATH county lines & borders
     let firstOverlayId = null;
     const layers = mapInstance.getStyle().layers || [];
     for (const layer of layers) {
@@ -37,8 +42,7 @@ export async function initRadarMode(mapInstance) {
         }
     }
 
-    // 3. Add IEM tile sources and layers (Keep ALL layers 'visible' so GPU preloads tiles)
-    frames.forEach((frame) => {
+    const addRadarLayer = (frame, isLive) => {
         const sourceId = `iem-radar-src-${frame.index}`;
         const layerId = `iem-radar-layer-${frame.index}`;
 
@@ -56,26 +60,40 @@ export async function initRadarMode(mapInstance) {
                 type: 'raster',
                 source: sourceId,
                 layout: {
-                    // 🌟 MUST stay 'visible' so MapLibre buffers all 12 frames in GPU memory!
                     'visibility': 'visible'
                 },
                 paint: {
-                    'raster-opacity': (frame.index === liveIndex) ? 1.0 : 0.0,
+                    'raster-opacity': isLive ? 1.0 : 0.0,
                     'raster-fade-duration': 0,
-                    // 🌟 Zero transition delay
                     'raster-opacity-transition': { duration: 0, delay: 0 },
                     'raster-resampling': 'linear'
                 }
             }, firstOverlayId);
         }
-    });
+    };
+
+    // 🌟 2. FAST-LOAD LIVE FRAME FIRST
+    // Gives 100% of network bandwidth to the current live radar so it displays immediately like on mobile
+    const liveFrame = frames[liveIndex];
+    addRadarLayer(liveFrame, true);
 
     syncRadarTimelineUI();
     setRadarFrame(liveIndex);
     bindRadarControls();
-
-    // 🌟 Ensure native basemap labels (cities, towns, states) are visible in Radar mode
     setBasemapLabelsVisibility(mapInstance, true);
+
+    // 🌟 3. Stagger historical frames from newest to oldest
+    // Spaced out by 35ms so the browser connection pool streams them cleanly without dropping packets
+    let delay = 35;
+    for (let i = liveIndex - 1; i >= 0; i--) {
+        const frame = frames[i];
+        setTimeout(() => {
+            if (radarMapInstance === mapInstance && radarState.frames.length > 0) {
+                addRadarLayer(frame, false);
+            }
+        }, delay);
+        delay += 35;
+    }
 }
 
 /**
