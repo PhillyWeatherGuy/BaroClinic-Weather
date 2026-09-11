@@ -736,7 +736,7 @@
       "id": "boundary_county",
       "type": "line",
       "source": "us_counties",
-      "minzoom": 3.5,
+      "minzoom": 4.2,
       "maxzoom": 24,
       "layout": {
         "line-cap": "round",
@@ -748,17 +748,17 @@
           "interpolate",
           ["linear"],
           ["zoom"],
-          3.5, 0.45,
-          6, 0.75,
-          9, 0.95
+          4.2, 0.3,
+          6, 0.65,
+          9, 0.85
         ],
         "line-width": [
           "interpolate",
           ["linear"],
           ["zoom"],
-          3.5, 0.9,
-          6, 1.8,
-          10, 3.0
+          4.2, 0.5,
+          6, 1.0,
+          10, 1.8
         ]
       }
     },
