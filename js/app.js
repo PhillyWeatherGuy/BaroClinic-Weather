@@ -460,11 +460,18 @@ export async function switchAppMode(targetMode) {
             stateManager.currentMapStyle = targetStyle;
             
             let loaded = false;
-            const onReady = async () => {
-                if (loaded) return;
-                loaded = true;
-                try { initCityOverlay(map); } catch (e) {}
-                try { initVectorContours(map); } catch (e) {}
+            toggleBtn.onclick = (e) => {
+        e.stopPropagation();
+
+        // 🛑 In Radar mode, do not open the model run dropdown
+        if (stateManager.activeMode === 'radar') {
+            menu.style.display = 'none';
+            return;
+        }
+
+        const isVisible = menu.style.display === 'block';
+        menu.style.display = isVisible ? 'none' : 'block';
+    };
                 await loadInitialModelData();
                 hideToast();
             };
