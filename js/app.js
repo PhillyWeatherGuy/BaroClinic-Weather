@@ -445,4 +445,78 @@ export async function switchAppMode(targetMode) {
         showToast("Loading Global Models...");
         
         // 🌟 Restore top button labels back to active model and parameter names
-        if (modelBtn) modelBtn.querySelector('span').textC
+        if (modelBtn) modelBtn.querySelector('span').textContent = 'ECMWF';
+        if (paramBtn) paramBtn.querySelector('span').textContent = stateManager.paramConfig?.name || '2m Temperature';
+
+        // 🌟 Turn OFF native basemap labels for Model Viewer
+        setBasemapLabelsVisibility(map, false);
+
+        const targetStyle = stateManager.currentTheme === 'dark'
+            ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
+            : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
+
+        // 🌟 Switch back to model basemap if coming from radar
+        if (stateManager.currentMapStyle !== targetStyle) {
+            stateManager.currentMapStyle = targetStyle;
+            
+            let loaded = false;
+            const onReady = async () => {
+                if (loaded) return;
+                loaded = true;
+                try { initCityOverlay(map); } catch (e) {}
+                try { initVectorContours(map); } catch (e) {}
+                await loadInitialModelData();
+                hideToast();
+            };
+
+            map.once('style.load', onReady);
+            setTimeout(onReady, 2000); // Fail-safe
+            map.setStyle(targetStyle);
+        } else {
+            try { initCityOverlay(map); } catch (e) {}
+            try { initVectorContours(map); } catch (e) {}
+            await loadInitialModelData();
+            hideToast();
+        }
+    }
+}
+
+// 🌟 Initialize Splash Transition with Mode Handler
+initHubTransition((selectedMode) => {
+    switchAppMode(selectedMode);
+});
+
+initViewerUI(
+    (stepIndex) => {
+        if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
+        renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
+    },
+    (newTheme) => { applyTheme(newTheme); },
+    (newView) => { applyView(newView); },
+    (direction, x, y) => { handleKeyboardZoom(direction, x, y); }
+);
+
+map.on('error', (e) => {
+    console.warn("MapLibre Basemap load warning:", e);
+});
+
+map.on('load', async () => {
+    stateManager.currentMapStyle = './config/style_default.json';
+    // 🌟 Ensure basemap labels start hidden by default for Model Viewer
+    setBasemapLabelsVisibility(map, false);
+    try { initVectorContours(map); } catch (err) {}
+});
+
+// 🌟 Unified Bilinear Inspection on Click
+map.on('click', (e) => {
+    if (stateManager.activeMode === 'radar') return;
+    if (!stateManager.manifest || !stateManager.activeFrameState) return;
+
+    const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
+    const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
+    const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
+
+    popup.setLngLat(e.lngLat)
+         .setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`)
+         .addTo(map);
+});
