@@ -78,10 +78,63 @@ export function updateBasemapStyle(styleUrl) {
         }
     };
 
-    // 🌟 Register 'style.load' before setStyle so the completion event is never missed
     map.once('style.load', onStyleReady);
     setTimeout(onStyleReady, 2000); // Fail-safe
     map.setStyle(styleUrl);
+}
+
+/**
+ * 🌟 ZERO-RELOAD RADAR THEME SWITCHER
+ * Changes basemap colors in-place without reloading the style or restarting the radar loop!
+ */
+function applyRadarTheme(theme) {
+    if (!map || !map.isStyleLoaded()) return;
+    const isDark = (theme === 'dark');
+
+    // 1. Land Background
+    if (map.getLayer('background')) {
+        map.setPaintProperty('background', 'background-color', isDark ? 'rgb(59, 51, 59)' : 'rgba(253, 229, 207, 1)');
+    }
+
+    // 2. Oceans & Water
+    const waterColor = isDark ? 'rgba(2, 20, 37, 1)' : '#E7F1F4';
+    if (map.getLayer('ocean_far')) {
+        map.setPaintProperty('ocean_far', 'fill-color', waterColor);
+    }
+    if (map.getLayer('water')) {
+        map.setPaintProperty('water', 'fill-color', waterColor);
+    }
+
+    // 3. Coastlines & Boundaries (White in dark mode, Black in light mode)
+    const outlineColor = isDark ? '#ffffff' : '#000000';
+    const outlineLayers = [
+        'coastline_far',
+        'water_outline',
+        'boundary_county',
+        'boundary_state',
+        'boundary_country_z0-4',
+        'boundary_country_z5-'
+    ];
+    outlineLayers.forEach(id => {
+        if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'line-color', outlineColor);
+        }
+    });
+
+    // 4. Place Labels
+    const labelColor = isDark ? '#ffffff' : '#000000';
+    const haloColor = isDark ? '#000000' : '#ffffff';
+    const labelLayers = [
+        'place_other', 'place_suburb', 'place_village', 'place_town',
+        'place_city', 'place_city_large', 'place_state', 'place_country_other',
+        'place_country_minor', 'place_country_major'
+    ];
+    labelLayers.forEach(id => {
+        if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'text-color', labelColor);
+            map.setPaintProperty(id, 'text-halo-color', haloColor);
+        }
+    });
 }
 
 /**
@@ -112,7 +165,6 @@ export function applyView(targetView) {
         hidePolarMap();
         clearPolarTextures();
 
-        // 🌟 Lazy-load 3D Globe assets only when clicked
         if (!threeGlobeLoaded) {
             try {
                 initThreeGlobe();
@@ -131,7 +183,6 @@ export function applyView(targetView) {
         hideThreeGlobe();
         clearThreeGlobeTextures();
 
-        // 🌟 Lazy-load Polar Map assets only when clicked
         if (!polarMapLoaded) {
             try {
                 initPolarMap();
@@ -172,17 +223,13 @@ export function handleKeyboardZoom(direction, x, y) {
  * 🌟 DYNAMIC THEME APPLIER
  */
 export async function applyTheme(theme) {
-    // 🌟 1. If in Radar mode, toggle between dark radar style and light basemap
+    // 🌟 1. In Radar Mode: Instant color shift without reloading the style or restarting the radar loop!
     if (stateManager.activeMode === 'radar') {
-        const targetStyle = theme === 'dark'
-            ? './config/style_radar.json'
-            : './config/map_style_light.json';
-        updateBasemapStyle(targetStyle);
+        applyRadarTheme(theme);
         return;
     }
 
     try {
-        // 🌟 2. For Model Viewer: Read active paramConfig directly from memory
         let paramConfig = stateManager.paramConfig;
 
         if (!paramConfig) {
@@ -254,7 +301,6 @@ export function initLayer(shaderType = null) {
         }
     }
 
-    // 🌟 Place weather layer underneath ALL basemap content layers so the entire transparent basemap sits on top
     let firstContentLayerId = null;
     const layers = map.getStyle().layers || [];
     for (const layer of layers) {
@@ -317,7 +363,6 @@ async function renderFrame(globalIdx) {
             updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
         } catch (e) {}
 
-        // 🌟 Ensure vector contours source and layer exist before updating data
         try { initVectorContours(map); } catch (e) {}
         updateVectorContours(frameInfo.step);
     } else if (activeView === '3d' && threeGlobeLoaded) {
@@ -397,7 +442,6 @@ export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
-    // 1. Destroy any active radar or forecast model state
     destroyRadarMode(map);
     purgeAllAppMemory(customShaderLayer);
     if (map.getLayer('weather-gpu-shader')) {
@@ -425,16 +469,11 @@ export async function switchAppMode(targetMode) {
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
         if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
         
-        // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 Respect current light/dark theme when loading radar basemap
-        const targetRadarStyle = stateManager.currentTheme === 'dark'
-            ? './config/style_radar.json'
-            : './config/map_style_light.json';
-
-        if (stateManager.currentMapStyle !== targetRadarStyle) {
-            stateManager.currentMapStyle = targetRadarStyle;
+        // 🌟 Use style_radar.json as the single base for Radar
+        if (stateManager.currentMapStyle !== './config/style_radar.json') {
+            stateManager.currentMapStyle = './config/style_radar.json';
             
             let loaded = false;
             const onReady = async () => {
@@ -442,34 +481,32 @@ export async function switchAppMode(targetMode) {
                 loaded = true;
                 setBasemapLabelsVisibility(map, true);
                 await initRadarMode(map);
+                applyRadarTheme(stateManager.currentTheme);
                 hideToast();
             };
 
-            // Register completion event BEFORE setStyle
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000); // Fail-safe: radar will NEVER hang
-            map.setStyle(targetRadarStyle);
+            setTimeout(onReady, 2000);
+            map.setStyle('./config/style_radar.json');
         } else {
             setBasemapLabelsVisibility(map, true);
             await initRadarMode(map);
+            applyRadarTheme(stateManager.currentTheme);
             hideToast();
         }
 
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
-        // 🌟 Restore top button labels back to active model and parameter names
         if (modelBtn) modelBtn.querySelector('span').textContent = 'ECMWF';
         if (paramBtn) paramBtn.querySelector('span').textContent = stateManager.paramConfig?.name || '2m Temperature';
 
-        // 🌟 Turn OFF native basemap labels for Model Viewer
         setBasemapLabelsVisibility(map, false);
 
         const targetStyle = stateManager.currentTheme === 'dark'
             ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
             : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
 
-        // 🌟 Switch back to model basemap if coming from radar
         if (stateManager.currentMapStyle !== targetStyle) {
             stateManager.currentMapStyle = targetStyle;
             
@@ -484,7 +521,7 @@ export async function switchAppMode(targetMode) {
             };
 
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000); // Fail-safe
+            setTimeout(onReady, 2000);
             map.setStyle(targetStyle);
         } else {
             try { initCityOverlay(map); } catch (e) {}
@@ -516,7 +553,6 @@ map.on('error', (e) => {
 
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
-    // 🌟 Ensure basemap labels start hidden by default for Model Viewer
     setBasemapLabelsVisibility(map, false);
     try { initVectorContours(map); } catch (err) {}
 });
