@@ -829,10 +829,17 @@ function initModelRunDropdown() {
 
     toggleBtn.onclick = (e) => {
         e.stopPropagation();
+
+        // 🛑 In Radar mode, do not open the model run dropdown
+        if (stateManager.activeMode === 'radar') {
+            menu.style.display = 'none';
+            return;
+        }
+
         const isVisible = menu.style.display === 'block';
         menu.style.display = isVisible ? 'none' : 'block';
     };
-
+    
     document.onclick = () => {
         menu.style.display = 'none';
     };
