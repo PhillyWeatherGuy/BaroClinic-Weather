@@ -358,6 +358,13 @@ export function initModelCategoryBar() {
     modelBtn.addEventListener('click', (e) => {
         e.stopPropagation();
 
+        // 🛑 In Radar mode, do not open model category bar
+        if (stateManager.activeMode === 'radar') {
+            categoryBar.style.display = 'none';
+            modelBtn.classList.remove('active', 'open');
+            return;
+        }
+
         const paramBar = document.getElementById('param-category-bar');
         const paramBtn = document.getElementById('btn-param-menu');
         if (paramBar) paramBar.style.display = 'none';
@@ -545,6 +552,13 @@ export function initParameterCategoryBar() {
 
     paramBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+
+        // 🛑 In Radar mode, do not open parameter category bar
+        if (stateManager.activeMode === 'radar') {
+            paramBar.style.display = 'none';
+            paramBtn.classList.remove('active', 'open');
+            return;
+        }
 
         const modelBar = document.getElementById('model-category-bar');
         const modelBtn = document.getElementById('btn-model-menu');
