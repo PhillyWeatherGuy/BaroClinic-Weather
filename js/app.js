@@ -64,6 +64,7 @@ export function updateBasemapStyle(styleUrl) {
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
         if (stateManager.activeMode === 'radar') {
+            applyRadarTheme(stateManager.currentTheme);
             setBasemapLabelsVisibility(map, true);
             initRadarMode(map);
         } else {
@@ -121,7 +122,32 @@ function applyRadarTheme(theme) {
         }
     });
 
-    // 4. Place Labels
+    // 4. Remove muddy gray urban/building fills in light mode
+    const fillLayers = ['landuse_residential', 'landcover_wood', 'landcover_ice_shelf', 'landcover_glacier', 'building', 'aeroway-area', 'road_area_pier'];
+    fillLayers.forEach(id => {
+        if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
+        }
+    });
+    if (map.getLayer('landuse_park')) {
+        map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : 'rgba(253, 229, 207, 1)');
+    }
+
+    // 5. Streets & Highways (White roads in light mode!)
+    const streetColor = isDark ? '#181818' : '#ffffff';
+    const streetCasing = isDark ? 'rgba(60, 60, 60, 0.8)' : 'rgba(0, 0, 0, 0.25)';
+
+    ['highway_motorway_inner', 'highway_major_inner', 'highway_major_subtle', 'highway_motorway_subtle'].forEach(id => {
+        if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', streetColor);
+    });
+    ['highway_motorway_casing', 'highway_major_casing'].forEach(id => {
+        if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', streetCasing);
+    });
+    if (map.getLayer('highway_minor')) {
+        map.setPaintProperty('highway_minor', 'line-color', isDark ? '#181818' : 'rgba(255, 255, 255, 0.8)');
+    }
+
+    // 6. Place Labels
     const labelColor = isDark ? '#ffffff' : '#000000';
     const haloColor = isDark ? '#000000' : '#ffffff';
     const labelLayers = [
@@ -442,6 +468,7 @@ export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
+    // 1. Destroy any active radar or forecast model state
     destroyRadarMode(map);
     purgeAllAppMemory(customShaderLayer);
     if (map.getLayer('weather-gpu-shader')) {
@@ -471,7 +498,7 @@ export async function switchAppMode(targetMode) {
         
         destroyCityOverlay();
 
-        // 🌟 Use style_radar.json as the single base for Radar
+        // 🌟 Switch to radar basemap
         if (stateManager.currentMapStyle !== './config/style_radar.json') {
             stateManager.currentMapStyle = './config/style_radar.json';
             
@@ -479,9 +506,10 @@ export async function switchAppMode(targetMode) {
             const onReady = async () => {
                 if (loaded) return;
                 loaded = true;
+                // 🌟 Apply active theme IMMEDIATELY upon style load (never flashes dark)
+                applyRadarTheme(stateManager.currentTheme);
                 setBasemapLabelsVisibility(map, true);
                 await initRadarMode(map);
-                applyRadarTheme(stateManager.currentTheme);
                 hideToast();
             };
 
@@ -489,9 +517,9 @@ export async function switchAppMode(targetMode) {
             setTimeout(onReady, 2000);
             map.setStyle('./config/style_radar.json');
         } else {
+            applyRadarTheme(stateManager.currentTheme);
             setBasemapLabelsVisibility(map, true);
             await initRadarMode(map);
-            applyRadarTheme(stateManager.currentTheme);
             hideToast();
         }
 
@@ -521,7 +549,7 @@ export async function switchAppMode(targetMode) {
             };
 
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000);
+            setTimeout(onReady, 2000); // Fail-safe
             map.setStyle(targetStyle);
         } else {
             try { initCityOverlay(map); } catch (e) {}
