@@ -524,7 +524,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "maxzoom": 6,
+      "minzoom": 6,
       "filter": [
         "all",
         ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
