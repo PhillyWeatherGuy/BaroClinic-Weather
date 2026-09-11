@@ -398,11 +398,21 @@ export async function switchAppMode(targetMode) {
         map.removeLayer('radar-gpu-shader');
     }
 
+    // Grab top dropdown navigation elements
+    const modelBtn = document.getElementById('btn-model-menu');
+    const paramBtn = document.getElementById('btn-param-menu');
+    const modelBar = document.getElementById('model-category-bar');
+    const paramBar = document.getElementById('param-category-bar');
+
+    // 🛑 Automatically close any open category bars and reset button active states
+    if (modelBar) modelBar.style.display = 'none';
+    if (paramBar) paramBar.style.display = 'none';
+    if (modelBtn) modelBtn.classList.remove('active', 'open');
+    if (paramBtn) paramBtn.classList.remove('active', 'open');
+
     // 2. Launch selected mode
     if (targetMode === 'radar') {
         showToast("Loading Real-Time Radar...");
-        const modelBtn = document.getElementById('btn-model-menu');
-        const paramBtn = document.getElementById('btn-param-menu');
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
         if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
         
@@ -422,7 +432,6 @@ export async function switchAppMode(targetMode) {
                 hideToast();
             };
 
-            // Register completion event BEFORE setStyle
             map.once('style.load', onReady);
             setTimeout(onReady, 2000); // Fail-safe: radar will NEVER hang
             map.setStyle('./config/style_radar.json');
@@ -435,75 +444,5 @@ export async function switchAppMode(targetMode) {
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
-        // 🌟 Turn OFF native basemap labels for Model Viewer
-        setBasemapLabelsVisibility(map, false);
-
-        const targetStyle = stateManager.currentTheme === 'dark'
-            ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
-            : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
-
-        // 🌟 Switch back to model basemap if coming from radar
-        if (stateManager.currentMapStyle !== targetStyle) {
-            stateManager.currentMapStyle = targetStyle;
-            
-            let loaded = false;
-            const onReady = async () => {
-                if (loaded) return;
-                loaded = true;
-                try { initCityOverlay(map); } catch (e) {}
-                try { initVectorContours(map); } catch (e) {}
-                await loadInitialModelData();
-                hideToast();
-            };
-
-            map.once('style.load', onReady);
-            setTimeout(onReady, 2000); // Fail-safe
-            map.setStyle(targetStyle);
-        } else {
-            try { initCityOverlay(map); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            await loadInitialModelData();
-            hideToast();
-        }
-    }
-}
-
-// 🌟 Initialize Splash Transition with Mode Handler
-initHubTransition((selectedMode) => {
-    switchAppMode(selectedMode);
-});
-
-initViewerUI(
-    (stepIndex) => {
-        if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
-        renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
-    },
-    (newTheme) => { applyTheme(newTheme); },
-    (newView) => { applyView(newView); },
-    (direction, x, y) => { handleKeyboardZoom(direction, x, y); }
-);
-
-map.on('error', (e) => {
-    console.warn("MapLibre Basemap load warning:", e);
-});
-
-map.on('load', async () => {
-    stateManager.currentMapStyle = './config/style_default.json';
-    // 🌟 Ensure basemap labels start hidden by default for Model Viewer
-    setBasemapLabelsVisibility(map, false);
-    try { initVectorContours(map); } catch (err) {}
-});
-
-// 🌟 Unified Bilinear Inspection on Click
-map.on('click', (e) => {
-    if (stateManager.activeMode === 'radar') return;
-    if (!stateManager.manifest || !stateManager.activeFrameState) return;
-
-    const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
-    const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
-    const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
-
-    popup.setLngLat(e.lngLat)
-         .setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`)
-         .addTo(map);
-});
+        // 🌟 Restore top button labels back to active model and parameter names
+        if (modelBtn) modelBtn.querySelector('span').textC
