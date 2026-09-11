@@ -172,8 +172,17 @@ export function handleKeyboardZoom(direction, x, y) {
  * 🌟 DYNAMIC THEME APPLIER
  */
 export async function applyTheme(theme) {
+    // 🌟 1. If in Radar mode, toggle between dark radar style and light basemap
+    if (stateManager.activeMode === 'radar') {
+        const targetStyle = theme === 'dark'
+            ? './config/style_radar.json'
+            : './config/map_style_light.json';
+        updateBasemapStyle(targetStyle);
+        return;
+    }
+
     try {
-        // 🌟 1. Read active paramConfig directly from memory to prevent lookup mismatches
+        // 🌟 2. For Model Viewer: Read active paramConfig directly from memory
         let paramConfig = stateManager.paramConfig;
 
         if (!paramConfig) {
@@ -419,9 +428,13 @@ export async function switchAppMode(targetMode) {
         // 🛑 Complete shutdown of city callout badges in Radar mode
         destroyCityOverlay();
 
-        // 🌟 Load style_radar.json, then run radar when style is ready
-        if (stateManager.currentMapStyle !== './config/style_radar.json') {
-            stateManager.currentMapStyle = './config/style_radar.json';
+        // 🌟 Respect current light/dark theme when loading radar basemap
+        const targetRadarStyle = stateManager.currentTheme === 'dark'
+            ? './config/style_radar.json'
+            : './config/map_style_light.json';
+
+        if (stateManager.currentMapStyle !== targetRadarStyle) {
+            stateManager.currentMapStyle = targetRadarStyle;
             
             let loaded = false;
             const onReady = async () => {
@@ -432,9 +445,10 @@ export async function switchAppMode(targetMode) {
                 hideToast();
             };
 
+            // Register completion event BEFORE setStyle
             map.once('style.load', onReady);
             setTimeout(onReady, 2000); // Fail-safe: radar will NEVER hang
-            map.setStyle('./config/style_radar.json');
+            map.setStyle(targetRadarStyle);
         } else {
             setBasemapLabelsVisibility(map, true);
             await initRadarMode(map);
