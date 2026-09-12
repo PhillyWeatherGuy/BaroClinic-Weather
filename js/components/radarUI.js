@@ -898,18 +898,18 @@ export function setRadarViewType(type) {
 }
 
 /**
- * 🌟 8. Fetch Real-Time NWS Level 3 Sweep via NOAA TGFTP (sn.last)
+ * 🌟 8. Fetch Real-Time Level 3 Sweep via Your Cloudflare Worker Proxy
  */
 async function fetchLatestLevel3File(stationId) {
-    const siteLower = (stationId.startsWith('K') && stationId.length === 4 
-        ? stationId.toLowerCase() 
-        : `k${stationId.toLowerCase()}`);
+    const siteCode = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
+    const workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=N0B`;
 
-    // Official NWS live radar directories (sn.last is guaranteed to be the most recent scan)
-    const productPaths = [
-        `DS.p94r0/SI.${siteLower}/sn.last`, // N0Q: 0.5° High-Res Base Reflectivity (250m)
-        `DS.153cr/SI.${siteLower}/sn.last`  // N0B: 0.5° Super-Res Base Reflectivity (250m)
-    ];
+    const resp = await fetch(workerUrl);
+    if (!resp.ok) {
+        throw new Error(`Worker returned HTTP ${resp.status} for ${stationId}`);
+    }
+    return await resp.arrayBuffer();
+}
 
     const proxyWrappers = [
         (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
