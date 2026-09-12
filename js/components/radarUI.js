@@ -19,12 +19,13 @@ let singleSiteRadarLayer = null;
 let activeStationId = null;
 let activeStationLat = 0;
 let activeStationLon = 0;
-let singleSiteFrames = new Array(12); // Stores the 12 decoded sweeps
+let singleSiteFrames = []; // Dynamically sized (12 to 48 frames)
 
 // 🌟 Archive Calendar State
 let archivePopoverEl = null;
 let calendarViewDate = new Date();
 let selectedDayForArchive = null;
+let selectedDurationHours = 1; // 1, 2, 3, 6, 12, 24
 let calendarViewMode = 'days'; // 'days' | 'months'
 
 // 🌟 Top Radar Mode Dropdown Element & Station Popup
@@ -40,7 +41,7 @@ function ensureArchiveStyles() {
             position: absolute;
             bottom: calc(100% + 12px);
             left: 0;
-            width: 270px;
+            width: 290px;
             background: rgba(11, 15, 25, 0.96);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
@@ -74,6 +75,50 @@ function ensureArchiveStyles() {
         }
         .archive-live-btn:hover {
             background: rgba(56, 189, 248, 0.35);
+        }
+        .duration-selector-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 4px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .duration-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: #94a3b8;
+            padding-left: 4px;
+            text-transform: uppercase;
+        }
+        .duration-pills-group {
+            display: flex;
+            gap: 2px;
+        }
+        .duration-pill-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: #94a3b8;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .duration-pill-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .duration-pill-btn.active {
+            background: rgba(56, 189, 248, 0.25);
+            color: #38bdf8;
+            border-color: rgba(56, 189, 248, 0.5);
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
         }
         .cal-header {
             display: flex;
@@ -312,9 +357,9 @@ export async function initRadarMode(mapInstance) {
 }
 
 /**
- * 🌟 2. Seamless Timeline Switcher (Live Loop vs Historical Archive)
+ * 🌟 2. Seamless Timeline Switcher (Live Loop vs Historical 1h–24h Archive)
  */
-export async function switchRadarTimeline(startUtcDate = null) {
+export async function switchRadarTimeline(startUtcDate = null, durationHours = 1) {
     if (!radarMapInstance) return;
     pauseRadarPlayback();
 
@@ -330,8 +375,8 @@ export async function switchRadarTimeline(startUtcDate = null) {
         });
     }
 
-    // 2. Build 12-frame timeline (Live OR Historical)
-    const frames = buildRadarTimeline(startUtcDate);
+    // 2. Build timeline frames based on chosen duration
+    const frames = buildRadarTimeline(startUtcDate, durationHours);
     const defaultIndex = (radarState.mode === 'live') ? frames.length - 1 : 0;
     currentVisibleIndex = defaultIndex;
 
@@ -382,9 +427,11 @@ export async function switchRadarTimeline(startUtcDate = null) {
         }
     };
 
-    addRadarLayer(frames[defaultIndex], true);
+    if (frames.length > 0) {
+        addRadarLayer(frames[defaultIndex], true);
+    }
 
-    // If a local radar station is currently active, reload its 12-frame loop for the new date
+    // If a local radar station is active, reload its loop for the new date and duration
     if (activeRadarViewType === 'local' && activeStationId) {
         await loadSingleSiteRadar(activeStationId, activeStationLat, activeStationLon);
         return;
@@ -394,7 +441,7 @@ export async function switchRadarTimeline(startUtcDate = null) {
     setRadarFrame(defaultIndex);
 
     // Stagger remaining composite frames in background
-    let delay = 35;
+    let delay = 25;
     for (let i = 0; i < frames.length; i++) {
         if (i === defaultIndex) continue;
         const frame = frames[i];
@@ -403,7 +450,7 @@ export async function switchRadarTimeline(startUtcDate = null) {
                 addRadarLayer(frame, false);
             }
         }, delay);
-        delay += 35;
+        delay += 25;
     }
 }
 
@@ -411,11 +458,13 @@ export async function switchRadarTimeline(startUtcDate = null) {
  * 🌟 3. Instant Zero-Blink GPU Frame Swapping
  */
 export function setRadarFrame(frameIndex) {
-    if (frameIndex < 0 || frameIndex >= 12) return;
+    const totalFrames = radarState.frames?.length || 12;
+    if (frameIndex < 0 || frameIndex >= totalFrames) return;
 
     const prevIndex = currentVisibleIndex;
     currentVisibleIndex = frameIndex;
     radarState.activeFrameIndex = frameIndex;
+    const frameInfo = radarState.frames?.[frameIndex];
 
     if (radarMapInstance) {
         if (activeRadarViewType === 'composite') {
@@ -455,13 +504,11 @@ export function setRadarFrame(frameIndex) {
     if (slider) slider.value = frameIndex.toString();
 
     const timeLabel = document.getElementById('time-label');
-    if (timeLabel) {
-        const frameInfo = radarState.frames?.[frameIndex];
-        timeLabel.textContent = frameInfo ? frameInfo.label : (frameIndex === 11 ? 'LIVE' : `-${(11 - frameIndex) * 5}m`);
+    if (timeLabel && frameInfo) {
+        timeLabel.textContent = frameInfo.label;
     }
 
     const appClock = document.getElementById('app-clock');
-    const frameInfo = radarState.frames?.[frameIndex];
     if (appClock && frameInfo?.date) {
         appClock.textContent = frameInfo.date.toLocaleTimeString([], {
             weekday: 'short',
@@ -485,6 +532,9 @@ export function toggleRadarPlayback() {
 }
 
 export function startRadarPlayback() {
+    const totalFrames = radarState.frames?.length || 12;
+    if (totalFrames <= 1) return;
+
     isRadarPlaying = true;
     updateRadarPlayPauseUI();
 
@@ -492,7 +542,7 @@ export function startRadarPlayback() {
 
     radarPlayInterval = setInterval(() => {
         let nextIdx = radarState.activeFrameIndex + 1;
-        if (nextIdx >= 12) {
+        if (nextIdx >= totalFrames) {
             nextIdx = 0;
         }
         setRadarFrame(nextIdx);
@@ -522,24 +572,26 @@ function updateRadarPlayPauseUI() {
  */
 function syncRadarTimelineUI() {
     const slider = document.getElementById('timeline-slider');
-    if (!slider) return;
+    const totalFrames = radarState.frames?.length || 12;
+    if (!slider || totalFrames === 0) return;
 
     slider.min = '0';
-    slider.max = '11';
+    slider.max = (totalFrames - 1).toString();
     slider.value = radarState.activeFrameIndex.toString();
 
     const runLabel = document.getElementById('current-run-label');
     if (runLabel) {
+        const dur = radarState.durationHours || 1;
         if (activeRadarViewType === 'local' && activeStationId) {
-            runLabel.textContent = `${activeStationId} (1h Loop)`;
+            runLabel.textContent = `${activeStationId} (${dur}h Loop)`;
         } else if (radarState.mode === 'live' || !radarState.archiveDate) {
-            runLabel.textContent = 'Live Loop (1h)';
+            runLabel.textContent = `Live Loop (${dur}h)`;
         } else {
             const d = radarState.archiveDate;
             const monthStr = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
             const day = d.getUTCDate();
             const hh = String(d.getUTCHours()).padStart(2, '0');
-            runLabel.textContent = `${monthStr} ${day}, ${hh}Z (1h)`;
+            runLabel.textContent = `${monthStr} ${day}, ${hh}Z (${dur}h)`;
         }
     }
 
@@ -548,9 +600,10 @@ function syncRadarTimelineUI() {
 
 function updateRadarSliderTrack() {
     const slider = document.getElementById('timeline-slider');
-    if (!slider) return;
+    const totalFrames = radarState.frames?.length || 12;
+    if (!slider || totalFrames === 0) return;
 
-    const total = 11;
+    const total = totalFrames - 1;
     const current = radarState.activeFrameIndex;
     const percent = total > 0 ? (current / total) * 100 : 0;
 
@@ -579,8 +632,9 @@ function bindRadarControls() {
     if (prevBtn) {
         prevBtn.onclick = () => {
             if (isRadarPlaying) pauseRadarPlayback();
+            const totalFrames = radarState.frames?.length || 12;
             let prevIdx = radarState.activeFrameIndex - 1;
-            if (prevIdx < 0) prevIdx = 11;
+            if (prevIdx < 0) prevIdx = totalFrames - 1;
             setRadarFrame(prevIdx);
         };
     }
@@ -588,15 +642,16 @@ function bindRadarControls() {
     if (nextBtn) {
         nextBtn.onclick = () => {
             if (isRadarPlaying) pauseRadarPlayback();
+            const totalFrames = radarState.frames?.length || 12;
             let nextIdx = radarState.activeFrameIndex + 1;
-            if (nextIdx >= 12) nextIdx = 0;
+            if (nextIdx >= totalFrames) nextIdx = 0;
             setRadarFrame(nextIdx);
         };
     }
 }
 
 /**
- * 🌟 6. Calendar + 24-Hour Archive Popover
+ * 🌟 6. Calendar + 24-Hour Archive Popover with Duration Selector
  */
 function initArchivePopover() {
     ensureArchiveStyles();
@@ -648,7 +703,7 @@ function renderArchivePopover() {
     liveBtn.onclick = async (e) => {
         e.stopPropagation();
         archivePopoverEl.style.display = 'none';
-        await switchRadarTimeline(null);
+        await switchRadarTimeline(null, 1);
     };
     archivePopoverEl.appendChild(liveBtn);
 
@@ -672,6 +727,27 @@ function renderArchivePopover() {
             calendarViewMode = 'days';
             renderArchivePopover();
         };
+
+        // 🌟 Duration Selector Row [ 1h | 2h | 3h | 6h | 12h | 24h ]
+        const durRow = document.createElement('div');
+        durRow.className = 'duration-selector-row';
+        durRow.innerHTML = `
+            <span class="duration-label">Loop:</span>
+            <div class="duration-pills-group">
+                ${[1, 2, 3, 6, 12, 24].map(dh => `
+                    <button class="duration-pill-btn ${selectedDurationHours === dh ? 'active' : ''}" data-hours="${dh}">${dh}h</button>
+                `).join('')}
+            </div>
+        `;
+        durRow.querySelectorAll('.duration-pill-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                selectedDurationHours = parseInt(btn.getAttribute('data-hours'), 10);
+                durRow.querySelectorAll('.duration-pill-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            };
+        });
+        archivePopoverEl.appendChild(durRow);
 
         const grid = document.createElement('div');
         grid.className = 'hours-grid';
@@ -697,7 +773,7 @@ function renderArchivePopover() {
                 hBtn.onclick = async (e) => {
                     e.stopPropagation();
                     archivePopoverEl.style.display = 'none';
-                    await switchRadarTimeline(candidateDate);
+                    await switchRadarTimeline(candidateDate, selectedDurationHours);
                 };
             }
 
@@ -950,9 +1026,9 @@ export function setRadarViewType(type) {
 }
 
 /**
- * 🌟 8. Fetch Real-Time Level 3 Sweep Frame via Your Cloudflare Worker S3 Engine
+ * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep via Your Cloudflare Worker S3 Engine
  */
-async function fetchLevel3Frame(stationId, frameIndex = 11, archiveDate = null) {
+async function fetchLevel3Frame(stationId, frameIndex = 11, archiveDate = null, durationHours = 1) {
     const siteCode = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
     let workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=N0B&frame=${frameIndex}`;
 
@@ -961,7 +1037,7 @@ async function fetchLevel3Frame(stationId, frameIndex = 11, archiveDate = null) 
         const mm = String(archiveDate.getUTCMonth() + 1).padStart(2, '0');
         const dd = String(archiveDate.getUTCDate()).padStart(2, '0');
         const hh = archiveDate.getUTCHours();
-        workerUrl += `&date=${yyyy}${mm}${dd}&hour=${hh}`;
+        workerUrl += `&date=${yyyy}${mm}${dd}&hour=${hh}&duration=${durationHours}`;
     }
 
     const resp = await fetch(workerUrl);
@@ -972,7 +1048,7 @@ async function fetchLevel3Frame(stationId, frameIndex = 11, archiveDate = null) 
 }
 
 /**
- * 🌟 Load & Animate Single-Site 12-Frame Time Loop from S3
+ * 🌟 Load & Animate Single-Site Dynamic Time Loop from S3 (1h to 24h)
  */
 async function loadSingleSiteRadar(stationId, lat, lon) {
     if (!radarMapInstance) return;
@@ -982,7 +1058,9 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         activeStationId = stationId;
         activeStationLat = lat;
         activeStationLon = lon;
-        singleSiteFrames = new Array(12);
+
+        const totalFrames = radarState.frames?.length || 12;
+        singleSiteFrames = new Array(totalFrames);
 
         // 1. Completely hide all composite layers
         if (radarState.frames) {
@@ -994,14 +1072,20 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
             });
         }
 
+        const dur = radarState.durationHours || 1;
         const runLabel = document.getElementById('current-run-label');
         if (runLabel) runLabel.textContent = `Loading ${stationId}...`;
 
-        // 2. Load and render the newest frame (frame 11 / LIVE) immediately!
-        const rawBuffer11 = await fetchLevel3Frame(stationId, 11, radarState.archiveDate);
-        const liveSweep = await decodeLevel3(rawBuffer11, { id: stationId, lat, lon });
+        // 2. Load and render default frame immediately (newest for live, or frame 0 for archive)
+        const defaultIndex = (radarState.mode === 'live') ? (totalFrames - 1) : 0;
+        const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, radarState.archiveDate, dur);
+        const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon });
 
-        singleSiteFrames[11] = { index: 11, sweepData: liveSweep, label: 'LIVE' };
+        singleSiteFrames[defaultIndex] = {
+            index: defaultIndex,
+            sweepData: sweep,
+            label: radarState.frames?.[defaultIndex]?.label || (defaultIndex === totalFrames - 1 ? 'LIVE' : 'START')
+        };
 
         // 3. Attach GPU single-site layer
         if (!singleSiteRadarLayer) {
@@ -1010,21 +1094,22 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
             radarMapInstance.addLayer(singleSiteRadarLayer, beforeId);
         }
 
-        singleSiteRadarLayer.setSweepData(liveSweep);
+        singleSiteRadarLayer.setSweepData(sweep);
 
-        if (runLabel) runLabel.textContent = `${stationId} (1h Loop)`;
+        if (runLabel) runLabel.textContent = `${stationId} (${dur}h Loop)`;
         syncRadarTimelineUI();
-        setRadarFrame(11);
+        setRadarFrame(defaultIndex);
 
-        // 4. Preload remaining 11 historical frames in background from S3 (frame 0 to 10)
-        for (let i = 0; i <= 10; i++) {
-            fetchLevel3Frame(stationId, i, radarState.archiveDate)
+        // 4. Preload remaining historical frames in background from S3
+        for (let i = 0; i < totalFrames; i++) {
+            if (i === defaultIndex) continue;
+            fetchLevel3Frame(stationId, i, radarState.archiveDate, dur)
                 .then(buf => decodeLevel3(buf, { id: stationId, lat, lon }))
-                .then(sweep => {
+                .then(decodedSweep => {
                     singleSiteFrames[i] = {
                         index: i,
-                        sweepData: sweep,
-                        label: `-${(11 - i) * 5}m`
+                        sweepData: decodedSweep,
+                        label: radarState.frames?.[i]?.label || `F${i}`
                     };
                 })
                 .catch(() => {});
@@ -1196,7 +1281,7 @@ export function destroyRadarMode(mapInstance) {
         singleSiteRadarLayer = null;
     }
     activeStationId = null;
-    singleSiteFrames = new Array(12);
+    singleSiteFrames = [];
 
     if (mapInstance) {
         if (radarState.frames) {
