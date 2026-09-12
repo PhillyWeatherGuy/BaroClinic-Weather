@@ -2,6 +2,8 @@
 import { radarState, buildRadarTimeline, purgeRadarMemory } from '../core/radarLoader.js';
 import { setBasemapLabelsVisibility } from '../layers/cityOverlay.js';
 import { getRadarStationsGeoJson } from '../config/radarStations.js';
+import { decodeLevel3 } from '../core/level3Decoder.js';
+import { createSingleSiteRadarLayer } from '../shaders/singleSiteRadarShader.js';
 
 let radarMapInstance = null;
 let radarPlayInterval = null;
@@ -11,6 +13,10 @@ const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 
 // 🌟 Radar Mode State ('composite' | 'local')
 let activeRadarViewType = 'composite';
+
+// 🌟 Single-Site Level 3 State
+let singleSiteRadarLayer = null;
+let activeStationId = null;
 
 // 🌟 Archive Calendar State
 let archivePopoverEl = null;
@@ -875,14 +881,114 @@ export function setRadarViewType(type) {
     if (type === 'composite') {
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
         setStationLayersVisibility(false);
+        if (singleSiteRadarLayer) {
+            singleSiteRadarLayer.isVisible = false;
+            radarMapInstance.triggerRepaint();
+        }
+        activeStationId = null;
+        setRadarFrame(radarState.activeFrameIndex);
     } else {
-        if (modelBtn) modelBtn.querySelector('span').textContent = 'Local Radar';
+        if (modelBtn) modelBtn.querySelector('span').textContent = activeStationId ? `Local Radar (${activeStationId})` : 'Local Radar';
         setStationLayersVisibility(true);
+        if (singleSiteRadarLayer && activeStationId) {
+            singleSiteRadarLayer.isVisible = true;
+            radarMapInstance.triggerRepaint();
+        }
     }
 }
 
 /**
- * 🌟 8. NWS-Style Blue Circles for WSR-88D Stations
+ * 🌟 8. Fetch & Load Single-Site Level 3 Sweep
+ */
+async function fetchLatestLevel3File(stationId) {
+    const site3 = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
+    const products = ['N0B', 'N0Q'];
+
+    const now = new Date();
+    const yyyy = now.getUTCFullYear();
+    const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(now.getUTCDate()).padStart(2, '0');
+
+    for (const prod of products) {
+        try {
+            // Check today's prefix on the public unidata-nexrad-level3 S3 bucket
+            const listUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/?list-type=2&prefix=${site3}_${prod}_${yyyy}_${mm}_${dd}`;
+            let resp = await fetch(listUrl);
+            let text = resp.ok ? await resp.text() : '';
+
+            // Fallback to general prefix if today is early UTC
+            if (!text.includes('<Key>')) {
+                const fallbackListUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/?list-type=2&prefix=${site3}_${prod}_`;
+                resp = await fetch(fallbackListUrl);
+                text = resp.ok ? await resp.text() : '';
+            }
+
+            const keyRegex = /<Key>([^<]+)<\/Key>/g;
+            let match;
+            let lastKey = null;
+            while ((match = keyRegex.exec(text)) !== null) {
+                lastKey = match[1];
+            }
+
+            if (lastKey) {
+                const fileUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/${lastKey}`;
+                const fileResp = await fetch(fileUrl);
+                if (fileResp.ok) {
+                    return await fileResp.arrayBuffer();
+                }
+            }
+        } catch (err) {
+            console.warn(`[RadarUI] Failed to fetch ${prod} for ${stationId}:`, err);
+        }
+    }
+    throw new Error(`No Level 3 radar data found for ${stationId}`);
+}
+
+async function loadSingleSiteRadar(stationId, lat, lon) {
+    if (!radarMapInstance) return;
+
+    try {
+        pauseRadarPlayback();
+
+        // 1. Hide the national mosaic loop layers while local scan is active
+        if (radarState.frames) {
+            radarState.frames.forEach((frame) => {
+                const layerId = `iem-radar-layer-${frame.index}`;
+                if (radarMapInstance.getLayer(layerId)) {
+                    radarMapInstance.setPaintProperty(layerId, 'raster-opacity', 0.0);
+                }
+            });
+        }
+
+        const runLabel = document.getElementById('current-run-label');
+        if (runLabel) runLabel.textContent = `Loading ${stationId}...`;
+
+        // 2. Fetch and decode raw Level 3 file
+        const rawBuffer = await fetchLatestLevel3File(stationId);
+        const sweepData = await decodeLevel3(rawBuffer, { id: stationId, lat, lon });
+
+        // 3. Attach GPU single-site layer if not already added
+        if (!singleSiteRadarLayer) {
+            singleSiteRadarLayer = createSingleSiteRadarLayer(radarMapInstance);
+            radarMapInstance.addLayer(singleSiteRadarLayer, 'radar-stations-circle-layer');
+        }
+
+        singleSiteRadarLayer.setSweepData(sweepData);
+        activeStationId = stationId;
+
+        if (runLabel) runLabel.textContent = `${stationId} (Super-Res N0B)`;
+        const timeLabel = document.getElementById('time-label');
+        if (timeLabel) timeLabel.textContent = 'SWEEP';
+
+    } catch (err) {
+        console.error(`[RadarUI] Error loading single site ${stationId}:`, err);
+        const runLabel = document.getElementById('current-run-label');
+        if (runLabel) runLabel.textContent = `Error (${stationId})`;
+    }
+}
+
+/**
+ * 🌟 9. NWS-Style Blue Circles for WSR-88D Stations
  */
 function setupStationLayers(mapInstance) {
     if (!mapInstance) return;
@@ -972,8 +1078,8 @@ function setupStationLayers(mapInstance) {
         stationHoverPopup.remove();
     });
 
-    // Click to select & fly to station
-    mapInstance.on('click', circleLayerId, (e) => {
+    // Click to select, fly to station, and load single-site radar
+    mapInstance.on('click', circleLayerId, async (e) => {
         if (activeRadarViewType !== 'local') return;
 
         const f = e.features && e.features[0];
@@ -992,6 +1098,9 @@ function setupStationLayers(mapInstance) {
         if (modelBtn) {
             modelBtn.querySelector('span').textContent = `Local Radar (${id})`;
         }
+
+        // 🌟 Trigger direct single-site radar download and render
+        await loadSingleSiteRadar(id, lat, lon);
     });
 }
 
@@ -1011,7 +1120,7 @@ function setStationLayersVisibility(isVisible) {
 }
 
 /**
- * 🌟 9. Teardown Radar Mode
+ * 🌟 10. Teardown Radar Mode
  */
 export function destroyRadarMode(mapInstance) {
     pauseRadarPlayback();
@@ -1028,6 +1137,16 @@ export function destroyRadarMode(mapInstance) {
     if (stationHoverPopup) {
         stationHoverPopup.remove();
     }
+
+    if (singleSiteRadarLayer) {
+        try {
+            if (mapInstance && mapInstance.getLayer(singleSiteRadarLayer.id)) {
+                mapInstance.removeLayer(singleSiteRadarLayer.id);
+            }
+        } catch (e) {}
+        singleSiteRadarLayer = null;
+    }
+    activeStationId = null;
 
     if (mapInstance) {
         if (radarState.frames) {
