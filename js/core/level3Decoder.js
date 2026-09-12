@@ -3,25 +3,26 @@ import { unzlibSync, inflateSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
 /**
- * 🌟 16-Level Reflectivity RLE Byte Map (0..15 -> 0..255 for radarPalettes.js)
+ * 🌟 NWS 16-Level Reflectivity Threshold Map (dBZ -> 0..255 Palette Index)
+ * Levels 0..2 (< 15 dBZ) are set to 0 (transparent) to filter out clear-air ground clutter!
  */
 const LEVEL_16_TO_BYTE = new Uint8Array([
-    0,   // Level 0: Below threshold / Clear air (transparent)
-    40,  // Level 1: ~5 dBZ
-    60,  // Level 2: ~10 dBZ
-    80,  // Level 3: ~15 dBZ
-    100, // Level 4: ~20 dBZ
-    120, // Level 5: ~25 dBZ
-    140, // Level 6: ~30 dBZ
-    160, // Level 7: ~35 dBZ
-    175, // Level 8: ~40 dBZ
-    190, // Level 9: ~45 dBZ
-    205, // Level 10: ~50 dBZ
-    220, // Level 11: ~55 dBZ
-    235, // Level 12: ~60 dBZ
-    245, // Level 13: ~65 dBZ
-    252, // Level 14: ~70 dBZ
-    255  // Level 15: ~75+ dBZ
+    0,   // Level 0: < 5 dBZ (Transparent)
+    0,   // Level 1: 5 dBZ (Transparent / Clear-air filter)
+    0,   // Level 2: 10 dBZ (Transparent / Clear-air filter)
+    85,  // Level 3: 15 dBZ (Light Blue / Drizzle)
+    105, // Level 4: 20 dBZ (Light Green)
+    125, // Level 5: 25 dBZ (Moderate Green)
+    140, // Level 6: 30 dBZ (Dark Green)
+    155, // Level 7: 35 dBZ (Yellow)
+    170, // Level 8: 40 dBZ (Dark Yellow / Light Orange)
+    185, // Level 9: 45 dBZ (Orange)
+    200, // Level 10: 50 dBZ (Red)
+    215, // Level 11: 55 dBZ (Dark Red)
+    230, // Level 12: 60 dBZ (Pink)
+    242, // Level 13: 65 dBZ (Purple)
+    250, // Level 14: 70 dBZ (Dark Purple)
+    255  // Level 15: 75+ dBZ (White / Hail)
 ]);
 
 /**
@@ -101,7 +102,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     let packetPos = -1;
     let packetCode = 0;
 
-    // Check standard offset 16 (Py-ART standard uncompressed layout)
+    // Check standard offset 16 first
     if (dataBytes.length >= 30) {
         const codeAt16 = view.getUint16(16, false);
         if (codeAt16 === 0xAF1F || codeAt16 === 0x0010 || codeAt16 === 16 || codeAt16 === 0x001C || codeAt16 === 28) {
@@ -110,7 +111,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // Fallback: Scan every single byte offset for packet code
+    // Fallback: Scan every byte offset for packet code
     if (packetPos === -1) {
         for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
             const code = view.getUint16(offset, false);
@@ -141,7 +142,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
 
     let pos = packetPos + 14;
 
-    // Check if first radial header contains override gate length
     if (pos + 6 <= dataBytes.length) {
         const firstRadialBytes = view.getUint16(pos, false);
         if ((packetCode === 16 || packetCode === 0x0010) && firstRadialBytes > 0 && firstRadialBytes !== numBins && firstRadialBytes <= 4000) {
@@ -149,8 +149,19 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    const gateSizeMeters = rangeScaleFactor > 0 ? rangeScaleFactor : (packetCode === 0xAF1F ? 1000 : 250);
-    const maxRangeMeters = numBins * gateSizeMeters;
+    // 🌟 CORRECT NEXRAD RANGE CALCULATION:
+    // - 230 km (230,000 meters / 124 nm) standard Base Reflectivity scan
+    // - 460 km (460,000 meters / 248 nm) extended Super-Res scan
+    let maxRangeMeters = 230000.0;
+    if (numBins >= 1000) {
+        maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
+    } else if (numBins <= 230) {
+        maxRangeMeters = 230000.0; // 230 bins * 1000m = 230km
+    } else if (numBins === 460) {
+        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km (Matches NWS display!)
+    } else {
+        maxRangeMeters = 230000.0;
+    }
 
     const TARGET_RADIALS = 720;
     const radarGrid = new Uint8Array(TARGET_RADIALS * numBins);
@@ -186,7 +197,12 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         } else {
             // === 8-Bit Digital Raw Radial Array ===
             const copyLength = Math.min(numUnits, numBins);
-            radarGrid.set(dataBytes.subarray(pos, pos + copyLength), targetOffset);
+            const rawSlice = dataBytes.subarray(pos, pos + copyLength);
+            for (let k = 0; k < copyLength; k++) {
+                const val = rawSlice[k];
+                // Filter out clear-air ground clutter below 15 dBZ (byte 75 in 8-bit space)
+                radarGrid[targetOffset + k] = val < 75 ? 0 : val;
+            }
             pos += numUnits;
         }
 
@@ -212,7 +228,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     const elapsed = (performance.now() - startTime).toFixed(1);
-    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates in ${elapsed}ms`);
+    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates (Range: ${maxRangeMeters / 1000}km) in ${elapsed}ms`);
 
     return {
         stationId: stationMeta?.id || "RADAR",
@@ -220,7 +236,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         lon: stationMeta?.lon || 0.0,
         numRadials: TARGET_RADIALS,
         numBins: numBins,
-        gateSizeMeters: gateSizeMeters,
         maxRangeMeters: maxRangeMeters,
         data: radarGrid
     };
