@@ -550,7 +550,7 @@ function renderArchivePopover() {
     // 1. Return to Live Loop Button
     const liveBtn = document.createElement('button');
     liveBtn.className = 'archive-live-btn';
-    liveBtn.innerHTML = `<span>⚡ Return to Live Loop</span>`;
+    liveBtn.innerHTML = `<span> Live Radar </span>`;
     liveBtn.onclick = async (e) => {
         e.stopPropagation();
         archivePopoverEl.style.display = 'none';
