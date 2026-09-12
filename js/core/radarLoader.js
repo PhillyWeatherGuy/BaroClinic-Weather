@@ -22,10 +22,14 @@ export function buildRadarTimeline(startUtcDate = null, durationHours = 1) {
         // --- REAL-TIME LIVE 1-HOUR LOOP ---
         radarState.mode = 'live';
         radarState.archiveDate = null;
-        const now = new Date();
+        
+        // 🌟 Snap live timeline to the true NWS 5-minute radar scan cycle (minus 2m processing lag)
+        const rawNow = new Date();
+        const latestScanMs = Math.floor((rawNow.getTime() - 2 * 60 * 1000) / (5 * 60 * 1000)) * (5 * 60 * 1000);
+        const latestScanDate = new Date(latestScanMs);
 
         MINUTE_OFFSETS_1H.forEach((minsAgo, idx) => {
-            const frameDate = new Date(now.getTime() - minsAgo * 60 * 1000);
+            const frameDate = new Date(latestScanDate.getTime() - minsAgo * 60 * 1000);
             const tag = minsAgo === 0 ? '900913' : `900913-m${String(minsAgo).padStart(2, '0')}m`;
             const label = minsAgo === 0 ? 'LIVE' : `-${minsAgo}m`;
 
