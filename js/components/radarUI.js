@@ -911,32 +911,6 @@ async function fetchLatestLevel3File(stationId) {
     return await resp.arrayBuffer();
 }
 
-    const proxyWrappers = [
-        (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-        (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-    ];
-
-    for (const prodPath of productPaths) {
-        const directUrl = `https://tgftp.nws.noaa.gov/SL.us008001/DF.of/DC.radar/${prodPath}`;
-        
-        for (const proxyFn of proxyWrappers) {
-            try {
-                const resp = await fetch(proxyFn(directUrl));
-                if (resp.ok) {
-                    const buf = await resp.arrayBuffer();
-                    if (buf.byteLength > 2000) {
-                        console.log(`✅ Loaded live Level 3 scan for ${stationId} from: ${directUrl}`);
-                        return buf;
-                    }
-                }
-            } catch (e) {
-                // Try next proxy / path fallback
-            }
-        }
-    }
-    throw new Error(`Could not fetch live Level 3 scan for ${stationId}`);
-}
-
 async function loadSingleSiteRadar(stationId, lat, lon) {
     if (!radarMapInstance) return;
 
