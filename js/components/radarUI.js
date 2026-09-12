@@ -1,6 +1,7 @@
 // js/components/radarUI.js
 import { radarState, buildRadarTimeline, purgeRadarMemory } from '../core/radarLoader.js';
 import { setBasemapLabelsVisibility } from '../layers/cityOverlay.js';
+import { getRadarStationsGeoJson } from '../config/radarStations.js';
 
 let radarMapInstance = null;
 let radarPlayInterval = null;
@@ -8,11 +9,18 @@ let isRadarPlaying = false;
 let currentVisibleIndex = -1;
 const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 
+// 🌟 Radar Mode State ('composite' | 'local')
+let activeRadarViewType = 'composite';
+
 // 🌟 Archive Calendar State
 let archivePopoverEl = null;
 let calendarViewDate = new Date();
 let selectedDayForArchive = null;
 let calendarViewMode = 'days'; // 'days' | 'months'
+
+// 🌟 Top Radar Mode Dropdown Element & Station Popup
+let radarModeMenuEl = null;
+let stationHoverPopup = null;
 
 function ensureArchiveStyles() {
     if (document.getElementById('radar-archive-styles')) return;
@@ -221,6 +229,55 @@ function ensureArchiveStyles() {
             color: #38bdf8;
             border-color: rgba(56, 189, 248, 0.5);
         }
+
+        /* 🌟 Top Bar Radar Mode Dropdown Styling */
+        .radar-top-dropdown {
+            position: absolute;
+            top: 48px;
+            right: 175px;
+            width: 190px;
+            background: rgba(11, 15, 25, 0.96);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 12px;
+            padding: 6px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            font-family: 'Rajdhani', sans-serif;
+        }
+        .radar-top-item {
+            background: transparent;
+            border: none;
+            color: #cbd5e1;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 13px;
+            text-align: left;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.15s ease;
+        }
+        .radar-top-item:hover {
+            background: rgba(56, 189, 248, 0.2);
+            color: #38bdf8;
+        }
+        .radar-top-item.active {
+            background: rgba(56, 189, 248, 0.25);
+            color: #38bdf8;
+        }
+        .station-hover-tooltip {
+            font-family: 'Rajdhani', sans-serif;
+            padding: 4px 6px;
+            text-align: center;
+        }
     `;
     document.head.appendChild(style);
 }
@@ -241,6 +298,8 @@ export async function initRadarMode(mapInstance) {
     bindRadarControls();
     setBasemapLabelsVisibility(mapInstance, true);
     initArchivePopover();
+    initRadarModeDropdown();
+    setupStationLayers(mapInstance);
 }
 
 /**
@@ -312,7 +371,6 @@ export async function switchRadarTimeline(startUtcDate = null) {
         }
     };
 
-    // Fast-load primary frame first
     addRadarLayer(frames[defaultIndex], true);
 
     syncRadarTimelineUI();
@@ -535,7 +593,7 @@ function initArchivePopover() {
         archivePopoverEl.style.display = isVisible ? 'none' : 'block';
         if (!isVisible) {
             selectedDayForArchive = null;
-            calendarViewMode = 'days'; // Reset to days view on open
+            calendarViewMode = 'days';
             calendarViewDate = radarState.archiveDate ? new Date(radarState.archiveDate) : new Date();
             renderArchivePopover();
         }
@@ -550,7 +608,7 @@ function renderArchivePopover() {
     // 1. Return to Live Loop Button
     const liveBtn = document.createElement('button');
     liveBtn.className = 'archive-live-btn';
-    liveBtn.innerHTML = `<span> Live Radar </span>`;
+    liveBtn.innerHTML = `<span>Live Radar</span>`;
     liveBtn.onclick = async (e) => {
         e.stopPropagation();
         archivePopoverEl.style.display = 'none';
@@ -558,9 +616,7 @@ function renderArchivePopover() {
     };
     archivePopoverEl.appendChild(liveBtn);
 
-    // ==========================================================
     // VIEW A: 24-Hour Selector (When day is clicked)
-    // ==========================================================
     if (selectedDayForArchive) {
         const hoursHeader = document.createElement('div');
         hoursHeader.className = 'hours-view-header';
@@ -615,9 +671,7 @@ function renderArchivePopover() {
         return;
     }
 
-    // ==========================================================
     // VIEW B: Month & Year Selector (When month title is clicked)
-    // ==========================================================
     if (calendarViewMode === 'months') {
         const currentYear = calendarViewDate.getUTCFullYear();
 
@@ -655,7 +709,6 @@ function renderArchivePopover() {
             mBtn.textContent = name;
 
             const testDate = new Date(Date.UTC(currentYear, mIdx, 1));
-            // Disable future months in current year
             if (testDate.getUTCFullYear() === now.getUTCFullYear() && mIdx > now.getUTCMonth()) {
                 mBtn.disabled = true;
             } else {
@@ -673,9 +726,7 @@ function renderArchivePopover() {
         return;
     }
 
-    // ==========================================================
     // VIEW C: Days Calendar (Default)
-    // ==========================================================
     const year = calendarViewDate.getUTCFullYear();
     const month = calendarViewDate.getUTCMonth();
 
@@ -690,7 +741,6 @@ function renderArchivePopover() {
     `;
     archivePopoverEl.appendChild(calHeader);
 
-    // 🌟 Click month title to enter Year / Month picker
     calHeader.querySelector('#btn-month-select').onclick = (e) => {
         e.stopPropagation();
         calendarViewMode = 'months';
@@ -756,7 +806,212 @@ function renderArchivePopover() {
 }
 
 /**
- * 🌟 7. Teardown Radar Mode
+ * 🌟 7. Top Radar Mode Dropdown ("NEXRAD Composite" vs "Local Radar")
+ */
+function initRadarModeDropdown() {
+    ensureArchiveStyles();
+
+    const modelBtn = document.getElementById('btn-model-menu');
+    const navRight = document.querySelector('.nav-right');
+    if (!modelBtn || !navRight) return;
+
+    if (!radarModeMenuEl) {
+        radarModeMenuEl = document.createElement('div');
+        radarModeMenuEl.id = 'radar-mode-menu';
+        radarModeMenuEl.className = 'radar-top-dropdown';
+        radarModeMenuEl.style.display = 'none';
+
+        radarModeMenuEl.innerHTML = `
+            <button class="radar-top-item ${activeRadarViewType === 'composite' ? 'active' : ''}" data-type="composite">
+                <span>NEXRAD Composite</span>
+            </button>
+            <button class="radar-top-item ${activeRadarViewType === 'local' ? 'active' : ''}" data-type="local">
+                <span>Local Radar</span>
+            </button>
+        `;
+
+        navRight.appendChild(radarModeMenuEl);
+
+        radarModeMenuEl.querySelectorAll('.radar-top-item').forEach((item) => {
+            item.onclick = (e) => {
+                e.stopPropagation();
+                const selectedType = item.getAttribute('data-type');
+                setRadarViewType(selectedType);
+                radarModeMenuEl.style.display = 'none';
+                modelBtn.classList.remove('active', 'open');
+            };
+        });
+
+        document.addEventListener('click', (e) => {
+            if (radarModeMenuEl && !radarModeMenuEl.contains(e.target) && !modelBtn.contains(e.target)) {
+                radarModeMenuEl.style.display = 'none';
+                modelBtn.classList.remove('active', 'open');
+            }
+        });
+    }
+
+    modelBtn.onclick = (e) => {
+        e.stopPropagation();
+        const isVisible = radarModeMenuEl.style.display === 'flex';
+        radarModeMenuEl.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            modelBtn.classList.add('active', 'open');
+        } else {
+            modelBtn.classList.remove('active', 'open');
+        }
+    };
+}
+
+export function setRadarViewType(type) {
+    activeRadarViewType = type;
+    const modelBtn = document.getElementById('btn-model-menu');
+
+    if (radarModeMenuEl) {
+        radarModeMenuEl.querySelectorAll('.radar-top-item').forEach((b) => {
+            b.classList.toggle('active', b.getAttribute('data-type') === type);
+        });
+    }
+
+    if (type === 'composite') {
+        if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
+        setStationLayersVisibility(false);
+    } else {
+        if (modelBtn) modelBtn.querySelector('span').textContent = 'Local Radar';
+        setStationLayersVisibility(true);
+    }
+}
+
+/**
+ * 🌟 8. NWS-Style Blue Circles for WSR-88D Stations
+ */
+function setupStationLayers(mapInstance) {
+    if (!mapInstance) return;
+
+    if (!stationHoverPopup) {
+        stationHoverPopup = new maplibregl.Popup({
+            closeButton: false,
+            closeOnClick: false
+        });
+    }
+
+    const sourceId = 'radar-stations-src';
+    const circleLayerId = 'radar-stations-circle-layer';
+    const labelLayerId = 'radar-stations-symbol-layer';
+
+    if (!mapInstance.getSource(sourceId)) {
+        mapInstance.addSource(sourceId, {
+            type: 'geojson',
+            data: getRadarStationsGeoJson()
+        });
+    }
+
+    if (!mapInstance.getLayer(circleLayerId)) {
+        mapInstance.addLayer({
+            id: circleLayerId,
+            type: 'circle',
+            source: sourceId,
+            layout: {
+                'visibility': activeRadarViewType === 'local' ? 'visible' : 'none'
+            },
+            paint: {
+                'circle-color': '#2563eb',
+                'circle-radius': [
+                    'interpolate', ['linear'], ['zoom'],
+                    3, 4,
+                    6, 7,
+                    10, 10
+                ],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 1.8,
+                'circle-opacity': 0.95
+            }
+        });
+    }
+
+    if (!mapInstance.getLayer(labelLayerId)) {
+        mapInstance.addLayer({
+            id: labelLayerId,
+            type: 'symbol',
+            source: sourceId,
+            minzoom: 6,
+            layout: {
+                'visibility': activeRadarViewType === 'local' ? 'visible' : 'none',
+                'text-field': ['get', 'id'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 11,
+                'text-offset': [0, 1.3],
+                'text-anchor': 'top',
+                'text-optional': true
+            },
+            paint: {
+                'text-color': '#ffffff',
+                'text-halo-color': '#0b0f19',
+                'text-halo-width': 2.0
+            }
+        });
+    }
+
+    // Hover Tooltip
+    mapInstance.on('mouseenter', circleLayerId, (e) => {
+        if (activeRadarViewType !== 'local') return;
+        mapInstance.getCanvas().style.cursor = 'pointer';
+
+        const f = e.features && e.features[0];
+        if (!f) return;
+
+        const coords = f.geometry.coordinates.slice();
+        const { id, name, state } = f.properties;
+
+        stationHoverPopup.setLngLat(coords)
+            .setHTML(`<div class="station-hover-tooltip"><strong>${id}</strong><br>${name}, ${state}</div>`)
+            .addTo(mapInstance);
+    });
+
+    mapInstance.on('mouseleave', circleLayerId, () => {
+        mapInstance.getCanvas().style.cursor = '';
+        stationHoverPopup.remove();
+    });
+
+    // Click to select & fly to station
+    mapInstance.on('click', circleLayerId, (e) => {
+        if (activeRadarViewType !== 'local') return;
+
+        const f = e.features && e.features[0];
+        if (!f) return;
+
+        const [lon, lat] = f.geometry.coordinates;
+        const { id, name } = f.properties;
+
+        mapInstance.flyTo({
+            center: [lon, lat],
+            zoom: 8.5,
+            duration: 1200
+        });
+
+        const modelBtn = document.getElementById('btn-model-menu');
+        if (modelBtn) {
+            modelBtn.querySelector('span').textContent = `Local Radar (${id})`;
+        }
+    });
+}
+
+function setStationLayersVisibility(isVisible) {
+    if (!radarMapInstance) return;
+    const visibilityVal = isVisible ? 'visible' : 'none';
+
+    if (radarMapInstance.getLayer('radar-stations-circle-layer')) {
+        radarMapInstance.setLayoutProperty('radar-stations-circle-layer', 'visibility', visibilityVal);
+    }
+    if (radarMapInstance.getLayer('radar-stations-symbol-layer')) {
+        radarMapInstance.setLayoutProperty('radar-stations-symbol-layer', 'visibility', visibilityVal);
+    }
+    if (!isVisible && stationHoverPopup) {
+        stationHoverPopup.remove();
+    }
+}
+
+/**
+ * 🌟 9. Teardown Radar Mode
  */
 export function destroyRadarMode(mapInstance) {
     pauseRadarPlayback();
@@ -766,15 +1021,31 @@ export function destroyRadarMode(mapInstance) {
         archivePopoverEl.style.display = 'none';
     }
 
-    if (mapInstance && radarState.frames) {
-        radarState.frames.forEach((frame) => {
-            const layerId = `iem-radar-layer-${frame.index}`;
-            const sourceId = `iem-radar-src-${frame.index}`;
-            try {
-                if (mapInstance.getLayer(layerId)) mapInstance.removeLayer(layerId);
-                if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
-            } catch (e) {}
-        });
+    if (radarModeMenuEl) {
+        radarModeMenuEl.style.display = 'none';
+    }
+
+    if (stationHoverPopup) {
+        stationHoverPopup.remove();
+    }
+
+    if (mapInstance) {
+        if (radarState.frames) {
+            radarState.frames.forEach((frame) => {
+                const layerId = `iem-radar-layer-${frame.index}`;
+                const sourceId = `iem-radar-src-${frame.index}`;
+                try {
+                    if (mapInstance.getLayer(layerId)) mapInstance.removeLayer(layerId);
+                    if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+                } catch (e) {}
+            });
+        }
+
+        try {
+            if (mapInstance.getLayer('radar-stations-symbol-layer')) mapInstance.removeLayer('radar-stations-symbol-layer');
+            if (mapInstance.getLayer('radar-stations-circle-layer')) mapInstance.removeLayer('radar-stations-circle-layer');
+            if (mapInstance.getSource('radar-stations-src')) mapInstance.removeSource('radar-stations-src');
+        } catch (e) {}
     }
 
     purgeRadarMemory();
