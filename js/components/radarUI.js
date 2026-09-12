@@ -13,158 +13,160 @@ let archivePopoverEl = null;
 let calendarViewDate = new Date();
 let selectedDayForArchive = null;
 
-// Inject Sleek Glass Calendar Styles
-const archiveStyle = document.createElement('style');
-archiveStyle.id = 'radar-archive-styles';
-archiveStyle.textContent = `
-    .radar-archive-popover {
-        position: absolute;
-        bottom: calc(100% + 12px);
-        left: 0;
-        width: 270px;
-        background: rgba(11, 15, 25, 0.96);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 14px;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
-        padding: 10px;
-        z-index: 120;
-        font-family: 'Rajdhani', sans-serif;
-        color: #f8fafc;
-        box-sizing: border-box;
-    }
-    .archive-live-btn {
-        width: 100%;
-        background: rgba(56, 189, 248, 0.18);
-        border: 1px solid rgba(56, 189, 248, 0.5);
-        color: #38bdf8;
-        font-family: 'Rajdhani', sans-serif;
-        font-weight: 700;
-        font-size: 12px;
-        letter-spacing: 0.5px;
-        padding: 6px;
-        border-radius: 8px;
-        cursor: pointer;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        transition: all 0.2s ease;
-    }
-    .archive-live-btn:hover {
-        background: rgba(56, 189, 248, 0.35);
-    }
-    .cal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 6px;
-        padding: 0 4px;
-    }
-    .cal-title {
-        font-weight: 700;
-        font-size: 14px;
-        color: #e2e8f0;
-    }
-    .cal-nav-btn {
-        background: transparent;
-        border: none;
-        color: #94a3b8;
-        font-size: 14px;
-        cursor: pointer;
-        padding: 2px 8px;
-        border-radius: 4px;
-    }
-    .cal-nav-btn:hover {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.1);
-    }
-    .cal-weekdays {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        text-align: center;
-        font-size: 11px;
-        font-weight: 700;
-        color: #64748b;
-        margin-bottom: 4px;
-    }
-    .cal-days-grid {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 2px;
-    }
-    .cal-day-btn {
-        background: transparent;
-        border: none;
-        color: #cbd5e1;
-        font-family: 'Rajdhani', sans-serif;
-        font-size: 12px;
-        font-weight: 600;
-        aspect-ratio: 1;
-        border-radius: 6px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.15s ease;
-    }
-    .cal-day-btn:hover:not(:disabled) {
-        background: rgba(56, 189, 248, 0.2);
-        color: #38bdf8;
-    }
-    .cal-day-btn.selected {
-        background: #38bdf8 !important;
-        color: #0b0f19 !important;
-        font-weight: 700;
-    }
-    .cal-day-btn:disabled {
-        opacity: 0.2;
-        cursor: not-allowed;
-    }
-    .hours-view-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 8px;
-    }
-    .hours-back-btn {
-        background: transparent;
-        border: none;
-        color: #38bdf8;
-        font-family: 'Rajdhani', sans-serif;
-        font-weight: 700;
-        font-size: 12px;
-        cursor: pointer;
-        padding: 2px 4px;
-    }
-    .hours-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 4px;
-        max-height: 180px;
-        overflow-y: auto;
-    }
-    .hour-chip-btn {
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        color: #cbd5e1;
-        font-family: 'Rajdhani', sans-serif;
-        font-size: 12px;
-        font-weight: 700;
-        padding: 6px 0;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .hour-chip-btn:hover {
-        background: rgba(56, 189, 248, 0.25);
-        color: #38bdf8;
-        border-color: rgba(56, 189, 248, 0.5);
-    }
-`;
-document.head.appendChild(archiveStyle);
+function ensureArchiveStyles() {
+    if (document.getElementById('radar-archive-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'radar-archive-styles';
+    style.textContent = `
+        .radar-archive-popover {
+            position: absolute;
+            bottom: calc(100% + 12px);
+            left: 0;
+            width: 270px;
+            background: rgba(11, 15, 25, 0.96);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 14px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            z-index: 120;
+            font-family: 'Rajdhani', sans-serif;
+            color: #f8fafc;
+            box-sizing: border-box;
+        }
+        .archive-live-btn {
+            width: 100%;
+            background: rgba(56, 189, 248, 0.18);
+            border: 1px solid rgba(56, 189, 248, 0.5);
+            color: #38bdf8;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            padding: 6px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+        .archive-live-btn:hover {
+            background: rgba(56, 189, 248, 0.35);
+        }
+        .cal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            padding: 0 4px;
+        }
+        .cal-title {
+            font-weight: 700;
+            font-size: 14px;
+            color: #e2e8f0;
+        }
+        .cal-nav-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .cal-nav-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .cal-weekdays {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            text-align: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+        .cal-days-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 2px;
+        }
+        .cal-day-btn {
+            background: transparent;
+            border: none;
+            color: #cbd5e1;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            aspect-ratio: 1;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+        .cal-day-btn:hover:not(:disabled) {
+            background: rgba(56, 189, 248, 0.2);
+            color: #38bdf8;
+        }
+        .cal-day-btn.selected {
+            background: #38bdf8 !important;
+            color: #0b0f19 !important;
+            font-weight: 700;
+        }
+        .cal-day-btn:disabled {
+            opacity: 0.2;
+            cursor: not-allowed;
+        }
+        .hours-view-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .hours-back-btn {
+            background: transparent;
+            border: none;
+            color: #38bdf8;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 2px 4px;
+        }
+        .hours-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+        .hour-chip-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 6px 0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .hour-chip-btn:hover {
+            background: rgba(56, 189, 248, 0.25);
+            color: #38bdf8;
+            border-color: rgba(56, 189, 248, 0.5);
+        }
+    `;
+    document.head.appendChild(style);
+}
 
 /**
  * 🌟 1. Launch Real-Time IEM Radar on Map
@@ -446,6 +448,8 @@ function bindRadarControls() {
  * 🌟 6. Calendar + 24-Hour Archive Popover
  */
 function initArchivePopover() {
+    ensureArchiveStyles();
+
     const toggleBtn = document.getElementById('model-run-toggle');
     const container = document.querySelector('.model-run-dropdown-container');
     if (!toggleBtn || !container) return;
@@ -499,7 +503,7 @@ function renderArchivePopover() {
         const dayNum = selectedDayForArchive.getUTCDate();
 
         hoursHeader.innerHTML = `
-            <button class="hours-back-btn" id="btn-back-to-days">← Change Day</button>
+            <button class="hours-back-btn" id="btn-back-to-days">&larr; Change Day</button>
             <span class="cal-title">${monthStr} ${dayNum} (UTC)</span>
         `;
         archivePopoverEl.appendChild(hoursHeader);
@@ -519,7 +523,6 @@ function renderArchivePopover() {
             const hhStr = String(h).padStart(2, '0') + 'Z';
             hBtn.textContent = hhStr;
 
-            // Check if hour is in future
             const candidateDate = new Date(Date.UTC(
                 selectedDayForArchive.getUTCFullYear(),
                 selectedDayForArchive.getUTCMonth(),
@@ -553,9 +556,9 @@ function renderArchivePopover() {
 
     const monthName = calendarViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
     calHeader.innerHTML = `
-        <button class="cal-nav-btn" id="btn-cal-prev">‹</button>
+        <button class="cal-nav-btn" id="btn-cal-prev">&lsaquo;</button>
         <span class="cal-title">${monthName}</span>
-        <button class="cal-nav-btn" id="btn-cal-next">›</button>
+        <button class="cal-nav-btn" id="btn-cal-next">&rsaquo;</button>
     `;
     archivePopoverEl.appendChild(calHeader);
 
@@ -601,7 +604,6 @@ function renderArchivePopover() {
 
         const dayUtc = new Date(Date.UTC(year, month, d));
 
-        // Disable future dates
         if (dayUtc > now) {
             dBtn.disabled = true;
         } else {
@@ -638,4 +640,6 @@ export function destroyRadarMode(mapInstance) {
         });
     }
 
-    purgeRadarMemory
+    purgeRadarMemory();
+    radarMapInstance = null;
+}
