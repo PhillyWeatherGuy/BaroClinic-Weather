@@ -101,16 +101,16 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     // 🌟 Extract Exact Radar Scan Time from Message Header Block
     let scanDate = new Date();
     try {
-        // The standard NEXRAD Message Header starts shortly after the WMO text string
-        for (let i = 0; i < 100; i++) {
+        // Search word-aligned (i += 2) to prevent reading garbage shifted bytes
+        for (let i = 0; i < 100; i += 2) {
             const msgCode = view.getUint16(i, false);
             // Common Product Codes are < 200 (e.g., 19 for Base Reflectivity, 153 for Super-Res)
             if (msgCode > 0 && msgCode < 200) {
-                const julianDays = view.getUint16(i + 2, false);          // Fixed offset! (+2)
-                const secondsSinceMidnight = view.getUint32(i + 4, false); // Fixed offset! (+4)
+                const julianDays = view.getUint16(i + 2, false);
+                const secondsSinceMidnight = view.getUint32(i + 4, false);
                 
-                // Sanity check: Julian days > 10000 (after 1997) and seconds < 86400 (24h)
-                if (julianDays > 10000 && julianDays < 40000 && secondsSinceMidnight < 86400) {
+                // Sanity check: Julian days > 18000 (after 2019) and seconds < 86400 (24h)
+                if (julianDays > 18000 && julianDays < 30000 && secondsSinceMidnight < 86400) {
                     const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
                     scanDate = new Date(unixMs);
                     break;
@@ -172,7 +172,9 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 🌟 CORRECT NEXRAD RANGE CALCULATION
+    // 🌟 CORRECT NEXRAD RANGE CALCULATION:
+    // - 230 km (230,000 meters / 124 nm) standard Base Reflectivity scan
+    // - 460 km (460,000 meters / 248 nm) extended Super-Res scan
     let maxRangeMeters = 230000.0;
     if (numBins >= 1000) {
         maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
