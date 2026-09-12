@@ -17,6 +17,7 @@ let activeRadarViewType = 'composite';
 // 🌟 Single-Site Level 3 State
 let singleSiteRadarLayer = null;
 let activeStationId = null;
+let singleSiteFrames = new Array(12); // Stores the 12 decoded sweeps
 
 // 🌟 Archive Calendar State
 let archivePopoverEl = null;
@@ -368,7 +369,7 @@ export async function switchRadarTimeline(startUtcDate = null) {
                 source: sourceId,
                 layout: { 'visibility': 'visible' },
                 paint: {
-                    'raster-opacity': isInitial ? 1.0 : 0.0,
+                    'raster-opacity': (activeRadarViewType === 'composite' && isInitial) ? 1.0 : 0.0,
                     'raster-fade-duration': 0,
                     'raster-opacity-transition': { duration: 0, delay: 0 },
                     'raster-resampling': 'linear'
@@ -400,24 +401,42 @@ export async function switchRadarTimeline(startUtcDate = null) {
  * 🌟 3. Instant Zero-Blink GPU Frame Swapping
  */
 export function setRadarFrame(frameIndex) {
-    if (!radarState.frames || frameIndex < 0 || frameIndex >= radarState.frames.length) return;
+    if (frameIndex < 0 || frameIndex >= 12) return;
 
     const prevIndex = currentVisibleIndex;
     currentVisibleIndex = frameIndex;
     radarState.activeFrameIndex = frameIndex;
-    const frameInfo = radarState.frames[frameIndex];
 
     if (radarMapInstance) {
-        const newLayerId = `iem-radar-layer-${frameIndex}`;
+        if (activeRadarViewType === 'composite') {
+            // === COMPOSITE MODE ===
+            const newLayerId = `iem-radar-layer-${frameIndex}`;
+            if (radarMapInstance.getLayer(newLayerId)) {
+                radarMapInstance.setPaintProperty(newLayerId, 'raster-opacity', 1.0);
+            }
 
-        if (radarMapInstance.getLayer(newLayerId)) {
-            radarMapInstance.setPaintProperty(newLayerId, 'raster-opacity', 1.0);
-        }
+            if (prevIndex >= 0 && prevIndex !== frameIndex) {
+                const prevLayerId = `iem-radar-layer-${prevIndex}`;
+                if (radarMapInstance.getLayer(prevLayerId)) {
+                    radarMapInstance.setPaintProperty(prevLayerId, 'raster-opacity', 0.0);
+                }
+            }
+        } else if (activeRadarViewType === 'local' && singleSiteRadarLayer) {
+            // === LOCAL SINGLE-SITE RADAR MODE ===
+            // Guarantee all composite tiles stay 100% hidden
+            if (radarState.frames) {
+                radarState.frames.forEach((f) => {
+                    const lId = `iem-radar-layer-${f.index}`;
+                    if (radarMapInstance.getLayer(lId)) {
+                        radarMapInstance.setPaintProperty(lId, 'raster-opacity', 0.0);
+                    }
+                });
+            }
 
-        if (prevIndex >= 0 && prevIndex !== frameIndex) {
-            const prevLayerId = `iem-radar-layer-${prevIndex}`;
-            if (radarMapInstance.getLayer(prevLayerId)) {
-                radarMapInstance.setPaintProperty(prevLayerId, 'raster-opacity', 0.0);
+            // Swap shader to the requested local frame
+            const frameObj = singleSiteFrames[frameIndex];
+            if (frameObj && frameObj.sweepData) {
+                singleSiteRadarLayer.setSweepData(frameObj.sweepData);
             }
         }
     }
@@ -426,11 +445,13 @@ export function setRadarFrame(frameIndex) {
     if (slider) slider.value = frameIndex.toString();
 
     const timeLabel = document.getElementById('time-label');
-    if (timeLabel && frameInfo) {
-        timeLabel.textContent = frameInfo.label;
+    if (timeLabel) {
+        const frameInfo = radarState.frames?.[frameIndex];
+        timeLabel.textContent = frameInfo ? frameInfo.label : (frameIndex === 11 ? 'LIVE' : `-${(11 - frameIndex) * 5}m`);
     }
 
     const appClock = document.getElementById('app-clock');
+    const frameInfo = radarState.frames?.[frameIndex];
     if (appClock && frameInfo?.date) {
         appClock.textContent = frameInfo.date.toLocaleTimeString([], {
             weekday: 'short',
@@ -454,8 +475,6 @@ export function toggleRadarPlayback() {
 }
 
 export function startRadarPlayback() {
-    if (!radarState.frames || radarState.frames.length <= 1) return;
-
     isRadarPlaying = true;
     updateRadarPlayPauseUI();
 
@@ -463,7 +482,7 @@ export function startRadarPlayback() {
 
     radarPlayInterval = setInterval(() => {
         let nextIdx = radarState.activeFrameIndex + 1;
-        if (nextIdx >= radarState.frames.length) {
+        if (nextIdx >= 12) {
             nextIdx = 0;
         }
         setRadarFrame(nextIdx);
@@ -493,16 +512,17 @@ function updateRadarPlayPauseUI() {
  */
 function syncRadarTimelineUI() {
     const slider = document.getElementById('timeline-slider');
-    const stepsCount = radarState.frames.length;
-    if (!slider || stepsCount === 0) return;
+    if (!slider) return;
 
     slider.min = '0';
-    slider.max = (stepsCount - 1).toString();
+    slider.max = '11';
     slider.value = radarState.activeFrameIndex.toString();
 
     const runLabel = document.getElementById('current-run-label');
     if (runLabel) {
-        if (radarState.mode === 'live' || !radarState.archiveDate) {
+        if (activeRadarViewType === 'local' && activeStationId) {
+            runLabel.textContent = `${activeStationId} (1h Loop)`;
+        } else if (radarState.mode === 'live' || !radarState.archiveDate) {
             runLabel.textContent = 'Live Loop (1h)';
         } else {
             const d = radarState.archiveDate;
@@ -518,9 +538,9 @@ function syncRadarTimelineUI() {
 
 function updateRadarSliderTrack() {
     const slider = document.getElementById('timeline-slider');
-    if (!slider || !radarState.frames || radarState.frames.length === 0) return;
+    if (!slider) return;
 
-    const total = radarState.frames.length - 1;
+    const total = 11;
     const current = radarState.activeFrameIndex;
     const percent = total > 0 ? (current / total) * 100 : 0;
 
@@ -550,7 +570,7 @@ function bindRadarControls() {
         prevBtn.onclick = () => {
             if (isRadarPlaying) pauseRadarPlayback();
             let prevIdx = radarState.activeFrameIndex - 1;
-            if (prevIdx < 0) prevIdx = radarState.frames.length - 1;
+            if (prevIdx < 0) prevIdx = 11;
             setRadarFrame(prevIdx);
         };
     }
@@ -559,7 +579,7 @@ function bindRadarControls() {
         nextBtn.onclick = () => {
             if (isRadarPlaying) pauseRadarPlayback();
             let nextIdx = radarState.activeFrameIndex + 1;
-            if (nextIdx >= radarState.frames.length) nextIdx = 0;
+            if (nextIdx >= 12) nextIdx = 0;
             setRadarFrame(nextIdx);
         };
     }
@@ -898,26 +918,31 @@ export function setRadarViewType(type) {
 }
 
 /**
- * 🌟 8. Fetch Real-Time Level 3 Sweep via Your Cloudflare Worker Proxy
+ * 🌟 8. Fetch Real-Time Level 3 Sweep Frame via Your Cloudflare Worker Proxy
  */
-async function fetchLatestLevel3File(stationId) {
+async function fetchLevel3Frame(stationId, frameIndex = 0) {
     const siteCode = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
-    const workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=N0B`;
+    const workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=N0B&frame=${frameIndex}`;
 
     const resp = await fetch(workerUrl);
     if (!resp.ok) {
-        throw new Error(`Worker returned HTTP ${resp.status} for ${stationId}`);
+        throw new Error(`Worker returned HTTP ${resp.status} for ${stationId} frame ${frameIndex}`);
     }
     return await resp.arrayBuffer();
 }
 
+/**
+ * 🌟 Load & Animate Single-Site 12-Frame Time Loop
+ */
 async function loadSingleSiteRadar(stationId, lat, lon) {
     if (!radarMapInstance) return;
 
     try {
         pauseRadarPlayback();
+        activeStationId = stationId;
+        singleSiteFrames = new Array(12);
 
-        // 1. Hide the national mosaic loop layers while local scan is active
+        // 1. Completely hide all composite layers
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
@@ -930,23 +955,41 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         const runLabel = document.getElementById('current-run-label');
         if (runLabel) runLabel.textContent = `Loading ${stationId}...`;
 
-        // 2. Fetch and decode raw Level 3 file
-        const rawBuffer = await fetchLatestLevel3File(stationId);
-        const sweepData = await decodeLevel3(rawBuffer, { id: stationId, lat, lon });
+        // 2. Load and render the LIVE frame (frame 0 / sn.last) immediately!
+        // Timeline index 11 = LIVE (most recent)
+        const rawBuffer0 = await fetchLevel3Frame(stationId, 0);
+        const liveSweep = await decodeLevel3(rawBuffer0, { id: stationId, lat, lon });
 
-        // 3. Attach GPU single-site layer if not already added
+        singleSiteFrames[11] = { index: 11, sweepData: liveSweep, label: 'LIVE' };
+
+        // 3. Attach GPU single-site layer
         if (!singleSiteRadarLayer) {
             singleSiteRadarLayer = createSingleSiteRadarLayer(radarMapInstance);
             const beforeId = radarMapInstance.getLayer('radar-stations-circle-layer') ? 'radar-stations-circle-layer' : undefined;
             radarMapInstance.addLayer(singleSiteRadarLayer, beforeId);
         }
 
-        singleSiteRadarLayer.setSweepData(sweepData);
-        activeStationId = stationId;
+        singleSiteRadarLayer.setSweepData(liveSweep);
 
-        if (runLabel) runLabel.textContent = `${stationId} (Live Sweep)`;
-        const timeLabel = document.getElementById('time-label');
-        if (timeLabel) timeLabel.textContent = 'LIVE';
+        if (runLabel) runLabel.textContent = `${stationId} (1h Loop)`;
+        syncRadarTimelineUI();
+        setRadarFrame(11);
+
+        // 4. Preload remaining 11 historical frames in background (sn.0001 to sn.0011)
+        // Frame 10 = sn.0001 (-5m), Frame 9 = sn.0002 (-10m) ... Frame 0 = sn.0011 (-55m)
+        for (let i = 1; i <= 11; i++) {
+            const timelineIdx = 11 - i;
+            fetchLevel3Frame(stationId, i)
+                .then(buf => decodeLevel3(buf, { id: stationId, lat, lon }))
+                .then(sweep => {
+                    singleSiteFrames[timelineIdx] = {
+                        index: timelineIdx,
+                        sweepData: sweep,
+                        label: `-${i * 5}m`
+                    };
+                })
+                .catch(() => {});
+        }
 
     } catch (err) {
         console.error(`[RadarUI] Error loading single site ${stationId}:`, err);
@@ -996,7 +1039,6 @@ function setupStationLayers(mapInstance) {
                     6, 7,
                     10, 10
                 ],
-                'circle-stroke-color': '#ffffff',
                 'circle-stroke-width': 1.8,
                 'circle-opacity': 0.95
             }
@@ -1116,6 +1158,7 @@ export function destroyRadarMode(mapInstance) {
         singleSiteRadarLayer = null;
     }
     activeStationId = null;
+    singleSiteFrames = new Array(12);
 
     if (mapInstance) {
         if (radarState.frames) {
