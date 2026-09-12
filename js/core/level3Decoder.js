@@ -1,10 +1,8 @@
 // js/core/level3Decoder.js
 import { unzlibSync, inflateSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
-import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
 /**
  * 🌟 NWS 16-Level Reflectivity Threshold Map (dBZ -> 0..255 Palette Index)
- * Levels 0..2 (< 15 dBZ) are set to 0 (transparent) to filter out clear-air ground clutter!
  */
 const LEVEL_16_TO_BYTE = new Uint8Array([
     0,   // Level 0: < 5 dBZ (Transparent)
@@ -26,30 +24,14 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Decompresses Level 3 payload (Supports BZIP2, ZLIB, GZIP, and Raw NIDS)
+ * 🛰️ Decompresses Level 3 payload using fflate and browser Zlib/Deflate
  */
 function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
     let bestOut = bytes;
     let maxLen = 0;
 
-    // 1. Scan for BZIP2 Header: 'B', 'Z', 'h' (0x42, 0x5A, 0x68)
-    for (let offset = 0; offset <= Math.min(bytes.length - 4, 600); offset++) {
-        if (bytes[offset] === 0x42 && bytes[offset + 1] === 0x5A && bytes[offset + 2] === 0x68) {
-            try {
-                const sub = bytes.subarray(offset);
-                const out = seekBzip.decode(sub);
-                if (out && out.length > maxLen) {
-                    bestOut = new Uint8Array(out);
-                    maxLen = out.length;
-                }
-            } catch (e) {}
-        }
-    }
-
-    if (maxLen > 1000) return bestOut;
-
-    // 2. Scan for ZLIB Header (0x78)
+    // 1. Scan every byte for ZLIB Header (0x78)
     for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         if (bytes[offset] === 0x78) {
             try {
@@ -65,7 +47,7 @@ function decompressLevel3Payload(arrayBuffer) {
 
     if (maxLen > 1000) return bestOut;
 
-    // 3. Scan for GZIP / Raw Deflate
+    // 2. Scan for GZIP / Raw Deflate
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             const out = unzlibSync(bytes);
@@ -95,18 +77,11 @@ function decompressLevel3Payload(arrayBuffer) {
  */
 function extractRadarTimestamp(rawBytes, view) {
     try {
-        // Search for the 102-byte PDB or scan for Julian Date / Time fields in the first 300 bytes
-        // In NEXRAD Level 3 PDB:
-        // Halfwords 23-24 (bytes 46-49 from PDB start) = Volume Scan Date (Julian days since Jan 1, 1970)
-        // Halfwords 25-26 (bytes 50-53 from PDB start) = Volume Scan Time (Seconds past midnight UTC)
         for (let off = 30; off <= Math.min(rawBytes.length - 54, 250); off += 2) {
             const julianDays = view.getUint32(off, false);
             const secPastMid = view.getUint32(off + 4, false);
 
-            // Sanity check: Julian days for 2020-2035 range roughly from 18262 to 23831
-            // Seconds past midnight ranges from 0 to 86400
             if (julianDays >= 18000 && julianDays <= 25000 && secPastMid >= 0 && secPastMid <= 86400) {
-                // Convert Unix epoch day offset (Julian days since 1970-01-01)
                 const msTime = (julianDays * 86400000) + (secPastMid * 1000);
                 const scanDate = new Date(msTime);
                 if (!isNaN(scanDate.getTime())) {
@@ -115,7 +90,7 @@ function extractRadarTimestamp(rawBytes, view) {
             }
         }
     } catch (e) {}
-    return new Date(); // Fallback to current time if unparsable
+    return new Date();
 }
 
 /**
@@ -126,17 +101,14 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const rawBytes = new Uint8Array(rawBuffer);
     const rawView = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
 
-    // 🌟 Extract exact scan time from raw file headers before decompression
     const scanTimestamp = extractRadarTimestamp(rawBytes, rawView);
 
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // 1. Locate Radial Data Packet Header
     let packetPos = -1;
     let packetCode = 0;
 
-    // Check standard offset 16 first
     if (dataBytes.length >= 30) {
         const codeAt16 = view.getUint16(16, false);
         if (codeAt16 === 0xAF1F || codeAt16 === 0x0010 || codeAt16 === 16 || codeAt16 === 0x001C || codeAt16 === 28) {
@@ -145,7 +117,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // Fallback: Scan every byte offset for packet code
     if (packetPos === -1) {
         for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
             const code = view.getUint16(offset, false);
@@ -166,7 +137,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         throw new Error(`Invalid Level 3 file: Radial packet not found (size: ${dataBytes.length} bytes)`);
     }
 
-    // 2. Read Packet Header
     const firstBin = view.getUint16(packetPos + 2, false);
     let numBins = view.getUint16(packetPos + 4, false);
     const iCenter = view.getInt16(packetPos + 6, false);
@@ -185,11 +155,11 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
 
     let maxRangeMeters = 230000.0;
     if (numBins >= 1000) {
-        maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
+        maxRangeMeters = 460000.0;
     } else if (numBins <= 230) {
-        maxRangeMeters = 230000.0; // 230 bins * 1000m = 230km
+        maxRangeMeters = 230000.0;
     } else if (numBins === 460) {
-        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km
+        maxRangeMeters = 230000.0;
     } else {
         maxRangeMeters = 230000.0;
     }
@@ -198,7 +168,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const radarGrid = new Uint8Array(TARGET_RADIALS * numBins);
     const filledRays = new Uint8Array(TARGET_RADIALS);
 
-    // 3. Unpack Radials (Handles both 4-Bit RLE Packet AF1F & 8-Bit Raw Packet 16/28)
     for (let r = 0; r < numRadialsInFile; r++) {
         if (pos + 6 > dataBytes.length) break;
 
@@ -212,7 +181,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         const targetOffset = rayIndex * numBins;
 
         if (packetCode === 0xAF1F) {
-            // === 4-Bit Run-Length Encoded Nibbles ===
             let binIdx = 0;
             const rleBytesCount = (numUnits * 2) - 6;
             for (let b = 0; b < rleBytesCount && pos < dataBytes.length; b++) {
@@ -226,7 +194,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
                 }
             }
         } else {
-            // === 8-Bit Digital Raw Radial Array ===
             const copyLength = Math.min(numUnits, numBins);
             const rawSlice = dataBytes.subarray(pos, pos + copyLength);
             for (let k = 0; k < copyLength; k++) {
@@ -245,7 +212,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 4. Fill Missing Rays by Interpolating Adjacent Neighbors
     for (let i = 0; i < TARGET_RADIALS; i++) {
         if (!filledRays[i]) {
             const prev = (i - 1 + TARGET_RADIALS) % TARGET_RADIALS;
@@ -267,6 +233,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
         data: radarGrid,
-        timestamp: scanTimestamp // 🌟 Exact scan observation time!
+        timestamp: scanTimestamp
     };
 }
