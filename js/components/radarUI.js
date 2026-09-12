@@ -12,6 +12,7 @@ const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 let archivePopoverEl = null;
 let calendarViewDate = new Date();
 let selectedDayForArchive = null;
+let calendarViewMode = 'days'; // 'days' | 'months'
 
 function ensureArchiveStyles() {
     if (document.getElementById('radar-archive-styles')) return;
@@ -69,6 +70,26 @@ function ensureArchiveStyles() {
             font-size: 14px;
             color: #e2e8f0;
         }
+        .cal-title-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: #e2e8f0;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 2px 8px;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .cal-title-btn:hover {
+            color: #38bdf8;
+            background: rgba(56, 189, 248, 0.15);
+            border-color: rgba(56, 189, 248, 0.4);
+        }
         .cal-nav-btn {
             background: transparent;
             border: none;
@@ -78,9 +99,13 @@ function ensureArchiveStyles() {
             padding: 2px 8px;
             border-radius: 4px;
         }
-        .cal-nav-btn:hover {
+        .cal-nav-btn:hover:not(:disabled) {
             color: #fff;
             background: rgba(255, 255, 255, 0.1);
+        }
+        .cal-nav-btn:disabled {
+            opacity: 0.2;
+            cursor: not-allowed;
         }
         .cal-weekdays {
             display: grid;
@@ -121,6 +146,38 @@ function ensureArchiveStyles() {
             font-weight: 700;
         }
         .cal-day-btn:disabled {
+            opacity: 0.2;
+            cursor: not-allowed;
+        }
+        .months-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .month-chip-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 8px 0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .month-chip-btn:hover:not(:disabled) {
+            background: rgba(56, 189, 248, 0.25);
+            color: #38bdf8;
+            border-color: rgba(56, 189, 248, 0.5);
+        }
+        .month-chip-btn.selected {
+            background: #38bdf8 !important;
+            color: #0b0f19 !important;
+            font-weight: 700;
+        }
+        .month-chip-btn:disabled {
             opacity: 0.2;
             cursor: not-allowed;
         }
@@ -461,7 +518,6 @@ function initArchivePopover() {
         archivePopoverEl.style.display = 'none';
         container.appendChild(archivePopoverEl);
 
-        // 🌟 Stop clicks inside popover from bubbling to document (prevents auto-close bug)
         archivePopoverEl.addEventListener('click', (e) => {
             e.stopPropagation();
         });
@@ -479,6 +535,7 @@ function initArchivePopover() {
         archivePopoverEl.style.display = isVisible ? 'none' : 'block';
         if (!isVisible) {
             selectedDayForArchive = null;
+            calendarViewMode = 'days'; // Reset to days view on open
             calendarViewDate = radarState.archiveDate ? new Date(radarState.archiveDate) : new Date();
             renderArchivePopover();
         }
@@ -488,6 +545,7 @@ function initArchivePopover() {
 function renderArchivePopover() {
     if (!archivePopoverEl) return;
     archivePopoverEl.innerHTML = '';
+    const now = new Date();
 
     // 1. Return to Live Loop Button
     const liveBtn = document.createElement('button');
@@ -500,7 +558,9 @@ function renderArchivePopover() {
     };
     archivePopoverEl.appendChild(liveBtn);
 
-    // 2. If a day is selected ➔ Show 24-Hour Selector
+    // ==========================================================
+    // VIEW A: 24-Hour Selector (When day is clicked)
+    // ==========================================================
     if (selectedDayForArchive) {
         const hoursHeader = document.createElement('div');
         hoursHeader.className = 'hours-view-header';
@@ -517,13 +577,13 @@ function renderArchivePopover() {
         hoursHeader.querySelector('#btn-back-to-days').onclick = (e) => {
             e.stopPropagation();
             selectedDayForArchive = null;
+            calendarViewMode = 'days';
             renderArchivePopover();
         };
 
         const grid = document.createElement('div');
         grid.className = 'hours-grid';
 
-        const now = new Date();
         for (let h = 0; h < 24; h++) {
             const hBtn = document.createElement('button');
             hBtn.className = 'hour-chip-btn';
@@ -555,7 +615,67 @@ function renderArchivePopover() {
         return;
     }
 
-    // 3. Otherwise ➔ Render Month / Day Calendar
+    // ==========================================================
+    // VIEW B: Month & Year Selector (When month title is clicked)
+    // ==========================================================
+    if (calendarViewMode === 'months') {
+        const currentYear = calendarViewDate.getUTCFullYear();
+
+        const calHeader = document.createElement('div');
+        calHeader.className = 'cal-header';
+        calHeader.innerHTML = `
+            <button class="cal-nav-btn" id="btn-year-prev">&lsaquo;</button>
+            <span class="cal-title">${currentYear}</span>
+            <button class="cal-nav-btn" id="btn-year-next" ${currentYear >= now.getUTCFullYear() ? 'disabled' : ''}>&rsaquo;</button>
+        `;
+        archivePopoverEl.appendChild(calHeader);
+
+        calHeader.querySelector('#btn-year-prev').onclick = (e) => {
+            e.stopPropagation();
+            calendarViewDate.setUTCFullYear(currentYear - 1);
+            renderArchivePopover();
+        };
+
+        const nextYearBtn = calHeader.querySelector('#btn-year-next');
+        if (nextYearBtn && currentYear < now.getUTCFullYear()) {
+            nextYearBtn.onclick = (e) => {
+                e.stopPropagation();
+                calendarViewDate.setUTCFullYear(currentYear + 1);
+                renderArchivePopover();
+            };
+        }
+
+        const monthsGrid = document.createElement('div');
+        monthsGrid.className = 'months-grid';
+
+        const monthShortNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        monthShortNames.forEach((name, mIdx) => {
+            const mBtn = document.createElement('button');
+            mBtn.className = `month-chip-btn ${mIdx === calendarViewDate.getUTCMonth() ? 'selected' : ''}`;
+            mBtn.textContent = name;
+
+            const testDate = new Date(Date.UTC(currentYear, mIdx, 1));
+            // Disable future months in current year
+            if (testDate.getUTCFullYear() === now.getUTCFullYear() && mIdx > now.getUTCMonth()) {
+                mBtn.disabled = true;
+            } else {
+                mBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    calendarViewDate.setUTCMonth(mIdx);
+                    calendarViewMode = 'days';
+                    renderArchivePopover();
+                };
+            }
+            monthsGrid.appendChild(mBtn);
+        });
+
+        archivePopoverEl.appendChild(monthsGrid);
+        return;
+    }
+
+    // ==========================================================
+    // VIEW C: Days Calendar (Default)
+    // ==========================================================
     const year = calendarViewDate.getUTCFullYear();
     const month = calendarViewDate.getUTCMonth();
 
@@ -565,10 +685,17 @@ function renderArchivePopover() {
     const monthName = calendarViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
     calHeader.innerHTML = `
         <button class="cal-nav-btn" id="btn-cal-prev">&lsaquo;</button>
-        <span class="cal-title">${monthName}</span>
+        <button class="cal-title-btn" id="btn-month-select" title="Click to change Month or Year">${monthName} &#9662;</button>
         <button class="cal-nav-btn" id="btn-cal-next">&rsaquo;</button>
     `;
     archivePopoverEl.appendChild(calHeader);
+
+    // 🌟 Click month title to enter Year / Month picker
+    calHeader.querySelector('#btn-month-select').onclick = (e) => {
+        e.stopPropagation();
+        calendarViewMode = 'months';
+        renderArchivePopover();
+    };
 
     calHeader.querySelector('#btn-cal-prev').onclick = (e) => {
         e.stopPropagation();
@@ -580,7 +707,7 @@ function renderArchivePopover() {
         e.stopPropagation();
         const nextMonth = new Date(calendarViewDate.getTime());
         nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
-        if (nextMonth <= new Date()) {
+        if (nextMonth <= now) {
             calendarViewDate = nextMonth;
             renderArchivePopover();
         }
@@ -600,7 +727,6 @@ function renderArchivePopover() {
 
     const firstDayIndex = new Date(Date.UTC(year, month, 1)).getUTCDay();
     const totalDays = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-    const now = new Date();
 
     for (let i = 0; i < firstDayIndex; i++) {
         const emptyCell = document.createElement('div');
