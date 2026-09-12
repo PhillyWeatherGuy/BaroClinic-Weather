@@ -98,6 +98,30 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
+    // 🌟 Extract Exact Radar Scan Time from Message Header Block
+    let scanDate = new Date();
+    try {
+        // The standard NEXRAD Message Header starts at byte 0 (or shortly after WMO text)
+        // Offset 12: Julian Date (Days since Jan 1, 1970)
+        // Offset 14: Time (Seconds since midnight UTC)
+        for (let i = 0; i < 40; i++) {
+            const msgCode = view.getUint16(i, false);
+            // Common Product Codes are < 200 (e.g. 19 for Base Reflectivity)
+            if (msgCode > 0 && msgCode < 255) {
+                const julianDays = view.getUint16(i + 12, false);
+                const secondsSinceMidnight = view.getUint32(i + 14, false);
+                
+                if (julianDays > 10000 && secondsSinceMidnight < 86400) {
+                    const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
+                    scanDate = new Date(unixMs);
+                    break;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Could not parse Level 3 message header time", e);
+    }
+
     // 1. Locate Radial Data Packet Header
     let packetPos = -1;
     let packetCode = 0;
@@ -237,6 +261,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         numRadials: TARGET_RADIALS,
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
+        scanDate: scanDate, // 🌟 New: Exact UTC time of the sweep
         data: radarGrid
     };
 }
