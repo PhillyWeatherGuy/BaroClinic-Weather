@@ -23,7 +23,7 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Decompress a Level 3 binary buffer with stream error isolation
+ * 🛰️ Decompress a Level 3 binary buffer with full zlib/raw-deflate support
  */
 async function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
@@ -42,59 +42,67 @@ async function decompressLevel3Payload(arrayBuffer) {
         }
     };
 
-    // 1. Direct GZIP (0x1F, 0x8B)
+    // 1. Direct GZIP
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         const out = await tryDecompress(bytes, 'gzip');
         if (out) return out;
     }
 
-    // 2. Direct ZLIB (0x78)
-    if (bytes[0] === 0x78) {
-        const out = await tryDecompress(bytes, 'deflate');
-        if (out) return out;
-    }
-
-    // 3. Scan for ZLIB magic header (0x78 0x9C, 0x78 0xDA, 0x78 0x01, 0x78 0x5E)
-    for (let offset = 0; offset <= Math.min(bytes.length - 2, 400); offset++) {
-        if (bytes[offset] === 0x78 && [0x01, 0x20, 0x5e, 0x9c, 0xda, 0xbb].includes(bytes[offset + 1])) {
+    // 2. Scan for ZLIB Header (0x78)
+    for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
+        if (bytes[offset] === 0x78) {
             const sub = bytes.subarray(offset);
             const out = await tryDecompress(sub, 'deflate');
             if (out && out.length > 50) return out;
         }
     }
 
+    // 3. Scan for Raw Deflate Stream
+    for (let offset = 20; offset <= Math.min(bytes.length - 2, 400); offset += 10) {
+        const sub = bytes.subarray(offset);
+        const out = await tryDecompress(sub, 'deflate-raw');
+        if (out && out.length > 50) return out;
+    }
+
+    // Return uncompressed bytes if already unpacked
     return bytes;
 }
 
 /**
- * 🛰️ Unpacks a Level 3 binary buffer (Packet 16 or Packet AF1F RLE) into a 720 x RangeBins matrix
+ * 🛰️ Unpacks a Level 3 binary buffer into a 720 x RangeBins matrix
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
     const dataBytes = await decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // 1. Locate Radial Packet Header (Packet 16 / 0x0010 or Packet AF1F / 0xAF1F)
+    // 1. Locate the true Symbology Block using the triple signature:
+    //    [Divider: -1] + [ID: 1] + [Layer Divider: -1 at offset +10]
     let packetPos = -1;
     let packetCode = 0;
 
-    // A: Scan via Symbology divider (-1 / 0xFFFF)
-    for (let i = 0; i < Math.min(dataBytes.length - 20, 1024); i += 2) {
-        if (view.getInt16(i, false) === -1) {
+    for (let i = 0; i <= dataBytes.length - 30; i += 2) {
+        if (view.getInt16(i, false) === -1) { // 0xFFFF
             const blockId = view.getInt16(i + 2, false);
-            if (blockId === 1) { // Symbology Block
-                packetPos = i + 16;
-                packetCode = view.getUint16(packetPos, false);
-                break;
+            const layerDivider = view.getInt16(i + 10, false);
+
+            if (blockId === 1 && layerDivider === -1) {
+                const code = view.getUint16(i + 16, false);
+                // Recognized Packet Codes: 0xAF1F (RLE), 0x0010 (Packet 16), 0x001C (Packet 28)
+                if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
+                    packetPos = i + 16;
+                    packetCode = code;
+                    break;
+                }
             }
         }
     }
 
-    // B: Fallback scan directly for Packet Code signatures
-    if (packetPos === -1 || (packetCode !== 0xAF1F && packetCode !== 0x0010 && packetCode !== 16 && packetCode !== 0x001C && packetCode !== 28)) {
-        for (let i = 0; i < Math.min(dataBytes.length - 20, 2048); i += 2) {
+    // Fallback: Direct scan for Packet 0xAF1F or Packet 16 structure
+    if (packetPos === -1) {
+        for (let i = 0; i <= dataBytes.length - 30; i += 2) {
             const code = view.getUint16(i, false);
-            if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
+            if (code === 0xAF1F || code === 0x0010 || code === 16) {
                 const numBins = view.getUint16(i + 4, false);
                 const numRadials = view.getUint16(i + 12, false);
                 if (numBins >= 50 && numBins <= 4000 && numRadials >= 100 && numRadials <= 800) {
@@ -107,7 +115,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     if (packetPos === -1) {
-        throw new Error(`Invalid Level 3 file: Radial packet not found (decompressed: ${dataBytes.length} bytes)`);
+        throw new Error(`Invalid Level 3 file: Symbology packet not found (decompressed: ${dataBytes.length} bytes)`);
     }
 
     // 2. Read Packet Header
@@ -163,7 +171,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
 
         filledRays[rayIndex] = 1;
 
-        // If data was 360 radials (1.0° beams), duplicate to next 0.5° slot
+        // If data was 360 radials (1.0° beams), duplicate to next 0.5° slot for smooth 720-ray circle
         if (numRadialsInFile <= 360) {
             const nextSlot = (rayIndex + 1) % TARGET_RADIALS;
             radarGrid.set(radarGrid.subarray(targetOffset, targetOffset + numBins), nextSlot * numBins);
@@ -171,7 +179,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 4. Fill Any Missing Rays by Interpolating Neighbors (Prevents black slits)
+    // 4. Fill Missing Rays by Interpolating Adjacent Neighbors
     for (let i = 0; i < TARGET_RADIALS; i++) {
         if (!filledRays[i]) {
             const prev = (i - 1 + TARGET_RADIALS) % TARGET_RADIALS;
