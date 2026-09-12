@@ -464,7 +464,6 @@ export function setRadarFrame(frameIndex) {
     const prevIndex = currentVisibleIndex;
     currentVisibleIndex = frameIndex;
     radarState.activeFrameIndex = frameIndex;
-    const frameInfo = radarState.frames?.[frameIndex];
 
     if (radarMapInstance) {
         if (activeRadarViewType === 'composite') {
@@ -504,13 +503,16 @@ export function setRadarFrame(frameIndex) {
     if (slider) slider.value = frameIndex.toString();
 
     const timeLabel = document.getElementById('time-label');
-    if (timeLabel && frameInfo) {
-        timeLabel.textContent = frameInfo.label;
+    if (timeLabel) {
+        const frameInfo = radarState.frames?.[frameIndex];
+        timeLabel.textContent = frameInfo ? frameInfo.label : (frameIndex === totalFrames - 1 ? 'LIVE' : `-${(totalFrames - 1 - frameIndex) * 5}m`);
     }
 
+    // 🌟 Update top clock with exact scan timestamp from the frame object
     const appClock = document.getElementById('app-clock');
-    if (appClock && frameInfo?.date) {
-        appClock.textContent = frameInfo.date.toLocaleTimeString([], {
+    const activeFrameObj = (activeRadarViewType === 'local') ? singleSiteFrames[frameIndex] : radarState.frames?.[frameIndex];
+    if (appClock && activeFrameObj?.date) {
+        appClock.textContent = activeFrameObj.date.toLocaleTimeString([], {
             weekday: 'short',
             month: 'numeric',
             day: 'numeric',
@@ -1026,7 +1028,7 @@ export function setRadarViewType(type) {
 }
 
 /**
- * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep via Your Cloudflare Worker S3 Engine
+ * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep Frame via Your Cloudflare Worker S3 Engine
  */
 async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, archiveDate = null, durationHours = 1) {
     const siteCode = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
@@ -1081,10 +1083,12 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, totalFrames, radarState.archiveDate, dur);
         const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon });
 
+        // 🌟 Use exact scan observation timestamp parsed from file header
         singleSiteFrames[defaultIndex] = {
             index: defaultIndex,
             sweepData: sweep,
-            label: radarState.frames?.[defaultIndex]?.label || (defaultIndex === totalFrames - 1 ? 'LIVE' : 'START')
+            label: radarState.frames?.[defaultIndex]?.label || (defaultIndex === totalFrames - 1 ? 'LIVE' : 'START'),
+            date: sweep.timestamp // Exact scan time!
         };
 
         // 3. Attach GPU single-site layer
@@ -1109,7 +1113,8 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
                     singleSiteFrames[i] = {
                         index: i,
                         sweepData: decodedSweep,
-                        label: radarState.frames?.[i]?.label || `F${i}`
+                        label: radarState.frames?.[i]?.label || `F${i}`,
+                        date: decodedSweep.timestamp // Exact scan time!
                     };
                 })
                 .catch(() => {});
@@ -1162,6 +1167,7 @@ function setupStationLayers(mapInstance) {
                     6, 7,
                     10, 10
                 ],
+                'circle-stroke-color': '#ffffff',
                 'circle-stroke-width': 1.8,
                 'circle-opacity': 0.95
             }
@@ -1298,10 +1304,3 @@ export function destroyRadarMode(mapInstance) {
         try {
             if (mapInstance.getLayer('radar-stations-symbol-layer')) mapInstance.removeLayer('radar-stations-symbol-layer');
             if (mapInstance.getLayer('radar-stations-circle-layer')) mapInstance.removeLayer('radar-stations-circle-layer');
-            if (mapInstance.getSource('radar-stations-src')) mapInstance.removeSource('radar-stations-src');
-        } catch (e) {}
-    }
-
-    purgeRadarMemory();
-    radarMapInstance = null;
-}
