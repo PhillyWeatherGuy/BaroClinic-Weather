@@ -24,12 +24,12 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Decompresses Level 3 payload (ZLIB, Deflate, Gzip, or Raw NIDS)
+ * 🛰️ Decompresses Level 3 payload safely
  */
 function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
     let bestOut = bytes;
-    let maxLen = bytes.length;
+    let maxLen = 0;
 
     // 1. Direct GZIP
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
@@ -42,13 +42,14 @@ function decompressLevel3Payload(arrayBuffer) {
         } catch (e) {}
     }
 
-    // 2. Scan every single byte for ZLIB Header (0x78)
+    // 2. Scan every byte for ZLIB Header (0x78)
     for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         if (bytes[offset] === 0x78) {
             try {
                 const sub = bytes.subarray(offset);
                 const out = unzlibSync(sub);
-                if (out && out.length > maxLen) {
+                // Real radar sweep is > 1000 bytes (ignores tiny metadata false positives)
+                if (out && out.length > 1000 && out.length > maxLen) {
                     bestOut = out;
                     maxLen = out.length;
                 }
@@ -56,12 +57,12 @@ function decompressLevel3Payload(arrayBuffer) {
         }
     }
 
-    // 3. Scan every single byte for Raw Deflate stream
+    // 3. Scan for Raw Deflate stream
     for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         try {
             const sub = bytes.subarray(offset);
             const out = inflateSync(sub);
-            if (out && out.length > maxLen) {
+            if (out && out.length > 1000 && out.length > maxLen) {
                 bestOut = out;
                 maxLen = out.length;
             }
@@ -72,14 +73,14 @@ function decompressLevel3Payload(arrayBuffer) {
 }
 
 /**
- * 🛰️ Universal Level 3 Radial Decoder (Byte-by-Byte Scanning)
+ * 🛰️ Universal Level 3 Radial Decoder
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // 1. Scan EVERY single byte offset (even and odd) for the Radial Packet Header
+    // 1. Scan for the Radial Data Packet Header across all byte boundaries
     let packetPos = -1;
     let packetCode = 0;
 
@@ -89,7 +90,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
             const numBins = view.getUint16(offset + 4, false);
             const numRadials = view.getUint16(offset + 12, false);
 
-            // Validate standard NEXRAD gate count (20..4000) & radial count (50..800)
             if (numBins >= 20 && numBins <= 4000 && numRadials >= 50 && numRadials <= 800) {
                 packetPos = offset;
                 packetCode = code;
@@ -163,7 +163,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 4. Fill Missing Rays by Interpolating Neighbors
+    // 4. Fill Missing Rays by Interpolating Adjacent Neighbors
     for (let i = 0; i < TARGET_RADIALS; i++) {
         if (!filledRays[i]) {
             const prev = (i - 1 + TARGET_RADIALS) % TARGET_RADIALS;
