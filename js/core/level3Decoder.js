@@ -91,10 +91,44 @@ function decompressLevel3Payload(arrayBuffer) {
 }
 
 /**
+ * 🌟 Helper: Extracts exact radar scan Date from the Product Description Block (PDB)
+ */
+function extractRadarTimestamp(rawBytes, view) {
+    try {
+        // Search for the 102-byte PDB or scan for Julian Date / Time fields in the first 300 bytes
+        // In NEXRAD Level 3 PDB:
+        // Halfwords 23-24 (bytes 46-49 from PDB start) = Volume Scan Date (Julian days since Jan 1, 1970)
+        // Halfwords 25-26 (bytes 50-53 from PDB start) = Volume Scan Time (Seconds past midnight UTC)
+        for (let off = 30; off <= Math.min(rawBytes.length - 54, 250); off += 2) {
+            const julianDays = view.getUint32(off, false);
+            const secPastMid = view.getUint32(off + 4, false);
+
+            // Sanity check: Julian days for 2020-2035 range roughly from 18262 to 23831
+            // Seconds past midnight ranges from 0 to 86400
+            if (julianDays >= 18000 && julianDays <= 25000 && secPastMid >= 0 && secPastMid <= 86400) {
+                // Convert Unix epoch day offset (Julian days since 1970-01-01)
+                const msTime = (julianDays * 86400000) + (secPastMid * 1000);
+                const scanDate = new Date(msTime);
+                if (!isNaN(scanDate.getTime())) {
+                    return scanDate;
+                }
+            }
+        }
+    } catch (e) {}
+    return new Date(); // Fallback to current time if unparsable
+}
+
+/**
  * 🛰️ Universal Level 3 Radial Decoder
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
+    const rawBytes = new Uint8Array(rawBuffer);
+    const rawView = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
+
+    // 🌟 Extract exact scan time from raw file headers before decompression
+    const scanTimestamp = extractRadarTimestamp(rawBytes, rawView);
+
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
@@ -149,16 +183,13 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 🌟 CORRECT NEXRAD RANGE CALCULATION:
-    // - 230 km (230,000 meters / 124 nm) standard Base Reflectivity scan
-    // - 460 km (460,000 meters / 248 nm) extended Super-Res scan
     let maxRangeMeters = 230000.0;
     if (numBins >= 1000) {
         maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
     } else if (numBins <= 230) {
         maxRangeMeters = 230000.0; // 230 bins * 1000m = 230km
     } else if (numBins === 460) {
-        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km (Matches NWS display!)
+        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km
     } else {
         maxRangeMeters = 230000.0;
     }
@@ -200,7 +231,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
             const rawSlice = dataBytes.subarray(pos, pos + copyLength);
             for (let k = 0; k < copyLength; k++) {
                 const val = rawSlice[k];
-                // Filter out clear-air ground clutter below 15 dBZ (byte 75 in 8-bit space)
                 radarGrid[targetOffset + k] = val < 75 ? 0 : val;
             }
             pos += numUnits;
@@ -208,7 +238,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
 
         filledRays[rayIndex] = 1;
 
-        // Duplicate 360 radials (1.0° beams) into adjacent 0.5° slots for smooth circle
         if (numRadialsInFile <= 360) {
             const nextSlot = (rayIndex + 1) % TARGET_RADIALS;
             radarGrid.set(radarGrid.subarray(targetOffset, targetOffset + numBins), nextSlot * numBins);
@@ -228,7 +257,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     const elapsed = (performance.now() - startTime).toFixed(1);
-    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates (Range: ${maxRangeMeters / 1000}km) in ${elapsed}ms`);
+    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates in ${elapsed}ms | Time: ${scanTimestamp.toUTCString()}`);
 
     return {
         stationId: stationMeta?.id || "RADAR",
@@ -237,6 +266,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         numRadials: TARGET_RADIALS,
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
-        data: radarGrid
+        data: radarGrid,
+        timestamp: scanTimestamp // 🌟 Exact scan observation time!
     };
 }
