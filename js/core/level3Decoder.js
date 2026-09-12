@@ -1,4 +1,5 @@
 // js/core/level3Decoder.js
+import { unzlibSync, inflateSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 
 /**
  * 🌟 16-Level Reflectivity RLE Byte Map (0..15 -> 0..255 for radarPalettes.js)
@@ -23,57 +24,49 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Decompress a Level 3 binary buffer with full zlib/raw-deflate support
+ * 🛰️ Decompresses Level 3 payload safely, ignoring any NOAA trailing text bytes
  */
-async function decompressLevel3Payload(arrayBuffer) {
+function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
-
-    const tryDecompress = async (subArray, format) => {
-        try {
-            const ds = new DecompressionStream(format);
-            const writer = ds.writable.getWriter();
-            writer.write(subArray);
-            writer.close();
-            const res = new Response(ds.readable);
-            const buf = await res.arrayBuffer();
-            return new Uint8Array(buf);
-        } catch (e) {
-            return null;
-        }
-    };
 
     // 1. Direct GZIP
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-        const out = await tryDecompress(bytes, 'gzip');
-        if (out) return out;
+        try {
+            return unzlibSync(bytes);
+        } catch (e) {}
     }
 
-    // 2. Scan for ZLIB Header (0x78)
+    // 2. Scan for ZLIB Header (0x78) starting at byte 0 through the first 600 bytes
     for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         if (bytes[offset] === 0x78) {
-            const sub = bytes.subarray(offset);
-            const out = await tryDecompress(sub, 'deflate');
-            if (out && out.length > 50) return out;
+            try {
+                const sub = bytes.subarray(offset);
+                const out = unzlibSync(sub);
+                if (out && out.length > 50) return out;
+            } catch (e) {
+                // Try next offset
+            }
         }
     }
 
-    // 3. Scan for Raw Deflate Stream
+    // 3. Scan for Raw Deflate stream without ZLIB header
     for (let offset = 20; offset <= Math.min(bytes.length - 2, 400); offset += 10) {
-        const sub = bytes.subarray(offset);
-        const out = await tryDecompress(sub, 'deflate-raw');
-        if (out && out.length > 50) return out;
+        try {
+            const sub = bytes.subarray(offset);
+            const out = inflateSync(sub);
+            if (out && out.length > 50) return out;
+        } catch (e) {}
     }
 
-    // Return uncompressed bytes if already unpacked
     return bytes;
 }
 
 /**
- * 🛰️ Unpacks a Level 3 binary buffer into a 720 x RangeBins matrix
+ * 🛰️ Unpacks Level 3 binary buffer into a 720 x RangeBins matrix
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
-    const dataBytes = await decompressLevel3Payload(rawBuffer);
+    const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
     // 1. Locate the true Symbology Block using the triple signature:
