@@ -464,7 +464,6 @@ export function setRadarFrame(frameIndex) {
     const prevIndex = currentVisibleIndex;
     currentVisibleIndex = frameIndex;
     radarState.activeFrameIndex = frameIndex;
-    const frameInfo = radarState.frames?.[frameIndex];
 
     if (radarMapInstance) {
         if (activeRadarViewType === 'composite') {
@@ -482,7 +481,6 @@ export function setRadarFrame(frameIndex) {
             }
         } else if (activeRadarViewType === 'local' && singleSiteRadarLayer) {
             // === LOCAL SINGLE-SITE RADAR MODE ===
-            // Guarantee all composite layers stay 100% hidden
             if (radarState.frames) {
                 radarState.frames.forEach((f) => {
                     const lId = `iem-radar-layer-${f.index}`;
@@ -492,7 +490,6 @@ export function setRadarFrame(frameIndex) {
                 });
             }
 
-            // Swap shader to the requested local frame
             const frameObj = singleSiteFrames[frameIndex];
             if (frameObj && frameObj.sweepData) {
                 singleSiteRadarLayer.setSweepData(frameObj.sweepData);
@@ -503,21 +500,43 @@ export function setRadarFrame(frameIndex) {
     const slider = document.getElementById('timeline-slider');
     if (slider) slider.value = frameIndex.toString();
 
+    // 🌟 Dynamically get exact scanDate for Local Mode or fallback to Composite snapped date
+    let frameDate = null;
+    let frameLabel = '';
+
+    if (activeRadarViewType === 'local') {
+        const frameObj = singleSiteFrames[frameIndex];
+        if (frameObj) {
+            frameDate = frameObj.sweepData?.scanDate;
+            frameLabel = frameObj.label;
+        }
+    } else {
+        const frameInfo = radarState.frames?.[frameIndex];
+        if (frameInfo) {
+            frameDate = frameInfo.date;
+            frameLabel = frameInfo.label;
+        }
+    }
+
     const timeLabel = document.getElementById('time-label');
-    if (timeLabel && frameInfo) {
-        timeLabel.textContent = frameInfo.label;
+    if (timeLabel) {
+        timeLabel.textContent = frameLabel || (frameIndex === totalFrames - 1 ? 'LIVE' : `F${frameIndex}`);
     }
 
     const appClock = document.getElementById('app-clock');
-    if (appClock && frameInfo?.date) {
-        appClock.textContent = frameInfo.date.toLocaleTimeString([], {
-            weekday: 'short',
-            month: 'numeric',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            timeZoneName: 'short'
-        });
+    if (appClock) {
+        if (frameDate) {
+            appClock.textContent = frameDate.toLocaleTimeString([], {
+                weekday: 'short',
+                month: 'numeric',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                timeZoneName: 'short'
+            });
+        } else {
+            appClock.textContent = '--:--';
+        }
     }
 
     updateRadarSliderTrack();
