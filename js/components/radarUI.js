@@ -898,53 +898,43 @@ export function setRadarViewType(type) {
 }
 
 /**
- * 🌟 8. Fetch & Load Single-Site Level 3 Sweep
+ * 🌟 8. Fetch Real-Time NWS Level 3 Sweep via NOAA TGFTP (sn.last)
  */
 async function fetchLatestLevel3File(stationId) {
-    const site3 = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
-    const products = ['N0B', 'N0Q'];
+    const siteLower = (stationId.startsWith('K') && stationId.length === 4 
+        ? stationId.toLowerCase() 
+        : `k${stationId.toLowerCase()}`);
 
-    const now = new Date();
-    const yyyy = now.getUTCFullYear();
-    const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(now.getUTCDate()).padStart(2, '0');
+    // Official NWS live radar directories (sn.last is guaranteed to be the most recent scan)
+    const productPaths = [
+        `DS.p94r0/SI.${siteLower}/sn.last`, // N0Q: 0.5° High-Res Base Reflectivity (250m)
+        `DS.153cr/SI.${siteLower}/sn.last`  // N0B: 0.5° Super-Res Base Reflectivity (250m)
+    ];
 
-    // 🌟 CORS Proxy helper so browser is not blocked by Amazon S3
-    const withCorsProxy = (targetUrl) => `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+    const proxyWrappers = [
+        (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+        (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+    ];
 
-    for (const prod of products) {
-        try {
-            // Check today's prefix on the public unidata-nexrad-level3 S3 bucket via proxy
-            const listUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/?list-type=2&prefix=${site3}_${prod}_${yyyy}_${mm}_${dd}`;
-            let resp = await fetch(withCorsProxy(listUrl));
-            let text = resp.ok ? await resp.text() : '';
-
-            // Fallback to general prefix if today is early UTC
-            if (!text.includes('<Key>')) {
-                const fallbackListUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/?list-type=2&prefix=${site3}_${prod}_`;
-                resp = await fetch(withCorsProxy(fallbackListUrl));
-                text = resp.ok ? await resp.text() : '';
-            }
-
-            const keyRegex = /<Key>([^<]+)<\/Key>/g;
-            let match;
-            let lastKey = null;
-            while ((match = keyRegex.exec(text)) !== null) {
-                lastKey = match[1];
-            }
-
-            if (lastKey) {
-                const fileUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/${lastKey}`;
-                const fileResp = await fetch(withCorsProxy(fileUrl));
-                if (fileResp.ok) {
-                    return await fileResp.arrayBuffer();
+    for (const prodPath of productPaths) {
+        const directUrl = `https://tgftp.nws.noaa.gov/SL.us008001/DF.of/DC.radar/${prodPath}`;
+        
+        for (const proxyFn of proxyWrappers) {
+            try {
+                const resp = await fetch(proxyFn(directUrl));
+                if (resp.ok) {
+                    const buf = await resp.arrayBuffer();
+                    if (buf.byteLength > 2000) {
+                        console.log(`✅ Loaded live Level 3 scan for ${stationId} from: ${directUrl}`);
+                        return buf;
+                    }
                 }
+            } catch (e) {
+                // Try next proxy / path fallback
             }
-        } catch (err) {
-            console.warn(`[RadarUI] Failed to fetch ${prod} for ${stationId}:`, err);
         }
     }
-    throw new Error(`No Level 3 radar data found for ${stationId}`);
+    throw new Error(`Could not fetch live Level 3 scan for ${stationId}`);
 }
 
 async function loadSingleSiteRadar(stationId, lat, lon) {
@@ -979,9 +969,9 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         singleSiteRadarLayer.setSweepData(sweepData);
         activeStationId = stationId;
 
-        if (runLabel) runLabel.textContent = `${stationId} (Super-Res N0B)`;
+        if (runLabel) runLabel.textContent = `${stationId} (Live Sweep)`;
         const timeLabel = document.getElementById('time-label');
-        if (timeLabel) timeLabel.textContent = 'SWEEP';
+        if (timeLabel) timeLabel.textContent = 'LIVE';
 
     } catch (err) {
         console.error(`[RadarUI] Error loading single site ${stationId}:`, err);
