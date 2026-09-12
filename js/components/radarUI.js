@@ -1074,6 +1074,13 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
 
     try {
         pauseRadarPlayback();
+
+        // 🚨 Immediately wipe the old station's radar off the screen!
+        if (singleSiteRadarLayer) {
+            singleSiteRadarLayer.isVisible = false;
+            radarMapInstance.triggerRepaint();
+        }
+
         activeStationId = stationId;
         activeStationLat = lat;
         activeStationLon = lon;
@@ -1181,6 +1188,7 @@ function setupStationLayers(mapInstance) {
                     6, 7,
                     10, 10
                 ],
+                'circle-stroke-color': '#ffffff',
                 'circle-stroke-width': 1.8,
                 'circle-opacity': 0.95
             }
