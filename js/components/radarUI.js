@@ -174,8 +174,8 @@ function ensureArchiveStyles() {
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: #cbd5e1;
             font-family: 'Rajdhani', sans-serif;
-            font-size: 13px;
             font-weight: 700;
+            font-size: 13px;
             padding: 8px 0;
             border-radius: 6px;
             cursor: pointer;
@@ -937,7 +937,8 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         // 3. Attach GPU single-site layer if not already added
         if (!singleSiteRadarLayer) {
             singleSiteRadarLayer = createSingleSiteRadarLayer(radarMapInstance);
-            radarMapInstance.addLayer(singleSiteRadarLayer, 'radar-stations-circle-layer');
+            const beforeId = radarMapInstance.getLayer('radar-stations-circle-layer') ? 'radar-stations-circle-layer' : undefined;
+            radarMapInstance.addLayer(singleSiteRadarLayer, beforeId);
         }
 
         singleSiteRadarLayer.setSweepData(sweepData);
@@ -949,6 +950,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
 
     } catch (err) {
         console.error(`[RadarUI] Error loading single site ${stationId}:`, err);
+        alert(`🚨 Radar Error for ${stationId}:\n${err.message || err}`);
         const runLabel = document.getElementById('current-run-label');
         if (runLabel) runLabel.textContent = `Error (${stationId})`;
     }
