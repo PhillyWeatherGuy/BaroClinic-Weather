@@ -461,6 +461,11 @@ function initArchivePopover() {
         archivePopoverEl.style.display = 'none';
         container.appendChild(archivePopoverEl);
 
+        // 🌟 Stop clicks inside popover from bubbling to document (prevents auto-close bug)
+        archivePopoverEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
         document.addEventListener('click', (e) => {
             if (archivePopoverEl && !archivePopoverEl.contains(e.target) && !toggleBtn.contains(e.target)) {
                 archivePopoverEl.style.display = 'none';
@@ -488,7 +493,8 @@ function renderArchivePopover() {
     const liveBtn = document.createElement('button');
     liveBtn.className = 'archive-live-btn';
     liveBtn.innerHTML = `<span>⚡ Return to Live Loop</span>`;
-    liveBtn.onclick = async () => {
+    liveBtn.onclick = async (e) => {
+        e.stopPropagation();
         archivePopoverEl.style.display = 'none';
         await switchRadarTimeline(null);
     };
@@ -508,7 +514,8 @@ function renderArchivePopover() {
         `;
         archivePopoverEl.appendChild(hoursHeader);
 
-        hoursHeader.querySelector('#btn-back-to-days').onclick = () => {
+        hoursHeader.querySelector('#btn-back-to-days').onclick = (e) => {
+            e.stopPropagation();
             selectedDayForArchive = null;
             renderArchivePopover();
         };
@@ -535,7 +542,8 @@ function renderArchivePopover() {
                 hBtn.style.opacity = '0.2';
                 hBtn.style.cursor = 'not-allowed';
             } else {
-                hBtn.onclick = async () => {
+                hBtn.onclick = async (e) => {
+                    e.stopPropagation();
                     archivePopoverEl.style.display = 'none';
                     await switchRadarTimeline(candidateDate);
                 };
@@ -562,12 +570,14 @@ function renderArchivePopover() {
     `;
     archivePopoverEl.appendChild(calHeader);
 
-    calHeader.querySelector('#btn-cal-prev').onclick = () => {
+    calHeader.querySelector('#btn-cal-prev').onclick = (e) => {
+        e.stopPropagation();
         calendarViewDate.setUTCMonth(calendarViewDate.getUTCMonth() - 1);
         renderArchivePopover();
     };
 
-    calHeader.querySelector('#btn-cal-next').onclick = () => {
+    calHeader.querySelector('#btn-cal-next').onclick = (e) => {
+        e.stopPropagation();
         const nextMonth = new Date(calendarViewDate.getTime());
         nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
         if (nextMonth <= new Date()) {
@@ -607,7 +617,8 @@ function renderArchivePopover() {
         if (dayUtc > now) {
             dBtn.disabled = true;
         } else {
-            dBtn.onclick = () => {
+            dBtn.onclick = (e) => {
+                e.stopPropagation();
                 selectedDayForArchive = dayUtc;
                 renderArchivePopover();
             };
