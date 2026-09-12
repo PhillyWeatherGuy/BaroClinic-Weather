@@ -1028,16 +1028,16 @@ export function setRadarViewType(type) {
 /**
  * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep via Your Cloudflare Worker S3 Engine
  */
-async function fetchLevel3Frame(stationId, frameIndex = 11, archiveDate = null, durationHours = 1) {
+async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, archiveDate = null, durationHours = 1) {
     const siteCode = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
-    let workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=N0B&frame=${frameIndex}`;
+    let workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=N0B&frame=${frameIndex}&totalFrames=${totalFrames}&duration=${durationHours}`;
 
     if (archiveDate) {
         const yyyy = archiveDate.getUTCFullYear();
         const mm = String(archiveDate.getUTCMonth() + 1).padStart(2, '0');
         const dd = String(archiveDate.getUTCDate()).padStart(2, '0');
         const hh = archiveDate.getUTCHours();
-        workerUrl += `&date=${yyyy}${mm}${dd}&hour=${hh}&duration=${durationHours}`;
+        workerUrl += `&date=${yyyy}${mm}${dd}&hour=${hh}`;
     }
 
     const resp = await fetch(workerUrl);
@@ -1078,7 +1078,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
 
         // 2. Load and render default frame immediately (newest for live, or frame 0 for archive)
         const defaultIndex = (radarState.mode === 'live') ? (totalFrames - 1) : 0;
-        const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, radarState.archiveDate, dur);
+        const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, totalFrames, radarState.archiveDate, dur);
         const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon });
 
         singleSiteFrames[defaultIndex] = {
@@ -1103,7 +1103,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         // 4. Preload remaining historical frames in background from S3
         for (let i = 0; i < totalFrames; i++) {
             if (i === defaultIndex) continue;
-            fetchLevel3Frame(stationId, i, radarState.archiveDate, dur)
+            fetchLevel3Frame(stationId, i, totalFrames, radarState.archiveDate, dur)
                 .then(buf => decodeLevel3(buf, { id: stationId, lat, lon }))
                 .then(decodedSweep => {
                     singleSiteFrames[i] = {
