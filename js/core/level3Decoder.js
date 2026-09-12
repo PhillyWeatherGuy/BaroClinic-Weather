@@ -4,7 +4,6 @@ import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
 /**
  * 🌟 NWS 16-Level Reflectivity Threshold Map (dBZ -> 0..255 Palette Index)
- * Levels 0..2 (< 15 dBZ) are set to 0 (transparent) to filter out clear-air ground clutter!
  */
 const LEVEL_16_TO_BYTE = new Uint8Array([
     0,   // Level 0: < 5 dBZ (Transparent)
@@ -24,6 +23,36 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
     250, // Level 14: 70 dBZ (Dark Purple)
     255  // Level 15: 75+ dBZ (White / Hail)
 ]);
+
+/**
+ * 🛰️ Helper to Extract Exact Scan Date from NEXRAD Message Header
+ * Scans for Julian Days (since Jan 1, 1970) and Seconds past midnight UTC
+ */
+function extractScanDate(buffer) {
+    try {
+        const view = new DataView(buffer);
+        const searchLen = Math.min(buffer.byteLength, 512); // Header is always in the first ~100 bytes
+        
+        for (let i = 0; i < searchLen - 8; i++) {
+            const msgCode = view.getUint16(i, false);
+            
+            // Common Product Codes are < 200 (e.g., 19 for Base Refl, 153 for Super-Res)
+            if (msgCode > 0 && msgCode < 200) {
+                const julianDays = view.getUint16(i + 2, false);
+                const secondsSinceMidnight = view.getUint32(i + 4, false);
+                
+                // Sanity check: Julian days > 19000 (after 2022) and seconds < 86400 (24h)
+                if (julianDays > 19000 && julianDays < 35000 && secondsSinceMidnight < 86400) {
+                    const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
+                    return new Date(unixMs);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Could not parse Level 3 message header time", e);
+    }
+    return null;
+}
 
 /**
  * 🛰️ Decompresses Level 3 payload (Supports BZIP2, ZLIB, GZIP, and Raw NIDS)
@@ -95,37 +124,22 @@ function decompressLevel3Payload(arrayBuffer) {
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
+    
+    // 🌟 Extract Exact Radar Scan Time from the RAW Buffer
+    let scanDate = extractScanDate(rawBuffer);
+    
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // 🌟 Extract Exact Radar Scan Time from Message Header Block
-    let scanDate = new Date();
-    try {
-        // Search word-aligned (i += 2) to prevent reading garbage shifted bytes
-        for (let i = 0; i < 100; i += 2) {
-            const msgCode = view.getUint16(i, false);
-            // Common Product Codes are < 200 (e.g., 19 for Base Reflectivity, 153 for Super-Res)
-            if (msgCode > 0 && msgCode < 200) {
-                const julianDays = view.getUint16(i + 2, false);
-                const secondsSinceMidnight = view.getUint32(i + 4, false);
-                
-                // Sanity check: Julian days > 18000 (after 2019) and seconds < 86400 (24h)
-                if (julianDays > 18000 && julianDays < 30000 && secondsSinceMidnight < 86400) {
-                    const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
-                    scanDate = new Date(unixMs);
-                    break;
-                }
-            }
-        }
-    } catch (e) {
-        console.warn("Could not parse Level 3 message header time", e);
+    // Fallback: If not found in raw, search the decompressed payload
+    if (!scanDate) {
+        scanDate = extractScanDate(dataBytes.buffer) || new Date(); 
     }
 
     // 1. Locate Radial Data Packet Header
     let packetPos = -1;
     let packetCode = 0;
 
-    // Check standard offset 16 first
     if (dataBytes.length >= 30) {
         const codeAt16 = view.getUint16(16, false);
         if (codeAt16 === 0xAF1F || codeAt16 === 0x0010 || codeAt16 === 16 || codeAt16 === 0x001C || codeAt16 === 28) {
@@ -134,7 +148,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // Fallback: Scan every byte offset for packet code
     if (packetPos === -1) {
         for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
             const code = view.getUint16(offset, false);
@@ -172,16 +185,14 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 🌟 CORRECT NEXRAD RANGE CALCULATION:
-    // - 230 km (230,000 meters / 124 nm) standard Base Reflectivity scan
-    // - 460 km (460,000 meters / 248 nm) extended Super-Res scan
+    // 🌟 CORRECT NEXRAD RANGE CALCULATION
     let maxRangeMeters = 230000.0;
     if (numBins >= 1000) {
         maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
     } else if (numBins <= 230) {
         maxRangeMeters = 230000.0; // 230 bins * 1000m = 230km
     } else if (numBins === 460) {
-        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km (Matches NWS display!)
+        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km
     } else {
         maxRangeMeters = 230000.0;
     }
@@ -260,7 +271,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         numRadials: TARGET_RADIALS,
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
-        scanDate: scanDate, // 🌟 Fixed: Exact UTC time of the sweep!
+        scanDate: scanDate, // 🌟 Now pulls exact time from uncompressed header!
         data: radarGrid
     };
 }
