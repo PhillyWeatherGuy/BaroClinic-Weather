@@ -1,5 +1,6 @@
 // js/core/level3Decoder.js
 import { unzlibSync, inflateSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
+import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
 /**
  * 🌟 16-Level Reflectivity RLE Byte Map (0..15 -> 0..255 for radarPalettes.js)
@@ -24,14 +25,46 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Decompresses Level 3 payload safely
+ * 🛰️ Decompresses Level 3 payload (Supports BZIP2, ZLIB, GZIP, and Raw NIDS)
  */
 function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
     let bestOut = bytes;
     let maxLen = 0;
 
-    // 1. Direct GZIP
+    // 1. Scan for BZIP2 Header: 'B', 'Z', 'h' (0x42, 0x5A, 0x68)
+    for (let offset = 0; offset <= Math.min(bytes.length - 4, 600); offset++) {
+        if (bytes[offset] === 0x42 && bytes[offset + 1] === 0x5A && bytes[offset + 2] === 0x68) {
+            try {
+                const sub = bytes.subarray(offset);
+                const out = seekBzip.decode(sub);
+                if (out && out.length > maxLen) {
+                    bestOut = new Uint8Array(out);
+                    maxLen = out.length;
+                }
+            } catch (e) {}
+        }
+    }
+
+    if (maxLen > 1000) return bestOut;
+
+    // 2. Scan for ZLIB Header (0x78)
+    for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
+        if (bytes[offset] === 0x78) {
+            try {
+                const sub = bytes.subarray(offset);
+                const out = unzlibSync(sub);
+                if (out && out.length > maxLen) {
+                    bestOut = out;
+                    maxLen = out.length;
+                }
+            } catch (e) {}
+        }
+    }
+
+    if (maxLen > 1000) return bestOut;
+
+    // 3. Scan for GZIP / Raw Deflate
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             const out = unzlibSync(bytes);
@@ -42,27 +75,11 @@ function decompressLevel3Payload(arrayBuffer) {
         } catch (e) {}
     }
 
-    // 2. Scan every byte for ZLIB Header (0x78)
-    for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
-        if (bytes[offset] === 0x78) {
-            try {
-                const sub = bytes.subarray(offset);
-                const out = unzlibSync(sub);
-                // Real radar sweep is > 1000 bytes (ignores tiny metadata false positives)
-                if (out && out.length > 1000 && out.length > maxLen) {
-                    bestOut = out;
-                    maxLen = out.length;
-                }
-            } catch (e) {}
-        }
-    }
-
-    // 3. Scan for Raw Deflate stream
     for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         try {
             const sub = bytes.subarray(offset);
             const out = inflateSync(sub);
-            if (out && out.length > 1000 && out.length > maxLen) {
+            if (out && out.length > maxLen) {
                 bestOut = out;
                 maxLen = out.length;
             }
@@ -80,20 +97,32 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // 1. Scan for the Radial Data Packet Header across all byte boundaries
+    // 1. Locate Radial Data Packet Header
     let packetPos = -1;
     let packetCode = 0;
 
-    for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
-        const code = view.getUint16(offset, false);
-        if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
-            const numBins = view.getUint16(offset + 4, false);
-            const numRadials = view.getUint16(offset + 12, false);
+    // Check standard offset 16 (Py-ART standard uncompressed layout)
+    if (dataBytes.length >= 30) {
+        const codeAt16 = view.getUint16(16, false);
+        if (codeAt16 === 0xAF1F || codeAt16 === 0x0010 || codeAt16 === 16 || codeAt16 === 0x001C || codeAt16 === 28) {
+            packetPos = 16;
+            packetCode = codeAt16;
+        }
+    }
 
-            if (numBins >= 20 && numBins <= 4000 && numRadials >= 50 && numRadials <= 800) {
-                packetPos = offset;
-                packetCode = code;
-                break;
+    // Fallback: Scan every single byte offset for packet code
+    if (packetPos === -1) {
+        for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
+            const code = view.getUint16(offset, false);
+            if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
+                const numBins = view.getUint16(offset + 4, false);
+                const numRadials = view.getUint16(offset + 12, false);
+
+                if (numBins >= 20 && numBins <= 4000 && numRadials >= 50 && numRadials <= 800) {
+                    packetPos = offset;
+                    packetCode = code;
+                    break;
+                }
             }
         }
     }
@@ -104,11 +133,21 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
 
     // 2. Read Packet Header
     const firstBin = view.getUint16(packetPos + 2, false);
-    const numBins = view.getUint16(packetPos + 4, false);
+    let numBins = view.getUint16(packetPos + 4, false);
     const iCenter = view.getInt16(packetPos + 6, false);
     const jCenter = view.getInt16(packetPos + 8, false);
     const rangeScaleFactor = view.getUint16(packetPos + 10, false);
     const numRadialsInFile = view.getUint16(packetPos + 12, false);
+
+    let pos = packetPos + 14;
+
+    // Check if first radial header contains override gate length
+    if (pos + 6 <= dataBytes.length) {
+        const firstRadialBytes = view.getUint16(pos, false);
+        if ((packetCode === 16 || packetCode === 0x0010) && firstRadialBytes > 0 && firstRadialBytes !== numBins && firstRadialBytes <= 4000) {
+            numBins = firstRadialBytes;
+        }
+    }
 
     const gateSizeMeters = rangeScaleFactor > 0 ? rangeScaleFactor : (packetCode === 0xAF1F ? 1000 : 250);
     const maxRangeMeters = numBins * gateSizeMeters;
@@ -116,8 +155,6 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const TARGET_RADIALS = 720;
     const radarGrid = new Uint8Array(TARGET_RADIALS * numBins);
     const filledRays = new Uint8Array(TARGET_RADIALS);
-
-    let pos = packetPos + 14;
 
     // 3. Unpack Radials (Handles both 4-Bit RLE Packet AF1F & 8-Bit Raw Packet 16/28)
     for (let r = 0; r < numRadialsInFile; r++) {
