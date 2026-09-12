@@ -165,7 +165,12 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     if (packetPos === -1) {
-        throw new Error(`Invalid Level 3 file: Radial packet not found (size: ${dataBytes.length} bytes)`);
+        // 🌟 Screen Diagnostic: Dump first 15 16-bit words into error popup
+        let headerWords = [];
+        for (let i = 0; i < Math.min(dataBytes.length, 30); i += 2) {
+            headerWords.push("0x" + view.getUint16(i, false).toString(16).toUpperCase());
+        }
+        throw new Error(`Packet not found (size: ${dataBytes.length}b). Header words: [${headerWords.join(', ')}]`);
     }
 
     // 2. Read Packet Header
@@ -185,14 +190,16 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 🌟 CORRECT NEXRAD RANGE CALCULATION
+    // 🌟 CORRECT NEXRAD RANGE CALCULATION:
+    // - 230 km (230,000 meters / 124 nm) standard Base Reflectivity scan
+    // - 460 km (460,000 meters / 248 nm) extended Super-Res scan
     let maxRangeMeters = 230000.0;
     if (numBins >= 1000) {
         maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
     } else if (numBins <= 230) {
         maxRangeMeters = 230000.0; // 230 bins * 1000m = 230km
     } else if (numBins === 460) {
-        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km
+        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km (Matches NWS display!)
     } else {
         maxRangeMeters = 230000.0;
     }
@@ -271,7 +278,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         numRadials: TARGET_RADIALS,
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
-        scanDate: scanDate, // 🌟 Now pulls exact time from uncompressed header!
+        scanDate: scanDate,
         data: radarGrid
     };
 }
