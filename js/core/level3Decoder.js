@@ -24,12 +24,12 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Decompresses Level 3 payload by finding the LARGEST decompressed data stream
+ * 🛰️ Decompresses Level 3 payload (ZLIB, Deflate, Gzip, or Raw NIDS)
  */
 function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
     let bestOut = bytes;
-    let maxLen = 0;
+    let maxLen = bytes.length;
 
     // 1. Direct GZIP
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
@@ -42,13 +42,12 @@ function decompressLevel3Payload(arrayBuffer) {
         } catch (e) {}
     }
 
-    // 2. Scan every byte from 0 to 600 for ZLIB Header (0x78)
+    // 2. Scan every single byte for ZLIB Header (0x78)
     for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         if (bytes[offset] === 0x78) {
             try {
                 const sub = bytes.subarray(offset);
                 const out = unzlibSync(sub);
-                // The real radar payload is > 5,000 bytes (usually 160KB - 1.3MB)
                 if (out && out.length > maxLen) {
                     bestOut = out;
                     maxLen = out.length;
@@ -57,7 +56,7 @@ function decompressLevel3Payload(arrayBuffer) {
         }
     }
 
-    // 3. Scan for Raw Deflate stream
+    // 3. Scan every single byte for Raw Deflate stream
     for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         try {
             const sub = bytes.subarray(offset);
@@ -73,18 +72,18 @@ function decompressLevel3Payload(arrayBuffer) {
 }
 
 /**
- * 🛰️ Universal Level 3 Radial Decoder
+ * 🛰️ Universal Level 3 Radial Decoder (Byte-by-Byte Scanning)
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // 1. Scan for the Radial Data Packet Header across all byte boundaries
+    // 1. Scan EVERY single byte offset (even and odd) for the Radial Packet Header
     let packetPos = -1;
     let packetCode = 0;
 
-    for (let offset = 0; offset <= dataBytes.length - 16; offset += 2) {
+    for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
         const code = view.getUint16(offset, false);
         if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
             const numBins = view.getUint16(offset + 4, false);
@@ -100,7 +99,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     if (packetPos === -1) {
-        throw new Error(`Invalid Level 3 file: Symbology packet not found (decompressed: ${dataBytes.length} bytes)`);
+        throw new Error(`Invalid Level 3 file: Radial packet not found (size: ${dataBytes.length} bytes)`);
     }
 
     // 2. Read Packet Header
@@ -156,7 +155,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
 
         filledRays[rayIndex] = 1;
 
-        // If data was 360 radials (1.0° beams), duplicate to next 0.5° slot for smooth 720-ray circle
+        // Duplicate 360 radials (1.0° beams) into adjacent 0.5° slots for smooth circle
         if (numRadialsInFile <= 360) {
             const nextSlot = (rayIndex + 1) % TARGET_RADIALS;
             radarGrid.set(radarGrid.subarray(targetOffset, targetOffset + numBins), nextSlot * numBins);
@@ -164,7 +163,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 4. Fill Missing Rays by Interpolating Adjacent Neighbors
+    // 4. Fill Missing Rays by Interpolating Neighbors
     for (let i = 0; i < TARGET_RADIALS; i++) {
         if (!filledRays[i]) {
             const prev = (i - 1 + TARGET_RADIALS) % TARGET_RADIALS;
