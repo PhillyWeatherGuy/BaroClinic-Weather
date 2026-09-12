@@ -17,10 +17,6 @@
       "type": "geojson",
       "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson"
     },
-    "ne_ocean": {
-      "type": "geojson",
-      "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_ocean.geojson"
-    },
     "ne_coastlines": {
       "type": "geojson",
       "data": "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson"
@@ -37,27 +33,14 @@
       }
     },
     {
-      "id": "ocean_far",
-      "type": "fill",
-      "source": "ne_ocean",
-      "maxzoom": 6,
-      "paint": {
-        "fill-antialias": true,
-        "fill-color": "rgba(2, 20, 37, 1)"
-      }
-    },
-    {
       "id": "water",
       "type": "fill",
       "source": "openmaptiles",
       "source-layer": "water",
-      "filter": [
-        "all",
-        ["match", ["geometry-type"], ["MultiPolygon", "Polygon"], true, false],
-        ["!=", ["get", "brunnel"], "tunnel"]
-      ],
+      "minzoom": 0,
+      "maxzoom": 24,
       "paint": {
-        "fill-antialias": false,
+        "fill-antialias": true,
         "fill-color": "rgba(2, 20, 37, 1)"
       }
     },
@@ -80,7 +63,6 @@
       "source-layer": "water",
       "minzoom": 2,
       "maxzoom": 24,
-      "filter": ["match", ["geometry-type"], ["MultiPolygon", "Polygon"], true, false],
       "paint": {
         "line-color": "#ffffff",
         "line-opacity": 0.85,
@@ -338,6 +320,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
+      "minzoom": 12,
       "filter": [
         "all",
         ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
@@ -380,7 +363,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 11,
+      "minzoom": 7,
       "filter": [
         "all",
         ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
@@ -401,7 +384,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 11,
+      "minzoom": 7,
       "filter": [
         "all",
         ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
@@ -421,7 +404,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 6,
+      "minzoom": 7,
       "maxzoom": 11,
       "filter": [
         "all",
@@ -442,7 +425,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 6,
+      "minzoom": 7,
       "filter": [
         "all",
         ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
@@ -464,7 +447,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 6,
+      "minzoom": 7,
       "filter": [
         "all",
         ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
@@ -517,26 +500,6 @@
       },
       "paint": {
         "icon-opacity": 0.5
-      }
-    },
-    {
-      "id": "highway_motorway_subtle",
-      "type": "line",
-      "source": "openmaptiles",
-      "source-layer": "transportation",
-      "minzoom": 6,
-      "filter": [
-        "all",
-        ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
-        ["==", ["get", "class"], "motorway"]
-      ],
-      "layout": {
-        "line-cap": "round",
-        "line-join": "round"
-      },
-      "paint": {
-        "line-color": "#181818",
-        "line-width": ["interpolate", ["exponential", 1.4], ["zoom"], 4, 2, 6, 1.3]
       }
     },
     {
