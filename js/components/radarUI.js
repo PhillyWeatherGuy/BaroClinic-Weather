@@ -8,6 +8,164 @@ let isRadarPlaying = false;
 let currentVisibleIndex = -1;
 const RADAR_PLAYBACK_SPEED_MS = 220; // Smooth Doppler Loop speed
 
+// 🌟 Archive Calendar State
+let archivePopoverEl = null;
+let calendarViewDate = new Date();
+let selectedDayForArchive = null;
+
+// Inject Sleek Glass Calendar Styles
+const archiveStyle = document.createElement('style');
+archiveStyle.id = 'radar-archive-styles';
+archiveStyle.textContent = `
+    .radar-archive-popover {
+        position: absolute;
+        bottom: calc(100% + 12px);
+        left: 0;
+        width: 270px;
+        background: rgba(11, 15, 25, 0.96);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 14px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+        padding: 10px;
+        z-index: 120;
+        font-family: 'Rajdhani', sans-serif;
+        color: #f8fafc;
+        box-sizing: border-box;
+    }
+    .archive-live-btn {
+        width: 100%;
+        background: rgba(56, 189, 248, 0.18);
+        border: 1px solid rgba(56, 189, 248, 0.5);
+        color: #38bdf8;
+        font-family: 'Rajdhani', sans-serif;
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        padding: 6px;
+        border-radius: 8px;
+        cursor: pointer;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: all 0.2s ease;
+    }
+    .archive-live-btn:hover {
+        background: rgba(56, 189, 248, 0.35);
+    }
+    .cal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        padding: 0 4px;
+    }
+    .cal-title {
+        font-weight: 700;
+        font-size: 14px;
+        color: #e2e8f0;
+    }
+    .cal-nav-btn {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 2px 8px;
+        border-radius: 4px;
+    }
+    .cal-nav-btn:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.1);
+    }
+    .cal-weekdays {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        text-align: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: #64748b;
+        margin-bottom: 4px;
+    }
+    .cal-days-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 2px;
+    }
+    .cal-day-btn {
+        background: transparent;
+        border: none;
+        color: #cbd5e1;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        aspect-ratio: 1;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+    }
+    .cal-day-btn:hover:not(:disabled) {
+        background: rgba(56, 189, 248, 0.2);
+        color: #38bdf8;
+    }
+    .cal-day-btn.selected {
+        background: #38bdf8 !important;
+        color: #0b0f19 !important;
+        font-weight: 700;
+    }
+    .cal-day-btn:disabled {
+        opacity: 0.2;
+        cursor: not-allowed;
+    }
+    .hours-view-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+    }
+    .hours-back-btn {
+        background: transparent;
+        border: none;
+        color: #38bdf8;
+        font-family: 'Rajdhani', sans-serif;
+        font-weight: 700;
+        font-size: 12px;
+        cursor: pointer;
+        padding: 2px 4px;
+    }
+    .hours-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+        max-height: 180px;
+        overflow-y: auto;
+    }
+    .hour-chip-btn {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #cbd5e1;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 6px 0;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .hour-chip-btn:hover {
+        background: rgba(56, 189, 248, 0.25);
+        color: #38bdf8;
+        border-color: rgba(56, 189, 248, 0.5);
+    }
+`;
+document.head.appendChild(archiveStyle);
+
 /**
  * 🌟 1. Launch Real-Time IEM Radar on Map
  */
@@ -15,19 +173,44 @@ export async function initRadarMode(mapInstance) {
     if (!mapInstance) return;
     radarMapInstance = mapInstance;
 
-    // 🌟 1. Expand tile cache so desktop screens can hold all 12 frames in memory without purging
     if (typeof mapInstance.setMaxTileCacheSize === 'function') {
         mapInstance.setMaxTileCacheSize(1200);
     }
 
-    // 1. Build 12-frame real-time timeline
-    const frames = buildRadarTimeline();
-    const liveIndex = frames.length - 1;
-    currentVisibleIndex = liveIndex;
+    await switchRadarTimeline(null);
 
-    // 2. Place radar ABOVE all land/building fills, but BENEATH county lines & borders
+    bindRadarControls();
+    setBasemapLabelsVisibility(mapInstance, true);
+    initArchivePopover();
+}
+
+/**
+ * 🌟 2. Seamless Timeline Switcher (Live Loop vs Historical Archive)
+ */
+export async function switchRadarTimeline(startUtcDate = null) {
+    if (!radarMapInstance) return;
+    pauseRadarPlayback();
+
+    // 1. Clean up old radar layers & sources
+    if (radarState.frames) {
+        radarState.frames.forEach((frame) => {
+            const layerId = `iem-radar-layer-${frame.index}`;
+            const sourceId = `iem-radar-src-${frame.index}`;
+            try {
+                if (radarMapInstance.getLayer(layerId)) radarMapInstance.removeLayer(layerId);
+                if (radarMapInstance.getSource(sourceId)) radarMapInstance.removeSource(sourceId);
+            } catch (e) {}
+        });
+    }
+
+    // 2. Build 12-frame timeline (Live OR Historical)
+    const frames = buildRadarTimeline(startUtcDate);
+    const defaultIndex = (radarState.mode === 'live') ? frames.length - 1 : 0;
+    currentVisibleIndex = defaultIndex;
+
+    // 3. Find layer to place radar under
     let firstOverlayId = null;
-    const layers = mapInstance.getStyle().layers || [];
+    const layers = radarMapInstance.getStyle().layers || [];
     for (const layer of layers) {
         const id = layer.id.toLowerCase();
         if (
@@ -42,28 +225,26 @@ export async function initRadarMode(mapInstance) {
         }
     }
 
-    const addRadarLayer = (frame, isLive) => {
+    const addRadarLayer = (frame, isInitial) => {
         const sourceId = `iem-radar-src-${frame.index}`;
         const layerId = `iem-radar-layer-${frame.index}`;
 
-        if (!mapInstance.getSource(sourceId)) {
-            mapInstance.addSource(sourceId, {
+        if (!radarMapInstance.getSource(sourceId)) {
+            radarMapInstance.addSource(sourceId, {
                 type: 'raster',
                 tiles: [frame.tileUrl],
                 tileSize: 256
             });
         }
 
-        if (!mapInstance.getLayer(layerId)) {
-            mapInstance.addLayer({
+        if (!radarMapInstance.getLayer(layerId)) {
+            radarMapInstance.addLayer({
                 id: layerId,
                 type: 'raster',
                 source: sourceId,
-                layout: {
-                    'visibility': 'visible'
-                },
+                layout: { 'visibility': 'visible' },
                 paint: {
-                    'raster-opacity': isLive ? 1.0 : 0.0,
+                    'raster-opacity': isInitial ? 1.0 : 0.0,
                     'raster-fade-duration': 0,
                     'raster-opacity-transition': { duration: 0, delay: 0 },
                     'raster-resampling': 'linear'
@@ -72,23 +253,19 @@ export async function initRadarMode(mapInstance) {
         }
     };
 
-    // 🌟 2. FAST-LOAD LIVE FRAME FIRST
-    // Gives 100% of network bandwidth to the current live radar so it displays immediately like on mobile
-    const liveFrame = frames[liveIndex];
-    addRadarLayer(liveFrame, true);
+    // Fast-load primary frame first
+    addRadarLayer(frames[defaultIndex], true);
 
     syncRadarTimelineUI();
-    setRadarFrame(liveIndex);
-    bindRadarControls();
-    setBasemapLabelsVisibility(mapInstance, true);
+    setRadarFrame(defaultIndex);
 
-    // 🌟 3. Stagger historical frames from newest to oldest
-    // Spaced out by 35ms so the browser connection pool streams them cleanly without dropping packets
+    // Stagger remaining frames in background
     let delay = 35;
-    for (let i = liveIndex - 1; i >= 0; i--) {
+    for (let i = 0; i < frames.length; i++) {
+        if (i === defaultIndex) continue;
         const frame = frames[i];
         setTimeout(() => {
-            if (radarMapInstance === mapInstance && radarState.frames.length > 0) {
+            if (radarMapInstance && radarState.frames.length > 0) {
                 addRadarLayer(frame, false);
             }
         }, delay);
@@ -97,7 +274,7 @@ export async function initRadarMode(mapInstance) {
 }
 
 /**
- * 🌟 2. Instant Zero-Blink GPU Frame Swapping
+ * 🌟 3. Instant Zero-Blink GPU Frame Swapping
  */
 export function setRadarFrame(frameIndex) {
     if (!radarState.frames || frameIndex < 0 || frameIndex >= radarState.frames.length) return;
@@ -110,12 +287,10 @@ export function setRadarFrame(frameIndex) {
     if (radarMapInstance) {
         const newLayerId = `iem-radar-layer-${frameIndex}`;
 
-        // 1. Turn ON new frame (already warm in GPU memory)
         if (radarMapInstance.getLayer(newLayerId)) {
             radarMapInstance.setPaintProperty(newLayerId, 'raster-opacity', 1.0);
         }
 
-        // 2. Turn OFF previous frame (instant swap, zero blackout)
         if (prevIndex >= 0 && prevIndex !== frameIndex) {
             const prevLayerId = `iem-radar-layer-${prevIndex}`;
             if (radarMapInstance.getLayer(prevLayerId)) {
@@ -124,11 +299,9 @@ export function setRadarFrame(frameIndex) {
         }
     }
 
-    // Update Slider Value
     const slider = document.getElementById('timeline-slider');
     if (slider) slider.value = frameIndex.toString();
 
-    // Update Time Label & App Clock
     const timeLabel = document.getElementById('time-label');
     if (timeLabel && frameInfo) {
         timeLabel.textContent = frameInfo.label;
@@ -150,7 +323,7 @@ export function setRadarFrame(frameIndex) {
 }
 
 /**
- * 🌟 3. Playback Controller
+ * 🌟 4. Playback Controller
  */
 export function toggleRadarPlayback() {
     if (isRadarPlaying) pauseRadarPlayback();
@@ -168,7 +341,7 @@ export function startRadarPlayback() {
     radarPlayInterval = setInterval(() => {
         let nextIdx = radarState.activeFrameIndex + 1;
         if (nextIdx >= radarState.frames.length) {
-            nextIdx = 0; // Loop back to oldest
+            nextIdx = 0;
         }
         setRadarFrame(nextIdx);
     }, RADAR_PLAYBACK_SPEED_MS);
@@ -193,7 +366,7 @@ function updateRadarPlayPauseUI() {
 }
 
 /**
- * 🌟 4. UI Slider Binding
+ * 🌟 5. UI Slider & Dropdown Binding
  */
 function syncRadarTimelineUI() {
     const slider = document.getElementById('timeline-slider');
@@ -205,7 +378,17 @@ function syncRadarTimelineUI() {
     slider.value = radarState.activeFrameIndex.toString();
 
     const runLabel = document.getElementById('current-run-label');
-    if (runLabel) runLabel.textContent = 'Live Loop (1h)';
+    if (runLabel) {
+        if (radarState.mode === 'live' || !radarState.archiveDate) {
+            runLabel.textContent = 'Live Loop (1h)';
+        } else {
+            const d = radarState.archiveDate;
+            const monthStr = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+            const day = d.getUTCDate();
+            const hh = String(d.getUTCHours()).padStart(2, '0');
+            runLabel.textContent = `${monthStr} ${day}, ${hh}Z (1h)`;
+        }
+    }
 
     updateRadarSliderTrack();
 }
@@ -260,11 +443,189 @@ function bindRadarControls() {
 }
 
 /**
- * 🌟 5. Teardown Radar Mode
+ * 🌟 6. Calendar + 24-Hour Archive Popover
+ */
+function initArchivePopover() {
+    const toggleBtn = document.getElementById('model-run-toggle');
+    const container = document.querySelector('.model-run-dropdown-container');
+    if (!toggleBtn || !container) return;
+
+    if (!archivePopoverEl) {
+        archivePopoverEl = document.createElement('div');
+        archivePopoverEl.id = 'radar-archive-popover';
+        archivePopoverEl.className = 'radar-archive-popover';
+        archivePopoverEl.style.display = 'none';
+        container.appendChild(archivePopoverEl);
+
+        document.addEventListener('click', (e) => {
+            if (archivePopoverEl && !archivePopoverEl.contains(e.target) && !toggleBtn.contains(e.target)) {
+                archivePopoverEl.style.display = 'none';
+            }
+        });
+    }
+
+    toggleBtn.onclick = (e) => {
+        e.stopPropagation();
+        const isVisible = archivePopoverEl.style.display === 'block';
+        archivePopoverEl.style.display = isVisible ? 'none' : 'block';
+        if (!isVisible) {
+            selectedDayForArchive = null;
+            calendarViewDate = radarState.archiveDate ? new Date(radarState.archiveDate) : new Date();
+            renderArchivePopover();
+        }
+    };
+}
+
+function renderArchivePopover() {
+    if (!archivePopoverEl) return;
+    archivePopoverEl.innerHTML = '';
+
+    // 1. Return to Live Loop Button
+    const liveBtn = document.createElement('button');
+    liveBtn.className = 'archive-live-btn';
+    liveBtn.innerHTML = `<span>⚡ Return to Live Loop</span>`;
+    liveBtn.onclick = async () => {
+        archivePopoverEl.style.display = 'none';
+        await switchRadarTimeline(null);
+    };
+    archivePopoverEl.appendChild(liveBtn);
+
+    // 2. If a day is selected ➔ Show 24-Hour Selector
+    if (selectedDayForArchive) {
+        const hoursHeader = document.createElement('div');
+        hoursHeader.className = 'hours-view-header';
+
+        const monthStr = selectedDayForArchive.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+        const dayNum = selectedDayForArchive.getUTCDate();
+
+        hoursHeader.innerHTML = `
+            <button class="hours-back-btn" id="btn-back-to-days">← Change Day</button>
+            <span class="cal-title">${monthStr} ${dayNum} (UTC)</span>
+        `;
+        archivePopoverEl.appendChild(hoursHeader);
+
+        hoursHeader.querySelector('#btn-back-to-days').onclick = () => {
+            selectedDayForArchive = null;
+            renderArchivePopover();
+        };
+
+        const grid = document.createElement('div');
+        grid.className = 'hours-grid';
+
+        const now = new Date();
+        for (let h = 0; h < 24; h++) {
+            const hBtn = document.createElement('button');
+            hBtn.className = 'hour-chip-btn';
+            const hhStr = String(h).padStart(2, '0') + 'Z';
+            hBtn.textContent = hhStr;
+
+            // Check if hour is in future
+            const candidateDate = new Date(Date.UTC(
+                selectedDayForArchive.getUTCFullYear(),
+                selectedDayForArchive.getUTCMonth(),
+                selectedDayForArchive.getUTCDate(),
+                h, 0, 0
+            ));
+
+            if (candidateDate > now) {
+                hBtn.disabled = true;
+                hBtn.style.opacity = '0.2';
+                hBtn.style.cursor = 'not-allowed';
+            } else {
+                hBtn.onclick = async () => {
+                    archivePopoverEl.style.display = 'none';
+                    await switchRadarTimeline(candidateDate);
+                };
+            }
+
+            grid.appendChild(hBtn);
+        }
+        archivePopoverEl.appendChild(grid);
+        return;
+    }
+
+    // 3. Otherwise ➔ Render Month / Day Calendar
+    const year = calendarViewDate.getUTCFullYear();
+    const month = calendarViewDate.getUTCMonth();
+
+    const calHeader = document.createElement('div');
+    calHeader.className = 'cal-header';
+
+    const monthName = calendarViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    calHeader.innerHTML = `
+        <button class="cal-nav-btn" id="btn-cal-prev">‹</button>
+        <span class="cal-title">${monthName}</span>
+        <button class="cal-nav-btn" id="btn-cal-next">›</button>
+    `;
+    archivePopoverEl.appendChild(calHeader);
+
+    calHeader.querySelector('#btn-cal-prev').onclick = () => {
+        calendarViewDate.setUTCMonth(calendarViewDate.getUTCMonth() - 1);
+        renderArchivePopover();
+    };
+
+    calHeader.querySelector('#btn-cal-next').onclick = () => {
+        const nextMonth = new Date(calendarViewDate.getTime());
+        nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+        if (nextMonth <= new Date()) {
+            calendarViewDate = nextMonth;
+            renderArchivePopover();
+        }
+    };
+
+    const weekdays = document.createElement('div');
+    weekdays.className = 'cal-weekdays';
+    ['S', 'M', 'T', 'W', 'T', 'F', 'S'].forEach(d => {
+        const span = document.createElement('span');
+        span.textContent = d;
+        weekdays.appendChild(span);
+    });
+    archivePopoverEl.appendChild(weekdays);
+
+    const daysGrid = document.createElement('div');
+    daysGrid.className = 'cal-days-grid';
+
+    const firstDayIndex = new Date(Date.UTC(year, month, 1)).getUTCDay();
+    const totalDays = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    const now = new Date();
+
+    for (let i = 0; i < firstDayIndex; i++) {
+        const emptyCell = document.createElement('div');
+        daysGrid.appendChild(emptyCell);
+    }
+
+    for (let d = 1; d <= totalDays; d++) {
+        const dBtn = document.createElement('button');
+        dBtn.className = 'cal-day-btn';
+        dBtn.textContent = d;
+
+        const dayUtc = new Date(Date.UTC(year, month, d));
+
+        // Disable future dates
+        if (dayUtc > now) {
+            dBtn.disabled = true;
+        } else {
+            dBtn.onclick = () => {
+                selectedDayForArchive = dayUtc;
+                renderArchivePopover();
+            };
+        }
+
+        daysGrid.appendChild(dBtn);
+    }
+    archivePopoverEl.appendChild(daysGrid);
+}
+
+/**
+ * 🌟 7. Teardown Radar Mode
  */
 export function destroyRadarMode(mapInstance) {
     pauseRadarPlayback();
     currentVisibleIndex = -1;
+
+    if (archivePopoverEl) {
+        archivePopoverEl.style.display = 'none';
+    }
 
     if (mapInstance && radarState.frames) {
         radarState.frames.forEach((frame) => {
@@ -277,6 +638,4 @@ export function destroyRadarMode(mapInstance) {
         });
     }
 
-    purgeRadarMemory();
-    radarMapInstance = null;
-}
+    purgeRadarMemory
