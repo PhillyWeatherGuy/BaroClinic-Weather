@@ -22,10 +22,23 @@ export function buildRadarTimeline(startUtcDate = null, durationHours = 1) {
         // --- REAL-TIME LIVE 1-HOUR LOOP ---
         radarState.mode = 'live';
         radarState.archiveDate = null;
-        const now = new Date();
+        
+        // 🌟 Snap to the latest exact 5-minute radar volume scan bucket (accounting for ~4 min processing delay)
+        const rawNow = new Date();
+        const delayedNow = new Date(rawNow.getTime() - 4 * 60 * 1000);
+        const snappedMinutes = Math.floor(delayedNow.getUTCMinutes() / 5) * 5;
+        
+        const snappedNow = new Date(Date.UTC(
+            delayedNow.getUTCFullYear(),
+            delayedNow.getUTCMonth(),
+            delayedNow.getUTCDate(),
+            delayedNow.getUTCHours(),
+            snappedMinutes,
+            0
+        ));
 
         MINUTE_OFFSETS_1H.forEach((minsAgo, idx) => {
-            const frameDate = new Date(now.getTime() - minsAgo * 60 * 1000);
+            const frameDate = new Date(snappedNow.getTime() - minsAgo * 60 * 1000);
             const tag = minsAgo === 0 ? '900913' : `900913-m${String(minsAgo).padStart(2, '0')}m`;
             const label = minsAgo === 0 ? 'LIVE' : `-${minsAgo}m`;
 
