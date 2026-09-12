@@ -24,49 +24,56 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Decompresses Level 3 payload by scanning every possible byte offset
+ * 🛰️ Decompresses Level 3 payload by finding the LARGEST decompressed data stream
  */
 function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
+    let bestOut = bytes;
+    let maxLen = 0;
 
-    // 1. Direct GZIP (0x1F, 0x8B)
+    // 1. Direct GZIP
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             const out = unzlibSync(bytes);
-            if (out && out.length > 500) return out;
+            if (out && out.length > maxLen) {
+                bestOut = out;
+                maxLen = out.length;
+            }
         } catch (e) {}
     }
 
-    // 2. Scan every byte from offset 0 to 512 for ZLIB Header (0x78)
-    for (let offset = 0; offset <= Math.min(bytes.length - 2, 512); offset++) {
+    // 2. Scan every byte from 0 to 600 for ZLIB Header (0x78)
+    for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         if (bytes[offset] === 0x78) {
             try {
                 const sub = bytes.subarray(offset);
                 const out = unzlibSync(sub);
-                if (out && out.length > 500) {
-                    return out;
+                // The real radar payload is > 5,000 bytes (usually 160KB - 1.3MB)
+                if (out && out.length > maxLen) {
+                    bestOut = out;
+                    maxLen = out.length;
                 }
             } catch (e) {}
         }
     }
 
-    // 3. Scan every byte from offset 0 to 512 for Raw Deflate stream without 0x78 header
-    for (let offset = 0; offset <= Math.min(bytes.length - 2, 512); offset++) {
+    // 3. Scan for Raw Deflate stream
+    for (let offset = 0; offset <= Math.min(bytes.length - 2, 600); offset++) {
         try {
             const sub = bytes.subarray(offset);
             const out = inflateSync(sub);
-            if (out && out.length > 500) {
-                return out;
+            if (out && out.length > maxLen) {
+                bestOut = out;
+                maxLen = out.length;
             }
         } catch (e) {}
     }
 
-    // If already uncompressed, return raw bytes
-    return bytes;
+    return bestOut;
 }
 
 /**
- * 🛰️ Universal Level 3 Radial Decoder (Supports Packet 16, 28, and 0xAF1F RLE)
+ * 🛰️ Universal Level 3 Radial Decoder
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
@@ -129,7 +136,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         if (packetCode === 0xAF1F) {
             // === 4-Bit Run-Length Encoded Nibbles ===
             let binIdx = 0;
-            const rleBytesCount = (numUnits * 2) - 6; // numUnits is halfwords in radial
+            const rleBytesCount = (numUnits * 2) - 6;
             for (let b = 0; b < rleBytesCount && pos < dataBytes.length; b++) {
                 const rleByte = dataBytes[pos++];
                 const run = (rleByte >> 4) & 0x0F;
