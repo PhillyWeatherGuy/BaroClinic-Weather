@@ -909,17 +909,20 @@ async function fetchLatestLevel3File(stationId) {
     const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
     const dd = String(now.getUTCDate()).padStart(2, '0');
 
+    // 🌟 CORS Proxy helper so browser is not blocked by Amazon S3
+    const withCorsProxy = (targetUrl) => `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+
     for (const prod of products) {
         try {
-            // Check today's prefix on the public unidata-nexrad-level3 S3 bucket
+            // Check today's prefix on the public unidata-nexrad-level3 S3 bucket via proxy
             const listUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/?list-type=2&prefix=${site3}_${prod}_${yyyy}_${mm}_${dd}`;
-            let resp = await fetch(listUrl);
+            let resp = await fetch(withCorsProxy(listUrl));
             let text = resp.ok ? await resp.text() : '';
 
             // Fallback to general prefix if today is early UTC
             if (!text.includes('<Key>')) {
                 const fallbackListUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/?list-type=2&prefix=${site3}_${prod}_`;
-                resp = await fetch(fallbackListUrl);
+                resp = await fetch(withCorsProxy(fallbackListUrl));
                 text = resp.ok ? await resp.text() : '';
             }
 
@@ -932,7 +935,7 @@ async function fetchLatestLevel3File(stationId) {
 
             if (lastKey) {
                 const fileUrl = `https://unidata-nexrad-level3.s3.amazonaws.com/${lastKey}`;
-                const fileResp = await fetch(fileUrl);
+                const fileResp = await fetch(withCorsProxy(fileUrl));
                 if (fileResp.ok) {
                     return await fileResp.arrayBuffer();
                 }
