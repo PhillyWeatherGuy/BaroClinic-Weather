@@ -26,43 +26,37 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 
 /**
  * 🛰️ Helper to Extract Exact Scan Date from NEXRAD Message Header
- * Scans for Julian Days (since Jan 1, 1970) and Seconds past midnight UTC
  */
 function extractScanDate(buffer) {
     try {
         const view = new DataView(buffer);
-        const searchLen = Math.min(buffer.byteLength, 512); // Header is always in the first ~100 bytes
+        const searchLen = Math.min(buffer.byteLength, 512);
         
         for (let i = 0; i < searchLen - 8; i++) {
             const msgCode = view.getUint16(i, false);
-            
-            // Common Product Codes are < 200 (e.g., 19 for Base Refl, 153 for Super-Res)
             if (msgCode > 0 && msgCode < 200) {
                 const julianDays = view.getUint16(i + 2, false);
                 const secondsSinceMidnight = view.getUint32(i + 4, false);
                 
-                // Sanity check: Julian days > 19000 (after 2022) and seconds < 86400 (24h)
                 if (julianDays > 19000 && julianDays < 35000 && secondsSinceMidnight < 86400) {
                     const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
                     return new Date(unixMs);
                 }
             }
         }
-    } catch (e) {
-        console.warn("Could not parse Level 3 message header time", e);
-    }
+    } catch (e) {}
     return null;
 }
 
 /**
- * 🛰️ Decompresses Level 3 payload (Supports BZIP2, ZLIB, GZIP, and Raw NIDS)
+ * 🛰️ Decompresses Level 3 payload (BZIP2, ZLIB, GZIP, Raw)
  */
 function decompressLevel3Payload(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
     let bestOut = bytes;
     let maxLen = 0;
 
-    // 1. Scan for BZIP2 Header: 'B', 'Z', 'h' (0x42, 0x5A, 0x68)
+    // 1. Scan for BZIP2 Header ('B', 'Z', 'h')
     for (let offset = 0; offset <= Math.min(bytes.length - 4, 600); offset++) {
         if (bytes[offset] === 0x42 && bytes[offset + 1] === 0x5A && bytes[offset + 2] === 0x68) {
             try {
@@ -120,41 +114,40 @@ function decompressLevel3Payload(arrayBuffer) {
 }
 
 /**
- * 🛰️ Universal Level 3 Radial Decoder
+ * 🛰️ Universal Level 3 Radial Decoder (Supports Packet 16, 28, and AF1F)
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
     
-    // 🌟 Extract Exact Radar Scan Time from the RAW Buffer
     let scanDate = extractScanDate(rawBuffer);
-    
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // Fallback: If not found in raw, search the decompressed payload
     if (!scanDate) {
         scanDate = extractScanDate(dataBytes.buffer) || new Date(); 
     }
 
-    // 1. Locate Radial Data Packet Header
+    // 1. Locate Radial Data Packet Header (Supports Packet 16, 28, AF1F)
     let packetPos = -1;
     let packetCode = 0;
 
-    if (dataBytes.length >= 30) {
-        const codeAt16 = view.getUint16(16, false);
-        if (codeAt16 === 0xAF1F || codeAt16 === 0x0010 || codeAt16 === 16 || codeAt16 === 0x001C || codeAt16 === 28) {
-            packetPos = 16;
-            packetCode = codeAt16;
-        }
-    }
-
-    if (packetPos === -1) {
-        for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
-            const code = view.getUint16(offset, false);
-            if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
+    for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
+        const code = view.getUint16(offset, false);
+        // Packet 16 (0x0010), Packet 28 (0x001C), Packet AF1F (0xAF1F)
+        if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
+            // For Packet 28, check component layout
+            if (code === 0x001C || code === 28) {
+                const numComp = view.getUint16(offset + 8, false);
+                const binsTest = view.getUint16(offset + 14, false);
+                const radsTest = view.getUint16(offset + 22, false);
+                if (numComp > 0 && binsTest >= 20 && binsTest <= 4000 && radsTest >= 50 && radsTest <= 800) {
+                    packetPos = offset;
+                    packetCode = code;
+                    break;
+                }
+            } else {
                 const numBins = view.getUint16(offset + 4, false);
                 const numRadials = view.getUint16(offset + 12, false);
-
                 if (numBins >= 20 && numBins <= 4000 && numRadials >= 50 && numRadials <= 800) {
                     packetPos = offset;
                     packetCode = code;
@@ -165,41 +158,45 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     if (packetPos === -1) {
-        // 🌟 Screen Diagnostic: Dump first 15 16-bit words into error popup
-        let headerWords = [];
-        for (let i = 0; i < Math.min(dataBytes.length, 30); i += 2) {
-            headerWords.push("0x" + view.getUint16(i, false).toString(16).toUpperCase());
-        }
-        throw new Error(`Packet not found (size: ${dataBytes.length}b). Header words: [${headerWords.join(', ')}]`);
+        throw new Error(`Invalid Level 3 file: Radial packet not found (size: ${dataBytes.length} bytes)`);
     }
 
-    // 2. Read Packet Header
-    const firstBin = view.getUint16(packetPos + 2, false);
-    let numBins = view.getUint16(packetPos + 4, false);
-    const iCenter = view.getInt16(packetPos + 6, false);
-    const jCenter = view.getInt16(packetPos + 8, false);
-    const rangeScaleFactor = view.getUint16(packetPos + 10, false);
-    const numRadialsInFile = view.getUint16(packetPos + 12, false);
+    // 2. Read Packet Header (Differentiating Packet 28 vs 16/AF1F)
+    let numBins = 0;
+    let rangeScaleFactor = 0;
+    let numRadialsInFile = 0;
+    let pos = 0;
 
-    let pos = packetPos + 14;
-
-    if (pos + 6 <= dataBytes.length) {
-        const firstRadialBytes = view.getUint16(pos, false);
-        if ((packetCode === 16 || packetCode === 0x0010) && firstRadialBytes > 0 && firstRadialBytes !== numBins && firstRadialBytes <= 4000) {
-            numBins = firstRadialBytes;
-        }
+    if (packetCode === 0x001C || packetCode === 28) {
+        // === Packet 28 Header Layout ===
+        const numComponents = view.getUint16(packetPos + 8, false);
+        pos = packetPos + 10;
+        // Read first component header
+        const compType = view.getUint16(pos, false);
+        const compLen = view.getUint32(pos + 2, false);
+        numBins = view.getUint16(pos + 6, false);
+        const firstBin = view.getUint16(pos + 8, false);
+        const iCenter = view.getInt16(pos + 10, false);
+        const jCenter = view.getInt16(pos + 12, false);
+        rangeScaleFactor = view.getUint16(pos + 14, false);
+        numRadialsInFile = view.getUint16(pos + 16, false);
+        pos += 18; // Start of radials in Packet 28
+    } else {
+        // === Packet 16 & AF1F Header Layout ===
+        const firstBin = view.getUint16(packetPos + 2, false);
+        numBins = view.getUint16(packetPos + 4, false);
+        const iCenter = view.getInt16(packetPos + 6, false);
+        const jCenter = view.getInt16(packetPos + 8, false);
+        rangeScaleFactor = view.getUint16(packetPos + 10, false);
+        numRadialsInFile = view.getUint16(packetPos + 12, false);
+        pos = packetPos + 14;
     }
 
-    // 🌟 CORRECT NEXRAD RANGE CALCULATION:
-    // - 230 km (230,000 meters / 124 nm) standard Base Reflectivity scan
-    // - 460 km (460,000 meters / 248 nm) extended Super-Res scan
     let maxRangeMeters = 230000.0;
     if (numBins >= 1000) {
-        maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
-    } else if (numBins <= 230) {
-        maxRangeMeters = 230000.0; // 230 bins * 1000m = 230km
-    } else if (numBins === 460) {
-        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km (Matches NWS display!)
+        maxRangeMeters = 460000.0;
+    } else if (numBins === 460 || numBins <= 230) {
+        maxRangeMeters = 230000.0;
     } else {
         maxRangeMeters = 230000.0;
     }
@@ -208,7 +205,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const radarGrid = new Uint8Array(TARGET_RADIALS * numBins);
     const filledRays = new Uint8Array(TARGET_RADIALS);
 
-    // 3. Unpack Radials (Handles both 4-Bit RLE Packet AF1F & 8-Bit Raw Packet 16/28)
+    // 3. Unpack Radials
     for (let r = 0; r < numRadialsInFile; r++) {
         if (pos + 6 > dataBytes.length) break;
 
@@ -236,20 +233,18 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
                 }
             }
         } else {
-            // === 8-Bit Digital Raw Radial Array ===
+            // === 8-Bit Digital Raw Radial Array (Packet 16 & Packet 28) ===
             const copyLength = Math.min(numUnits, numBins);
             const rawSlice = dataBytes.subarray(pos, pos + copyLength);
             for (let k = 0; k < copyLength; k++) {
                 const val = rawSlice[k];
-                // Filter out clear-air ground clutter below 15 dBZ (byte 75 in 8-bit space)
-                radarGrid[targetOffset + k] = val < 75 ? 0 : val;
+                radarGrid[targetOffset + k] = val < 75 ? 0 : val; // Clutter filter
             }
             pos += numUnits;
         }
 
         filledRays[rayIndex] = 1;
 
-        // Duplicate 360 radials (1.0° beams) into adjacent 0.5° slots for smooth circle
         if (numRadialsInFile <= 360) {
             const nextSlot = (rayIndex + 1) % TARGET_RADIALS;
             radarGrid.set(radarGrid.subarray(targetOffset, targetOffset + numBins), nextSlot * numBins);
@@ -257,7 +252,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 4. Fill Missing Rays by Interpolating Adjacent Neighbors
+    // 4. Fill Missing Rays
     for (let i = 0; i < TARGET_RADIALS; i++) {
         if (!filledRays[i]) {
             const prev = (i - 1 + TARGET_RADIALS) % TARGET_RADIALS;
@@ -269,7 +264,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     const elapsed = (performance.now() - startTime).toFixed(1);
-    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates (Range: ${maxRangeMeters / 1000}km) in ${elapsed}ms`);
+    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates in ${elapsed}ms`);
 
     return {
         stationId: stationMeta?.id || "RADAR",
