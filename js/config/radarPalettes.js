@@ -169,63 +169,90 @@ RF: 123 0 200
 `;
 
 /**
- * 🌟 Explicit Velocity Color Stops (Calibrated in MPH)
- * Negative = Inbound (Greens/Cyans/Blues), Positive = Outbound (Reds/Oranges/Yellows)
+ * 🌟 Symmetrical Velocity Color Stops (Calibrated in MPH)
  */
 export const VELOCITY_STOPS = [
+    // Extreme Inbound (-200 to -140 MPH: Tornado Core)
     { val: -200.0, r: 255, g: 220, b: 220 },
-    { val: -140.1, r: 255, g: 220, b: 220 },
     { val: -140.0, r: 255, g: 20,  b: 180 },
+
+    // Violent Inbound (-140 to -120 MPH: Hot Pink to Magenta)
     { val: -139.9, r: 114, g: 3,   b: 141 },
     { val: -120.0, r: 250, g: 4,   b: 130 },
+
+    // Severe Inbound (-120 to -100 MPH: Deep Purple)
     { val: -119.9, r: 32,  g: 1,   b: 141 },
     { val: -100.0, r: 105, g: 2,   b: 142 },
+
+    // Intense Inbound (-100 to -90 MPH: Indigo to Blue)
     { val: -99.9,  r: 47,  g: 215, b: 225 },
     { val: -90.0,  r: 25,  g: 1,   b: 142 },
+
+    // High Inbound (-90 to -70 MPH: Deep Blue to Ice Blue/Cyan)
     { val: -89.9,  r: 172, g: 239, b: 242 },
     { val: -70.0,  r: 55,  g: 226, b: 229 },
-    { val: -69.9,  r: 33,  g: 253, b: 50  },
+
+    // Strong Inbound (-70 to -50 MPH: Electric Cyan to Neon Lime)
+    { val: -69.9,  r: 172, g: 239, b: 242 },
     { val: -50.0,  r: 180, g: 240, b: 243 },
-    { val: -49.9,  r: 15,  g: 99,  b: 20  },
+
+    // Moderate/Strong Inbound (-50 to -40 MPH: Neon Lime to Vivid Green)
+    { val: -49.9,  r: 33,  g: 253, b: 50  },
     { val: -40.0,  r: 10,  g: 248, b: 35  },
-    { val: -39.9,  r: 106, g: 125, b: 105 },
-    { val: -10.0,  r: 72,  g: 112, b: 71  },
-    { val: -0.1,   r: 130, g: 106, b: 120 },
+
+    // 🌟 Standard Inbound Storm Winds (-40 to -10 MPH: Rich Vivid Doppler Green!)
+    { val: -39.9,  r: 10,  g: 248, b: 35  },
+    { val: -10.0,  r: 15,  g: 99,  b: 20  },
+
+    // 🌟 Calm / Dead-Zone Inbound (-10 to 0 MPH: Neutral Gray-Green near 0)
+    { val: -9.9,   r: 106, g: 125, b: 105 },
+    { val: -0.1,   r: 72,  g: 112, b: 71  },
+
+    // 🌟 Zero Velocity Line (0 MPH: Neutral Gray)
     { val: 0.0,    r: 130, g: 106, b: 120 },
+
+    // 🌟 Calm / Dead-Zone Outbound (0 to +10 MPH: Neutral Gray to Faint Brown/Red)
+    { val: 0.1,    r: 130, g: 106, b: 120 },
     { val: 9.9,    r: 122, g: 48,  b: 57  },
+
+    // 🌟 Standard Outbound Storm Winds (+10 to +40 MPH: Dark Red to Crimson Red)
     { val: 10.0,   r: 105, g: 0,   b: 0   },
     { val: 39.9,   r: 242, g: 1,   b: 6   },
+
+    // Strong Outbound (+40 to +55 MPH: Crimson to Salmon/Pink)
     { val: 40.0,   r: 249, g: 58,  b: 84  },
     { val: 54.9,   r: 255, g: 142, b: 212 },
+
+    // Severe Outbound (+55 to +60 MPH: Pink to Cream/Orange)
     { val: 55.0,   r: 255, g: 157, b: 206 },
     { val: 59.9,   r: 255, g: 221, b: 176 },
+
+    // Intense Outbound (+60 to +80 MPH: Yellow to Orange)
     { val: 60.0,   r: 255, g: 230, b: 169 },
     { val: 79.9,   r: 255, g: 151, b: 86  },
+
+    // High Outbound (+80 to +120 MPH: Orange to Maroon)
     { val: 80.0,   r: 254, g: 137, b: 80  },
-    { val: 119.9,  r: 254, g: 137, b: 80  },
+    { val: 119.9,  r: 97,  g: 6,   b: 2   },
+
+    // Violent Outbound (+120 to +140 MPH: Maroon to Deep Red)
     { val: 120.0,  r: 97,  g: 6,   b: 2   },
-    { val: 139.9,  r: 97,  g: 6,   b: 2   },
+    { val: 139.9,  r: 60,  g: 0,   b: 0   },
+
+    // Catastrophic Outbound (+140 to +200 MPH: Deep Red to Dark)
     { val: 140.0,  r: 60,  g: 0,   b: 0   },
-    { val: 199.9,  r: 60,  g: 0,   b: 0   },
     { val: 200.0,  r: 45,  g: 0,   b: 0   }
 ];
 
 export const VELOCITY_RF_COLOR = { r: 123, g: 0, b: 200, a: 255 };
 
-/**
- * 🌟 256-Entry WebGL Velocity Palette Builder
- * Maps Level 3 8-bit Base Velocity Product 154:
- *   - Byte 0: Clear air / Below threshold (Transparent)
- *   - Byte 1: Range Folded (RF) (Purple: 123, 0, 200)
- *   - Bytes 2..255: Digital Radial Velocity ((byte - 129) * 1.11847 MPH)
- */
 export function generate256VelocityPalette(stops = VELOCITY_STOPS, rfColor = VELOCITY_RF_COLOR) {
     const palette = [];
 
-    // Byte 0: Transparent
+    // Byte 0: Transparent (Clear air)
     palette.push({ r: 0, g: 0, b: 0, a: 0 });
 
-    // Byte 1: Range Folded (RF)
+    // Byte 1: Range Folded (RF Purple: 123, 0, 200)
     palette.push(rfColor);
 
     // Bytes 2..255: 0.5 m/s per count converted to MPH (1 m/s = 2.23694 MPH)
@@ -302,12 +329,9 @@ export const ACCUM_STORM_TOTAL_LEVELS = [
     17.00, 17.50, 18.00
 ];
 
-/**
- * 🌟 Maps Discrete Accumulation Levels (Inches) into a 256-Entry WebGL Palette
- */
 function generate256AccumPalette(levels, hexColors, maxInches) {
     const palette = [];
-    palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 0 is always transparent (0 inches)
+    palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 0 = transparent
 
     for (let i = 1; i < 256; i++) {
         const val = ((i - 1) / 254.0) * maxInches;
@@ -342,28 +366,21 @@ export const ACCUM_STORM_TOTAL_PALETTE_256 = generate256AccumPalette(ACCUM_STORM
 export function getRadarPalette(productCode) {
     const p = (productCode || '').toUpperCase();
 
-    // Super-Res Velocity (N0G modern, N0U legacy)
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
         return VELOCITY_PALETTE_256;
     }
 
-    // 1-Hour Accumulation (DAA, N1P, OHA) & 3-Hour Accumulation (N3P, DU3)
     if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
         return ACCUM_1H_3H_PALETTE_256;
     }
 
-    // Storm Total Accumulation (DTA, DSP, NTP, STA)
     if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
         return ACCUM_STORM_TOTAL_PALETTE_256;
     }
 
-    // Default: Base Reflectivity (N0B / N0Q / Composite)
     return WXTOOLS_PALETTE_256;
 }
 
-/**
- * 🌟 Create a WebGL 1D Texture from a 256-Entry Palette
- */
 export function createRadarPaletteTexture(gl, palette256 = WXTOOLS_PALETTE_256) {
     const paletteTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, paletteTex);
