@@ -12,6 +12,7 @@ export const stateManager = {
     activeModelRun: null,
     activeModel: 'ecmwf',    // 🌟 Active Model ID
     activeParam: '2t',       // 🌟 Active Parameter ID
+    activeRadarProduct: 'N0B', // 🌟 Active Single-Site Radar Product ('N0B' | 'N0U' | 'DAA' | 'N3P' | 'DTA')
     currentMapStyle: null,   // 🌟 Active Basemap Style URL
     currentTheme: 'light',   // 🌟 Active Theme ('light' | 'dark')
     activeView: '2d',        // 🌟 Active Projection ('2d' | '3d' | 'polar')
