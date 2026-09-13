@@ -42,6 +42,7 @@ let stationHoverPopup = null;
 const RADAR_PRODUCTS = [
     { id: 'N0B', name: 'Base Reflectivity (dBZ)' },
     { id: 'N0U', name: 'Base Velocity (MPH)' },
+    { id: 'N0C', name: 'Correlation Coeff. (ρHV)' },
     { id: 'DAA', name: '1-Hour Precip (in)' },
     { id: 'N3P', name: '3-Hour Precip (in)' },
     { id: 'DTA', name: 'Storm Total Precip (in)' }
@@ -1011,7 +1012,7 @@ function initRadarModeDropdown() {
 }
 
 /**
- * 🌟 7b. Top Radar Parameter Dropdown (Reflectivity, Velocity, Accumulations)
+ * 🌟 7b. Top Radar Parameter Dropdown (Reflectivity, Velocity, CC, Accumulations)
  */
 function initRadarParamDropdown() {
     ensureArchiveStyles();
@@ -1026,7 +1027,7 @@ function initRadarParamDropdown() {
         radarParamMenuEl.className = 'radar-top-dropdown';
         radarParamMenuEl.style.display = 'none';
         radarParamMenuEl.style.right = '12px';
-        radarParamMenuEl.style.width = '210px';
+        radarParamMenuEl.style.width = '220px';
 
         const currentProd = stateManager.activeRadarProduct || 'N0B';
         radarParamMenuEl.innerHTML = RADAR_PRODUCTS.map(p => `
@@ -1056,7 +1057,7 @@ function initRadarParamDropdown() {
                     b.classList.toggle('active', b.getAttribute('data-product') === selectedProd);
                 });
 
-                // Velocity and Accumulation are single-site products: switch to Local view if currently on composite
+                // Velocity, CC, and Accumulation are single-site products: switch to Local view if currently on composite
                 if (selectedProd !== 'N0B' && activeRadarViewType === 'composite') {
                     setRadarViewType('local');
                 }
