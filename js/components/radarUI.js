@@ -1221,11 +1221,28 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
             label: radarState.frames?.[defaultIndex]?.label || (defaultIndex === totalFrames - 1 ? 'LIVE' : 'START')
         };
 
-        // 3. Attach GPU single-site layer
+        // 3. Attach GPU single-site layer underneath boundaries and labels
+        let firstOverlayId = null;
+        const layers = radarMapInstance.getStyle().layers || [];
+        for (const layer of layers) {
+            const id = layer.id.toLowerCase();
+            if (
+                id.includes('boundary_county') ||
+                id.includes('boundary_state') ||
+                id.includes('admin') ||
+                id.startsWith('boundary_') ||
+                id.startsWith('place_')
+            ) {
+                firstOverlayId = layer.id;
+                break;
+            }
+        }
+
         if (!singleSiteRadarLayer) {
             singleSiteRadarLayer = createSingleSiteRadarLayer(radarMapInstance);
-            const beforeId = radarMapInstance.getLayer('radar-stations-circle-layer') ? 'radar-stations-circle-layer' : undefined;
-            radarMapInstance.addLayer(singleSiteRadarLayer, beforeId);
+            radarMapInstance.addLayer(singleSiteRadarLayer, firstOverlayId);
+        } else if (firstOverlayId && radarMapInstance.getLayer(singleSiteRadarLayer.id)) {
+            radarMapInstance.moveLayer(singleSiteRadarLayer.id, firstOverlayId);
         }
 
         singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd));
