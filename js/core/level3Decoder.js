@@ -136,6 +136,10 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         scanDate = extractScanDate(dataBytes.buffer) || new Date(); 
     }
 
+    // Identify product type for selective filtering
+    const prod = (stationMeta?.product || 'N0B').toUpperCase();
+    const isReflectivity = prod === 'N0B' || prod === 'N0Q' || prod === 'REF';
+
     // 1. Locate Radial Data Packet Header
     let packetPos = -1;
     let packetCode = 0;
@@ -185,16 +189,14 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
-    // 🌟 CORRECT NEXRAD RANGE CALCULATION
+    // 🌟 CORRECT NEXRAD RANGE CALCULATION PER PRODUCT
     let maxRangeMeters = 230000.0;
-    if (numBins >= 1000) {
-        maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km
-    } else if (numBins <= 230) {
-        maxRangeMeters = 230000.0; // 230 bins * 1000m = 230km
-    } else if (numBins === 460) {
-        maxRangeMeters = 230000.0; // 460 bins * 500m = 230km
+    if (numBins >= 1400) {
+        maxRangeMeters = 460000.0; // 1840 bins * 250m = 460km (N0B Super-Res Refl)
+    } else if (numBins >= 1000) {
+        maxRangeMeters = 300000.0; // 1200 bins * 250m = 300km (N0U / N0G Super-Res Velocity)
     } else {
-        maxRangeMeters = 230000.0;
+        maxRangeMeters = 230000.0; // 230km (DAA / DTA / Legacy Products)
     }
 
     const TARGET_RADIALS = 720;
@@ -222,7 +224,9 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
                 const rleByte = dataBytes[pos++];
                 const run = (rleByte >> 4) & 0x0F;
                 const level = rleByte & 0x0F;
-                const byteVal = LEVEL_16_TO_BYTE[level] || 0;
+                const byteVal = isReflectivity 
+                    ? (LEVEL_16_TO_BYTE[level] || 0)
+                    : (level === 0 ? 0 : Math.round((level / 15) * 255));
 
                 for (let k = 0; k < run && binIdx < numBins; k++) {
                     radarGrid[targetOffset + binIdx++] = byteVal;
@@ -234,8 +238,13 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
             const rawSlice = dataBytes.subarray(pos, pos + copyLength);
             for (let k = 0; k < copyLength; k++) {
                 const val = rawSlice[k];
-                // Filter out clear-air ground clutter below 15 dBZ (byte 75 in 8-bit space)
-                radarGrid[targetOffset + k] = val < 75 ? 0 : val;
+                if (isReflectivity) {
+                    // Filter out clear-air ground clutter below 15 dBZ (byte 75 in 8-bit space)
+                    radarGrid[targetOffset + k] = val < 75 ? 0 : val;
+                } else {
+                    // Velocity & Accumulation: keep all valid bytes (0 = no signal, 1 = RF)
+                    radarGrid[targetOffset + k] = val;
+                }
             }
             pos += numUnits;
         }
@@ -262,16 +271,17 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     const elapsed = (performance.now() - startTime).toFixed(1);
-    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates (Range: ${maxRangeMeters / 1000}km) in ${elapsed}ms`);
+    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [${prod} - 0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates (Range: ${maxRangeMeters / 1000}km) in ${elapsed}ms`);
 
     return {
         stationId: stationMeta?.id || "RADAR",
+        product: prod,
         lat: stationMeta?.lat || 0.0,
         lon: stationMeta?.lon || 0.0,
         numRadials: TARGET_RADIALS,
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
-        scanDate: scanDate, // 🌟 Now pulls exact time from uncompressed header!
+        scanDate: scanDate,
         data: radarGrid
     };
 }
