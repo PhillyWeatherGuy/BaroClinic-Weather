@@ -168,9 +168,6 @@ color: -200 255 220 220
 RF: 123 0 200
 `;
 
-/**
- * 🌟 Symmetrical Velocity Color Stops (Calibrated in MPH)
- */
 export const VELOCITY_STOPS = [
     // Extreme Inbound (-200 to -140 MPH: Tornado Core)
     { val: -200.0, r: 255, g: 220, b: 220 },
@@ -260,7 +257,7 @@ export function generate256VelocityPalette(stops = VELOCITY_STOPS, rfColor = VEL
         const mph = (i - 129) * 1.11847;
 
         if (mph <= stops[0].val) {
-            palette.push({ r: stops[0].r, g: stops[0].g, b: stops[0].b, a: 255 });
+            palette.push({ r: stops[0].r, g: stops[0].b, a: 255 });
             continue;
         }
 
@@ -360,7 +357,79 @@ export const ACCUM_STORM_TOTAL_PALETTE_256 = generate256AccumPalette(ACCUM_STORM
 
 /**
  * ============================================================================
- * 4. DYNAMIC PALETTE SELECTOR BY PRODUCT CODE
+ * 4. CORRELATION COEFFICIENT PALETTE (RHO)
+ * ============================================================================
+ */
+
+export const CC_STOPS = [
+    { val: 0.00, r: 15,  g: 15,  b: 140 },
+    { val: 0.45, r: 15,  g: 15,  b: 140 },
+    { val: 0.60, r: 10,  g: 10,  b: 190 },
+    { val: 0.75, r: 120, g: 120, b: 255 },
+    { val: 0.80, r: 95,  g: 245, b: 100 },
+    { val: 0.85, r: 135, g: 215, b: 10  },
+    { val: 0.90, r: 255, g: 255, b: 0   },
+    { val: 0.95, r: 255, g: 140, b: 0   },
+    { val: 0.97, r: 225, g: 3,   b: 0   },
+    { val: 0.99, r: 139, g: 30,  b: 77  },
+    { val: 1.00, r: 255, g: 180, b: 215 },
+    { val: 1.05, r: 164, g: 54,  b: 150 }
+];
+
+export function generate256CCPalette(stops = CC_STOPS) {
+    const palette = [];
+
+    // Byte 0: Transparent (no signal / clear air)
+    palette.push({ r: 0, g: 0, b: 0, a: 0 });
+
+    // Byte 1: Reserved / flag (Transparent)
+    palette.push({ r: 0, g: 0, b: 0, a: 0 });
+
+    // Bytes 2..255: Linear scale from 0.00 to 1.05
+    for (let i = 2; i < 256; i++) {
+        const cc = ((i - 2) / 253.0) * 1.05;
+
+        if (cc <= stops[0].val) {
+            palette.push({ r: stops[0].r, g: stops[0].g, b: stops[0].b, a: 255 });
+            continue;
+        }
+
+        if (cc >= stops[stops.length - 1].val) {
+            const last = stops[stops.length - 1];
+            palette.push({ r: last.r, g: last.g, b: last.b, a: 255 });
+            continue;
+        }
+
+        let left = stops[0];
+        let right = stops[stops.length - 1];
+
+        for (let j = 0; j < stops.length - 1; j++) {
+            if (cc >= stops[j].val && cc <= stops[j + 1].val) {
+                left = stops[j];
+                right = stops[j + 1];
+                break;
+            }
+        }
+
+        const span = right.val - left.val;
+        const t = span > 0 ? (cc - left.val) / span : 0;
+
+        palette.push({
+            r: Math.round(left.r + t * (right.r - left.r)),
+            g: Math.round(left.g + t * (right.g - left.g)),
+            b: Math.round(left.b + t * (right.b - left.b)),
+            a: 255
+        });
+    }
+
+    return palette;
+}
+
+export const CC_PALETTE_256 = generate256CCPalette();
+
+/**
+ * ============================================================================
+ * 5. DYNAMIC PALETTE SELECTOR BY PRODUCT CODE
  * ============================================================================
  */
 export function getRadarPalette(productCode) {
@@ -368,6 +437,10 @@ export function getRadarPalette(productCode) {
 
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
         return VELOCITY_PALETTE_256;
+    }
+
+    if (p === 'N0C' || p === 'CC' || p === 'RHO') {
+        return CC_PALETTE_256;
     }
 
     if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
