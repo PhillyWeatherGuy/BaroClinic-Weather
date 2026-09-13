@@ -1,5 +1,5 @@
 // js/shaders/singleSiteRadarShader.js
-import { createRadarPaletteTexture, WXTOOLS_PALETTE_256 } from '../config/radarPalettes.js';
+import { createRadarPaletteTexture, WXTOOLS_PALETTE_256, getRadarPalette } from '../config/radarPalettes.js';
 
 const vsSingleSite = `
     attribute vec2 a_pos;
@@ -60,7 +60,7 @@ const fsSingleSite = `
         float rawByte = texture2D(u_radarTexture, vec2(normRange, normAzimuth)).r;
 
         // Byte 0 = Below threshold / no signal (clear air)
-        if (rawByte < 0.0039) {
+        if (rawByte < 0.001) {
             discard;
         }
 
@@ -113,6 +113,14 @@ export function createSingleSiteRadarLayer(mapInstance) {
         setSweepData: function (sweep) {
             if (!this.gl || !sweep || !sweep.data) return;
             const gl = this.gl;
+
+            // Auto-switch palette if product is specified on the sweep
+            if (sweep.product) {
+                const targetPal = getRadarPalette(sweep.product);
+                if (targetPal !== this.activePalette) {
+                    this.updatePalette(targetPal);
+                }
+            }
 
             this.centerLngLat = [sweep.lon, sweep.lat];
             this.maxRangeMeters = sweep.maxRangeMeters || 460000.0;
