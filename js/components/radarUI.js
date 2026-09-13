@@ -21,6 +21,10 @@ let activeStationLat = 0;
 let activeStationLon = 0;
 let singleSiteFrames = []; // Dynamically sized (12 to 48 frames)
 
+// 🌟 Live Auto-Refresh (keeps the "LIVE" slot current without a full reload/flash)
+let localRadarAutoRefreshInterval = null;
+const LOCAL_RADAR_REFRESH_MS = 120000; // 2 minutes
+
 // 🌟 Archive Calendar State
 let archivePopoverEl = null;
 let calendarViewDate = new Date();
@@ -354,6 +358,10 @@ export async function initRadarMode(mapInstance) {
     initArchivePopover();
     initRadarModeDropdown();
     setupStationLayers(mapInstance);
+
+    // 🌟 Start the background live-refresh loop for Local Radar mode.
+    // Safe no-op whenever a station isn't active / mode isn't live.
+    startLocalRadarAutoRefresh();
 }
 
 /**
@@ -1057,9 +1065,14 @@ async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, ar
         const dd = String(archiveDate.getUTCDate()).padStart(2, '0');
         const hh = archiveDate.getUTCHours();
         workerUrl += `&date=${yyyy}${mm}${dd}&hour=${hh}`;
+    } else {
+        // 🌟 Cache-bust LIVE requests only — archive scans are immutable/permanent,
+        // but "live" must never be servable from a stale local HTTP cache (Safari
+        // in particular will happily reuse an identical GET URL indefinitely).
+        workerUrl += `&_t=${Date.now()}`;
     }
 
-    const resp = await fetch(workerUrl);
+    const resp = await fetch(workerUrl, { cache: 'no-store' });
     if (!resp.ok) {
         throw new Error(`Worker returned HTTP ${resp.status} for ${stationId} frame ${frameIndex}`);
     }
@@ -1141,10 +1154,72 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
                 .catch(() => {});
         }
 
+        // 🌟 Make sure the background auto-refresh loop is running now that a
+        // live station is active (safe to call repeatedly — it self-clears).
+        startLocalRadarAutoRefresh();
+
     } catch (err) {
         console.error(`[RadarUI] Error loading single site ${stationId}:`, err);
         const runLabel = document.getElementById('current-run-label');
         if (runLabel) runLabel.textContent = `Error (${stationId})`;
+    }
+}
+
+/**
+ * 🌟 8b. LIVE AUTO-REFRESH LOOP
+ * Keeps the "LIVE" (newest) slot of the currently active single-site station
+ * fresh every ~2 minutes without a full reload/flash, so the app never sits
+ * on stale data just because nobody has re-clicked the station recently.
+ */
+function startLocalRadarAutoRefresh() {
+    if (localRadarAutoRefreshInterval) return; // already running
+    localRadarAutoRefreshInterval = setInterval(refreshLocalRadarLiveFrame, LOCAL_RADAR_REFRESH_MS);
+}
+
+function stopLocalRadarAutoRefresh() {
+    if (localRadarAutoRefreshInterval) {
+        clearInterval(localRadarAutoRefreshInterval);
+        localRadarAutoRefreshInterval = null;
+    }
+}
+
+async function refreshLocalRadarLiveFrame() {
+    // No-op unless we're actively viewing a live single-site station
+    if (activeRadarViewType !== 'local' || radarState.mode !== 'live' || !activeStationId) return;
+
+    try {
+        const totalFrames = radarState.frames?.length || 12;
+        const dur = radarState.durationHours || 1;
+        const newestIdx = totalFrames - 1;
+
+        const rawBuffer = await fetchLevel3Frame(activeStationId, newestIdx, totalFrames, null, dur);
+        const sweep = await decodeLevel3(rawBuffer, { id: activeStationId, lat: activeStationLat, lon: activeStationLon });
+
+        singleSiteFrames[newestIdx] = {
+            index: newestIdx,
+            sweepData: sweep,
+            label: radarState.frames?.[newestIdx]?.label || 'LIVE'
+        };
+
+        // If the user is currently looking at the LIVE frame, swap the visible
+        // sweep in immediately. If they're scrubbed back to an earlier frame,
+        // just update the cached data quietly — no visual disruption.
+        if (currentVisibleIndex === newestIdx && singleSiteRadarLayer) {
+            singleSiteRadarLayer.setSweepData(sweep);
+            const appClock = document.getElementById('app-clock');
+            if (appClock && sweep.scanDate) {
+                appClock.textContent = sweep.scanDate.toLocaleTimeString([], {
+                    weekday: 'short',
+                    month: 'numeric',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    timeZoneName: 'short'
+                });
+            }
+        }
+    } catch (err) {
+        console.warn(`[RadarUI] Live auto-refresh failed for ${activeStationId}:`, err);
     }
 }
 
@@ -1285,6 +1360,7 @@ function setStationLayersVisibility(isVisible) {
  */
 export function destroyRadarMode(mapInstance) {
     pauseRadarPlayback();
+    stopLocalRadarAutoRefresh();
     currentVisibleIndex = -1;
 
     if (archivePopoverEl) {
