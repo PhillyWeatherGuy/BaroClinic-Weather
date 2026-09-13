@@ -4,6 +4,8 @@ import { setBasemapLabelsVisibility } from '../layers/cityOverlay.js';
 import { getRadarStationsGeoJson } from '../config/radarStations.js';
 import { decodeLevel3 } from '../core/level3Decoder.js';
 import { createSingleSiteRadarLayer } from '../shaders/singleSiteRadarShader.js';
+import { stateManager } from '../core/stateManager.js';
+import { getRadarPalette } from '../config/radarPalettes.js';
 
 let radarMapInstance = null;
 let radarPlayInterval = null;
@@ -32,9 +34,18 @@ let selectedDayForArchive = null;
 let selectedDurationHours = 1; // 1, 2, 3, 6, 12, 24
 let calendarViewMode = 'days'; // 'days' | 'months'
 
-// 🌟 Top Radar Mode Dropdown Element & Station Popup
+// 🌟 Top Radar Dropdown Elements & Station Popup
 let radarModeMenuEl = null;
+let radarParamMenuEl = null;
 let stationHoverPopup = null;
+
+const RADAR_PRODUCTS = [
+    { id: 'N0B', name: 'Base Reflectivity (dBZ)' },
+    { id: 'N0U', name: 'Base Velocity (MPH)' },
+    { id: 'DAA', name: '1-Hour Precip (in)' },
+    { id: 'N3P', name: '3-Hour Precip (in)' },
+    { id: 'DTA', name: 'Storm Total Precip (in)' }
+];
 
 function ensureArchiveStyles() {
     if (document.getElementById('radar-archive-styles')) return;
@@ -288,11 +299,10 @@ function ensureArchiveStyles() {
             border-color: rgba(56, 189, 248, 0.5);
         }
 
-        /* 🌟 Top Bar Radar Mode Dropdown Styling */
+        /* 🌟 Top Bar Radar Dropdowns Styling */
         .radar-top-dropdown {
             position: absolute;
             top: 48px;
-            right: 175px;
             width: 190px;
             background: rgba(11, 15, 25, 0.96);
             backdrop-filter: blur(20px);
@@ -357,6 +367,7 @@ export async function initRadarMode(mapInstance) {
     setBasemapLabelsVisibility(mapInstance, true);
     initArchivePopover();
     initRadarModeDropdown();
+    initRadarParamDropdown();
     setupStationLayers(mapInstance);
 }
 
@@ -955,6 +966,7 @@ function initRadarModeDropdown() {
         radarModeMenuEl.id = 'radar-mode-menu';
         radarModeMenuEl.className = 'radar-top-dropdown';
         radarModeMenuEl.style.display = 'none';
+        radarModeMenuEl.style.right = '175px';
 
         radarModeMenuEl.innerHTML = `
             <button class="radar-top-item ${activeRadarViewType === 'composite' ? 'active' : ''}" data-type="composite">
@@ -987,12 +999,91 @@ function initRadarModeDropdown() {
 
     modelBtn.onclick = (e) => {
         e.stopPropagation();
+        if (radarParamMenuEl) radarParamMenuEl.style.display = 'none';
         const isVisible = radarModeMenuEl.style.display === 'flex';
         radarModeMenuEl.style.display = isVisible ? 'none' : 'flex';
         if (!isVisible) {
             modelBtn.classList.add('active', 'open');
         } else {
             modelBtn.classList.remove('active', 'open');
+        }
+    };
+}
+
+/**
+ * 🌟 7b. Top Radar Parameter Dropdown (Reflectivity, Velocity, Accumulations)
+ */
+function initRadarParamDropdown() {
+    ensureArchiveStyles();
+
+    const paramBtn = document.getElementById('btn-param-menu');
+    const navRight = document.querySelector('.nav-right');
+    if (!paramBtn || !navRight) return;
+
+    if (!radarParamMenuEl) {
+        radarParamMenuEl = document.createElement('div');
+        radarParamMenuEl.id = 'radar-param-menu';
+        radarParamMenuEl.className = 'radar-top-dropdown';
+        radarParamMenuEl.style.display = 'none';
+        radarParamMenuEl.style.right = '12px';
+        radarParamMenuEl.style.width = '210px';
+
+        const currentProd = stateManager.activeRadarProduct || 'N0B';
+        radarParamMenuEl.innerHTML = RADAR_PRODUCTS.map(p => `
+            <button class="radar-top-item ${currentProd === p.id ? 'active' : ''}" data-product="${p.id}">
+                <span>${p.name}</span>
+            </button>
+        `).join('');
+
+        navRight.appendChild(radarParamMenuEl);
+
+        radarParamMenuEl.querySelectorAll('.radar-top-item').forEach((item) => {
+            item.onclick = async (e) => {
+                e.stopPropagation();
+                const selectedProd = item.getAttribute('data-product');
+                radarParamMenuEl.style.display = 'none';
+                paramBtn.classList.remove('active', 'open');
+
+                if (stateManager.activeRadarProduct === selectedProd) return;
+
+                stateManager.activeRadarProduct = selectedProd;
+                const prodInfo = RADAR_PRODUCTS.find(p => p.id === selectedProd);
+                if (prodInfo) {
+                    paramBtn.querySelector('span').textContent = prodInfo.name;
+                }
+
+                radarParamMenuEl.querySelectorAll('.radar-top-item').forEach(b => {
+                    b.classList.toggle('active', b.getAttribute('data-product') === selectedProd);
+                });
+
+                // Velocity and Accumulation are single-site products: switch to Local view if currently on composite
+                if (selectedProd !== 'N0B' && activeRadarViewType === 'composite') {
+                    setRadarViewType('local');
+                }
+
+                if (activeRadarViewType === 'local' && activeStationId) {
+                    await loadSingleSiteRadar(activeStationId, activeStationLat, activeStationLon);
+                }
+            };
+        });
+
+        document.addEventListener('click', (e) => {
+            if (radarParamMenuEl && !radarParamMenuEl.contains(e.target) && !paramBtn.contains(e.target)) {
+                radarParamMenuEl.style.display = 'none';
+                paramBtn.classList.remove('active', 'open');
+            }
+        });
+    }
+
+    paramBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (radarModeMenuEl) radarModeMenuEl.style.display = 'none';
+        const isVisible = radarParamMenuEl.style.display === 'flex';
+        radarParamMenuEl.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            paramBtn.classList.add('active', 'open');
+        } else {
+            paramBtn.classList.remove('active', 'open');
         }
     };
 }
@@ -1056,9 +1147,10 @@ export function setRadarViewType(type) {
 /**
  * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep via Your Cloudflare Worker S3 Engine
  */
-async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, archiveDate = null, durationHours = 1) {
+async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, archiveDate = null, durationHours = 1, product = null) {
+    const prod = product || stateManager.activeRadarProduct || 'N0B';
     const siteCode = stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId;
-    let workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=N0B&frame=${frameIndex}&totalFrames=${totalFrames}&duration=${durationHours}`;
+    let workerUrl = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar?station=${siteCode}&product=${prod}&frame=${frameIndex}&totalFrames=${totalFrames}&duration=${durationHours}`;
 
     if (archiveDate) {
         const yyyy = archiveDate.getUTCFullYear();
@@ -1076,7 +1168,7 @@ async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, ar
 
     const resp = await fetch(workerUrl, { cache: 'no-store' });
     if (!resp.ok) {
-        throw new Error(`Worker returned HTTP ${resp.status} for ${stationId} frame ${frameIndex}`);
+        throw new Error(`Worker returned HTTP ${resp.status} for ${stationId} (${prod}) frame ${frameIndex}`);
     }
     return await resp.arrayBuffer();
 }
@@ -1100,6 +1192,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         activeStationLat = lat;
         activeStationLon = lon;
 
+        const currentProd = stateManager.activeRadarProduct || 'N0B';
         const totalFrames = radarState.frames?.length || 12;
         singleSiteFrames = new Array(totalFrames);
 
@@ -1119,8 +1212,8 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
 
         // 2. Load and render default frame immediately (newest for live, or frame 0 for archive)
         const defaultIndex = (radarState.mode === 'live') ? (totalFrames - 1) : 0;
-        const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, totalFrames, radarState.archiveDate, dur);
-        const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon });
+        const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, totalFrames, radarState.archiveDate, dur, currentProd);
+        const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon, product: currentProd });
 
         singleSiteFrames[defaultIndex] = {
             index: defaultIndex,
@@ -1135,6 +1228,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
             radarMapInstance.addLayer(singleSiteRadarLayer, beforeId);
         }
 
+        singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd));
         singleSiteRadarLayer.setSweepData(sweep);
 
         if (runLabel) runLabel.textContent = `${stationId} (${dur}h Loop)`;
@@ -1144,8 +1238,8 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         // 4. Preload remaining historical frames in background from S3
         for (let i = 0; i < totalFrames; i++) {
             if (i === defaultIndex) continue;
-            fetchLevel3Frame(stationId, i, totalFrames, radarState.archiveDate, dur)
-                .then(buf => decodeLevel3(buf, { id: stationId, lat, lon }))
+            fetchLevel3Frame(stationId, i, totalFrames, radarState.archiveDate, dur, currentProd)
+                .then(buf => decodeLevel3(buf, { id: stationId, lat, lon, product: currentProd }))
                 .then(decodedSweep => {
                     singleSiteFrames[i] = {
                         index: i,
@@ -1172,17 +1266,6 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
 
 /**
  * 🌟 8b. LIVE AUTO-REFRESH LOOP
- * Keeps the "LIVE" slot of the active single-site station current without requiring
- * the user to reselect the station or reload the page. Runs only while:
- *   - Radar mode is active
- *   - View type is 'local'
- *   - A station is selected
- *   - Timeline mode is 'live' (not viewing a historical archive window)
- *
- * Fetches quietly in the background every LOCAL_RADAR_REFRESH_MS. If the user is currently
- * parked on the newest ("LIVE") frame, the new sweep is swapped in immediately. If the user
- * has scrubbed back to an earlier frame, the new data is stored silently so it's ready the
- * moment they return to LIVE, without yanking the display out from under them.
  */
 function startLocalRadarAutoRefresh() {
     stopLocalRadarAutoRefresh();
@@ -1195,13 +1278,15 @@ function startLocalRadarAutoRefresh() {
         const totalFrames = radarState.frames?.length || 12;
         const liveIndex = totalFrames - 1;
         const dur = radarState.durationHours || 1;
+        const currentProd = stateManager.activeRadarProduct || 'N0B';
 
         try {
-            const rawBuffer = await fetchLevel3Frame(activeStationId, liveIndex, totalFrames, null, dur);
+            const rawBuffer = await fetchLevel3Frame(activeStationId, liveIndex, totalFrames, null, dur, currentProd);
             const sweep = await decodeLevel3(rawBuffer, {
                 id: activeStationId,
                 lat: activeStationLat,
-                lon: activeStationLon
+                lon: activeStationLon,
+                product: currentProd
             });
 
             // Guard against a station switch happening mid-fetch
@@ -1387,6 +1472,10 @@ export function destroyRadarMode(mapInstance) {
 
     if (radarModeMenuEl) {
         radarModeMenuEl.style.display = 'none';
+    }
+
+    if (radarParamMenuEl) {
+        radarParamMenuEl.style.display = 'none';
     }
 
     if (stationHoverPopup) {
