@@ -25,18 +25,22 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Helper to Extract Exact Scan Date from NEXRAD Message Header
- * Scans for Julian Days (since Jan 1, 1970) and Seconds past midnight UTC
+ * 🛰️ Unified NEXRAD Header Parser
+ * Safely finds the Message Header and extracts Date, Scale, and Offset.
  */
-function extractScanDate(buffer) {
+function extractHeaderInfo(buffer) {
+    let scanDate = null;
+    let scale = null;
+    let offset = null;
+
     try {
         const view = new DataView(buffer);
-        const searchLen = Math.min(buffer.byteLength, 512); // Header is always in the first ~100 bytes
+        const searchLen = Math.min(buffer.byteLength, 1024); // Header is always in first 1KB
         
         for (let i = 0; i < searchLen - 8; i++) {
             const msgCode = view.getUint16(i, false);
             
-            // Common Product Codes are < 200 (e.g., 19 for Base Refl, 153 for Super-Res)
+            // Common Product Codes are < 200 (19=N0B, 154=N0U, 170=DAA, 171=DTA)
             if (msgCode > 0 && msgCode < 200) {
                 const julianDays = view.getUint16(i + 2, false);
                 const secondsSinceMidnight = view.getUint32(i + 4, false);
@@ -44,14 +48,29 @@ function extractScanDate(buffer) {
                 // Sanity check: Julian days > 19000 (after 2022) and seconds < 86400 (24h)
                 if (julianDays > 19000 && julianDays < 35000 && secondsSinceMidnight < 86400) {
                     const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
-                    return new Date(unixMs);
+                    scanDate = new Date(unixMs);
+                    
+                    // Extract Scale (HW 31,32 -> bytes +60) and Offset (HW 33,34 -> bytes +64)
+                    if (i + 68 <= buffer.byteLength) {
+                        const parsedScale = view.getFloat32(i + 60, false);
+                        const parsedOffset = view.getFloat32(i + 64, false);
+                        
+                        // Prevent garbage Float32 reads by enforcing sane ranges
+                        if (!isNaN(parsedScale) && Math.abs(parsedScale) > 0.01 && Math.abs(parsedScale) < 10000) {
+                            scale = parsedScale;
+                        }
+                        if (!isNaN(parsedOffset) && Math.abs(parsedOffset) < 1000) {
+                            offset = parsedOffset;
+                        }
+                    }
+                    break; // Found header, stop searching
                 }
             }
         }
     } catch (e) {
-        console.warn("Could not parse Level 3 message header time", e);
+        console.warn("Could not parse Level 3 message header", e);
     }
-    return null;
+    return { scanDate, scale, offset };
 }
 
 /**
@@ -125,32 +144,37 @@ function decompressLevel3Payload(arrayBuffer) {
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
     
-    // 🌟 Extract Exact Radar Scan Time from the RAW Buffer
-    let scanDate = extractScanDate(rawBuffer);
+    // 🌟 Unified Header Extraction
+    let { scanDate, scale, offset } = extractHeaderInfo(rawBuffer);
     
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // Fallback: If not found in raw, search the decompressed payload
     if (!scanDate) {
-        scanDate = extractScanDate(dataBytes.buffer) || new Date(); 
+        // Fallback: If not found in raw, search the decompressed payload
+        const fallback = extractHeaderInfo(dataBytes.buffer);
+        scanDate = fallback.scanDate || new Date(); 
+        scale = scale || fallback.scale;
+        offset = offset || fallback.offset;
     }
-
-    // 🌟 Extract Dynamic Scale and Offset for Precipitation Array Products (From PDB Halfwords 31-34)
-    let scale = 1.0;
-    let offset = 0.0;
-    try {
-        if (dataBytes.length > 68) {
-            scale = view.getFloat32(60, false);  // Byte 60 = HW 31,32
-            offset = view.getFloat32(64, false); // Byte 64 = HW 33,34
-            if (!scale || isNaN(scale) || scale === 0) scale = 1.0;
-            if (isNaN(offset)) offset = 0.0;
-        }
-    } catch (e) {}
 
     // Identify product type for selective filtering
     const prod = (stationMeta?.product || 'N0B').toUpperCase();
     const isReflectivity = prod === 'N0B' || prod === 'N0Q' || prod === 'REF';
+
+    // 🌟 Safety net for Accumulation Scale & Offset
+    if (['DAA', 'N1P', 'OHA', '1HR', 'N3P', 'DU3', '3HR', 'DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(prod)) {
+        if (scale === null || isNaN(scale) || scale === 0) {
+            const isStormTotal = ['DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(prod);
+            scale = isStormTotal ? 10.0 : 100.0; // NWS standard fallbacks
+        }
+        if (offset === null || isNaN(offset)) {
+            offset = 0.0;
+        }
+    } else {
+        scale = scale || 1.0;
+        offset = offset || 0.0;
+    }
 
     // 1. Locate Radial Data Packet Header
     let packetPos = -1;
@@ -358,11 +382,17 @@ export function formatRadarValue(rawByte, productCode, scale = 1.0, offset = 0.0
 
     // 3. Accumulations (DAA, DTA, etc.) -> 🌟 DYNAMIC CONVERSION USING HEADER SCALE/OFFSET
     if (['DAA', 'N1P', 'OHA', '1HR', 'N3P', 'DU3', '3HR', 'DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(p)) {
-        // Fallback to 100.0 if header parsing fails
-        const s = (scale && !isNaN(scale) && scale !== 0) ? scale : 100.0; 
-        const o = !isNaN(offset) ? offset : 0.0;
+        const isStormTotal = ['DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(p);
         
-        // NWS Formula: (Byte - Offset) / Scale
+        // Strictly enforce the safety fallback so tooltip math never explodes
+        let s = scale;
+        if (s === undefined || s === null || isNaN(s) || s === 0 || Math.abs(s) > 100000) {
+            s = isStormTotal ? 10.0 : 100.0;
+        }
+        
+        const o = !isNaN(offset) && offset !== null ? offset : 0.0;
+        
+        // NWS Formula: Value = (Byte - Offset) / Scale
         const inches = (rawByte - o) / s;
         return inches.toFixed(2) + ' in';
     }
