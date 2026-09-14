@@ -348,6 +348,28 @@ function ensureArchiveStyles() {
             padding: 4px 6px;
             text-align: center;
         }
+
+        /* 🌟 Floating Radar Gate Value Cursor Badge */
+        .radar-cursor-badge {
+            position: absolute;
+            pointer-events: none;
+            z-index: 90;
+            background: rgba(11, 15, 25, 0.90);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 10px rgba(56, 189, 248, 0.2);
+            white-space: nowrap;
+            display: none;
+            transform: translate3d(0, 0, 0);
+        }
     `;
     document.head.appendChild(style);
 }
@@ -399,7 +421,8 @@ function setupHoverInspection(mapInstance) {
         }
 
         const rawByte = sampleRadarSweep(e.lngLat.lng, e.lngLat.lat, currentFrame.sweepData);
-        const formatted = formatRadarValue(rawByte, currentFrame.sweepData.product);
+        // 🌟 Pass scale and offset cleanly down to the formatter!
+        const formatted = formatRadarValue(rawByte, currentFrame.sweepData.product, currentFrame.sweepData.scale, currentFrame.sweepData.offset);
 
         if (!formatted) {
             if (radarCursorBadge) radarCursorBadge.style.display = 'none';
@@ -1153,7 +1176,7 @@ export function setRadarViewType(type) {
         }
         activeStationId = null;
         stopLocalRadarAutoRefresh();
-        if (radarCursorBadge) radarCursorBadge.style.display = 'none';
+        if (radarCursorBadge) radarCursorBadge.style.display = 'none'; // Hide badge when switching modes
 
         // Restore composite layers visibility
         if (radarState.frames) {
@@ -1247,7 +1270,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
-                if (radarMapInstance && radarMapInstance.getLayer(layerId)) {
+                if (radarMapInstance.getLayer(layerId)) {
                     radarMapInstance.setLayoutProperty(layerId, 'visibility', 'none');
                 }
             });
@@ -1292,7 +1315,8 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
             radarMapInstance.moveLayer(singleSiteRadarLayer.id, firstOverlayId);
         }
 
-        singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd));
+        // 🌟 Pass scale and offset to palette generator!
+        singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd, sweep.scale, sweep.offset));
         singleSiteRadarLayer.setSweepData(sweep);
 
         if (runLabel) runLabel.textContent = `${stationId} (${dur}h Loop)`;
@@ -1364,6 +1388,8 @@ function startLocalRadarAutoRefresh() {
 
             // Only push the refreshed sweep to the screen if the user is actually on the LIVE frame
             if (currentVisibleIndex === liveIndex && singleSiteRadarLayer) {
+                // 🌟 Also update the palette for the live frame incase storm total accumulation limits changed!
+                singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd, sweep.scale, sweep.offset));
                 singleSiteRadarLayer.setSweepData(sweep);
                 const appClock = document.getElementById('app-clock');
                 if (appClock && sweep.scanDate) {
