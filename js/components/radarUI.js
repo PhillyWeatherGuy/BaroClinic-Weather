@@ -348,28 +348,6 @@ function ensureArchiveStyles() {
             padding: 4px 6px;
             text-align: center;
         }
-
-        /* 🌟 Floating Radar Gate Value Cursor Badge */
-        .radar-cursor-badge {
-            position: absolute;
-            pointer-events: none;
-            z-index: 90;
-            background: rgba(11, 15, 25, 0.90);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(56, 189, 248, 0.4);
-            color: #38bdf8;
-            font-family: 'Rajdhani', sans-serif;
-            font-weight: 700;
-            font-size: 14px;
-            letter-spacing: 0.5px;
-            padding: 4px 10px;
-            border-radius: 8px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 10px rgba(56, 189, 248, 0.2);
-            white-space: nowrap;
-            display: none;
-            transform: translate3d(0, 0, 0);
-        }
     `;
     document.head.appendChild(style);
 }
@@ -397,7 +375,7 @@ export async function initRadarMode(mapInstance) {
 }
 
 /**
- * 🌟 1b. Mouse Hover Gate Inspection
+ * 🌟 1b. Mouse Hover Gate Inspection (Shows dBZ, MPH, CC, or in under cursor)
  */
 function setupHoverInspection(mapInstance) {
     if (!mapInstance) return;
@@ -446,6 +424,7 @@ export async function switchRadarTimeline(startUtcDate = null, durationHours = 1
     if (!radarMapInstance) return;
     pauseRadarPlayback();
 
+    // 1. Clean up old composite raster layers & sources
     if (radarState.frames) {
         radarState.frames.forEach((frame) => {
             const layerId = `iem-radar-layer-${frame.index}`;
@@ -457,10 +436,12 @@ export async function switchRadarTimeline(startUtcDate = null, durationHours = 1
         });
     }
 
+    // 2. Build timeline frames based on chosen duration
     const frames = buildRadarTimeline(startUtcDate, durationHours);
     const defaultIndex = (radarState.mode === 'live') ? frames.length - 1 : 0;
     currentVisibleIndex = defaultIndex;
 
+    // 3. Find layer to place radar under
     let firstOverlayId = null;
     const layers = radarMapInstance.getStyle().layers || [];
     for (const layer of layers) {
@@ -511,6 +492,7 @@ export async function switchRadarTimeline(startUtcDate = null, durationHours = 1
         addRadarLayer(frames[defaultIndex], true);
     }
 
+    // If a local radar station is active, reload its loop for the new date and duration
     if (activeRadarViewType === 'local' && activeStationId) {
         await loadSingleSiteRadar(activeStationId, activeStationLat, activeStationLon);
         return;
@@ -519,6 +501,7 @@ export async function switchRadarTimeline(startUtcDate = null, durationHours = 1
     syncRadarTimelineUI();
     setRadarFrame(defaultIndex);
 
+    // Stagger remaining composite frames in background
     let delay = 25;
     for (let i = 0; i < frames.length; i++) {
         if (i === defaultIndex) continue;
@@ -545,6 +528,7 @@ export function setRadarFrame(frameIndex) {
 
     if (radarMapInstance) {
         if (activeRadarViewType === 'composite') {
+            // === COMPOSITE MODE ===
             const newLayerId = `iem-radar-layer-${frameIndex}`;
             if (radarMapInstance.getLayer(newLayerId)) {
                 radarMapInstance.setPaintProperty(newLayerId, 'raster-opacity', 1.0);
@@ -557,6 +541,7 @@ export function setRadarFrame(frameIndex) {
                 }
             }
         } else if (activeRadarViewType === 'local' && singleSiteRadarLayer) {
+            // === LOCAL SINGLE-SITE RADAR MODE ===
             if (radarState.frames) {
                 radarState.frames.forEach((f) => {
                     const lId = `iem-radar-layer-${f.index}`;
@@ -576,6 +561,7 @@ export function setRadarFrame(frameIndex) {
     const slider = document.getElementById('timeline-slider');
     if (slider) slider.value = frameIndex.toString();
 
+    // 🌟 Dynamically get exact scanDate for Local Mode or fallback to Composite snapped date
     let frameDate = null;
     let frameLabel = '';
 
@@ -790,6 +776,7 @@ function renderArchivePopover() {
     archivePopoverEl.innerHTML = '';
     const now = new Date();
 
+    // 1. Return to Live Loop Button
     const liveBtn = document.createElement('button');
     liveBtn.className = 'archive-live-btn';
     liveBtn.innerHTML = `<span>Live Radar</span>`;
@@ -800,6 +787,7 @@ function renderArchivePopover() {
     };
     archivePopoverEl.appendChild(liveBtn);
 
+    // VIEW A: 24-Hour Selector (When day is clicked)
     if (selectedDayForArchive) {
         const hoursHeader = document.createElement('div');
         hoursHeader.className = 'hours-view-header';
@@ -820,6 +808,7 @@ function renderArchivePopover() {
             renderArchivePopover();
         };
 
+        // 🌟 Duration Selector Row [ 1h | 2h | 3h | 6h | 12h | 24h ]
         const durRow = document.createElement('div');
         durRow.className = 'duration-selector-row';
         durRow.innerHTML = `
@@ -874,6 +863,7 @@ function renderArchivePopover() {
         return;
     }
 
+    // VIEW B: Month & Year Selector (When month title is clicked)
     if (calendarViewMode === 'months') {
         const currentYear = calendarViewDate.getUTCFullYear();
 
@@ -928,6 +918,7 @@ function renderArchivePopover() {
         return;
     }
 
+    // VIEW C: Days Calendar (Default)
     const year = calendarViewDate.getUTCFullYear();
     const month = calendarViewDate.getUTCMonth();
 
@@ -1111,6 +1102,7 @@ function initRadarParamDropdown() {
                     b.classList.toggle('active', b.getAttribute('data-product') === selectedProd);
                 });
 
+                // Velocity, CC, and Accumulation are single-site products: switch to Local view if currently on composite
                 if (selectedProd !== 'N0B' && activeRadarViewType === 'composite') {
                     setRadarViewType('local');
                 }
@@ -1161,8 +1153,9 @@ export function setRadarViewType(type) {
         }
         activeStationId = null;
         stopLocalRadarAutoRefresh();
-        if (radarCursorBadge) radarCursorBadge.style.display = 'none'; // Hide badge when switching modes
+        if (radarCursorBadge) radarCursorBadge.style.display = 'none';
 
+        // Restore composite layers visibility
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
@@ -1177,6 +1170,7 @@ export function setRadarViewType(type) {
         if (modelBtn) modelBtn.querySelector('span').textContent = activeStationId ? `Local Radar (${activeStationId})` : 'Local Radar';
         setStationLayersVisibility(true);
 
+        // Hide all composite layers
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
@@ -1198,7 +1192,7 @@ export function setRadarViewType(type) {
 }
 
 /**
- * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep
+ * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep via Your Cloudflare Worker S3 Engine
  */
 async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, archiveDate = null, durationHours = 1, product = null) {
     const prod = product || stateManager.activeRadarProduct || 'N0B';
@@ -1212,6 +1206,10 @@ async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, ar
         const hh = archiveDate.getUTCHours();
         workerUrl += `&date=${yyyy}${mm}${dd}&hour=${hh}`;
     } else {
+        // 🌟 CACHE-BUST: Live requests must never be served from Safari's (or any browser's)
+        // local HTTP cache, since the URL would otherwise be byte-identical every single time
+        // and the browser can silently keep re-serving an old response forever. Archive
+        // requests are intentionally left alone since those scans are immutable and safe to cache.
         workerUrl += `&_t=${Date.now()}`;
     }
 
@@ -1231,6 +1229,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
     try {
         pauseRadarPlayback();
 
+        // 🚨 Immediately wipe the old station's radar off the screen!
         if (singleSiteRadarLayer) {
             singleSiteRadarLayer.isVisible = false;
             radarMapInstance.triggerRepaint();
@@ -1244,10 +1243,11 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         const totalFrames = radarState.frames?.length || 12;
         singleSiteFrames = new Array(totalFrames);
 
+        // 1. Completely hide all composite layers
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
-                if (radarMapInstance.getLayer(layerId)) {
+                if (radarMapInstance && radarMapInstance.getLayer(layerId)) {
                     radarMapInstance.setLayoutProperty(layerId, 'visibility', 'none');
                 }
             });
@@ -1257,6 +1257,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         const runLabel = document.getElementById('current-run-label');
         if (runLabel) runLabel.textContent = `Loading ${stationId}...`;
 
+        // 2. Load and render default frame immediately (newest for live, or frame 0 for archive)
         const defaultIndex = (radarState.mode === 'live') ? (totalFrames - 1) : 0;
         const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, totalFrames, radarState.archiveDate, dur, currentProd);
         const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon, product: currentProd });
@@ -1267,6 +1268,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
             label: radarState.frames?.[defaultIndex]?.label || (defaultIndex === totalFrames - 1 ? 'LIVE' : 'START')
         };
 
+        // 3. Attach GPU single-site layer underneath boundaries and labels
         let firstOverlayId = null;
         const layers = radarMapInstance.getStyle().layers || [];
         for (const layer of layers) {
@@ -1297,6 +1299,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         syncRadarTimelineUI();
         setRadarFrame(defaultIndex);
 
+        // 4. Preload remaining historical frames in background from S3
         for (let i = 0; i < totalFrames; i++) {
             if (i === defaultIndex) continue;
             fetchLevel3Frame(stationId, i, totalFrames, radarState.archiveDate, dur, currentProd)
@@ -1311,6 +1314,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
                 .catch(() => {});
         }
 
+        // 5. Kick off (or restart) the auto-refresh loop for this newly-selected live station
         if (radarState.mode === 'live') {
             startLocalRadarAutoRefresh();
         } else {
@@ -1349,6 +1353,7 @@ function startLocalRadarAutoRefresh() {
                 product: currentProd
             });
 
+            // Guard against a station switch happening mid-fetch
             if (activeRadarViewType !== 'local' || !activeStationId) return;
 
             singleSiteFrames[liveIndex] = {
@@ -1357,8 +1362,8 @@ function startLocalRadarAutoRefresh() {
                 label: 'LIVE'
             };
 
+            // Only push the refreshed sweep to the screen if the user is actually on the LIVE frame
             if (currentVisibleIndex === liveIndex && singleSiteRadarLayer) {
-                singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd));
                 singleSiteRadarLayer.setSweepData(sweep);
                 const appClock = document.getElementById('app-clock');
                 if (appClock && sweep.scanDate) {
@@ -1455,6 +1460,7 @@ function setupStationLayers(mapInstance) {
         });
     }
 
+    // Hover Tooltip
     mapInstance.on('mouseenter', circleLayerId, (e) => {
         if (activeRadarViewType !== 'local') return;
         mapInstance.getCanvas().style.cursor = 'pointer';
@@ -1475,6 +1481,7 @@ function setupStationLayers(mapInstance) {
         stationHoverPopup.remove();
     });
 
+    // Click to select, fly to station, and load single-site radar
     mapInstance.on('click', circleLayerId, async (e) => {
         if (activeRadarViewType !== 'local') return;
 
@@ -1495,6 +1502,7 @@ function setupStationLayers(mapInstance) {
             modelBtn.querySelector('span').textContent = `Local Radar (${id})`;
         }
 
+        // 🌟 Trigger direct single-site radar download and render
         await loadSingleSiteRadar(id, lat, lon);
     });
 }
