@@ -358,9 +358,12 @@ export function formatRadarValue(rawByte, productCode, scale = 1.0, offset = 0.0
 
     // 3. Accumulations (DAA, DTA, etc.) -> 🌟 DYNAMIC CONVERSION USING HEADER SCALE/OFFSET
     if (['DAA', 'N1P', 'OHA', '1HR', 'N3P', 'DU3', '3HR', 'DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(p)) {
-        const s = (scale && !isNaN(scale) && scale !== 0) ? scale : 1.0;
+        // Fallback to 100.0 if header parsing fails
+        const s = (scale && !isNaN(scale) && scale !== 0) ? scale : 100.0; 
         const o = !isNaN(offset) ? offset : 0.0;
-        const inches = ((rawByte - o) / s) * 0.01;
+        
+        // NWS Formula: (Byte - Offset) / Scale
+        const inches = (rawByte - o) / s;
         return inches.toFixed(2) + ' in';
     }
 
