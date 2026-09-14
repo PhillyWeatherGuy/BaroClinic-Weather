@@ -953,3 +953,27 @@
 .theme-toggle-pill.light-mode .moon-icon {
     color: #94a3b8;
 }
+
+/* ==========================================
+   RADAR HOVER INSPECTION BADGE
+   ========================================== */
+.radar-cursor-badge {
+    position: absolute;
+    pointer-events: none;
+    z-index: 90;
+    background: rgba(11, 15, 25, 0.90);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 10px rgba(56, 189, 248, 0.2);
+    white-space: nowrap;
+    display: none;
+    transform: translate3d(0, 0, 0);
+}
