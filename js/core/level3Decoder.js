@@ -340,7 +340,7 @@ export function formatRadarValue(rawByte, productCode) {
 
     // 3. 1-Hour & 3-Hour Precip Accumulation (DAA / N3P)
     if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
-        const inches = ((rawByte - 1) / 254.0) * 10.0;
+        const inches = ((rawByte - 2) / 25.4) * 0.1;
         return inches.toFixed(2) + ' in';
     }
 
