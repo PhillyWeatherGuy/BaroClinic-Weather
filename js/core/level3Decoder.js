@@ -136,6 +136,18 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         scanDate = extractScanDate(dataBytes.buffer) || new Date(); 
     }
 
+    // 🌟 Extract Dynamic Scale and Offset for Precipitation Array Products (From PDB Halfwords 31-34)
+    let scale = 1.0;
+    let offset = 0.0;
+    try {
+        if (dataBytes.length > 68) {
+            scale = view.getFloat32(60, false);  // Byte 60 = HW 31,32
+            offset = view.getFloat32(64, false); // Byte 64 = HW 33,34
+            if (!scale || isNaN(scale) || scale === 0) scale = 1.0;
+            if (isNaN(offset)) offset = 0.0;
+        }
+    } catch (e) {}
+
     // Identify product type for selective filtering
     const prod = (stationMeta?.product || 'N0B').toUpperCase();
     const isReflectivity = prod === 'N0B' || prod === 'N0Q' || prod === 'REF';
@@ -282,6 +294,8 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
         scanDate: scanDate,
+        scale: scale,
+        offset: offset,
         data: radarGrid
     };
 }
@@ -319,38 +333,38 @@ export function sampleRadarSweep(lng, lat, sweep) {
 /**
  * 🌟 Converts raw 8-bit radar gate byte to human-readable physical meteorological quantity
  */
-export function formatRadarValue(rawByte, productCode) {
+export function formatRadarValue(rawByte, productCode, scale = 1.0, offset = 0.0) {
     if (rawByte === undefined || rawByte === null || rawByte === 0) return null;
 
     const p = (productCode || 'N0B').toUpperCase();
 
-    // 1. Super-Res Velocity (N0U / N0G)
+    // RF is hardcoded to byte 1 for Velocity
+    if (rawByte === 1 && (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL'))) {
+        return 'RF';
+    }
+
+    // 1. Super-Res Velocity (N0U / N0G) -> Fixed standard conversion
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
-        if (rawByte === 1) return 'RF'; // Range Folded
         const mph = Math.round((rawByte - 129) * 1.11847);
         return (mph > 0 ? `+${mph}` : `${mph}`) + ' MPH';
     }
 
-    // 2. Correlation Coefficient (N0C / CC / RHO)
+    // 2. Correlation Coefficient (N0C / CC / RHO) -> Fixed standard conversion
     if (p === 'N0C' || p === 'CC' || p === 'RHO') {
         if (rawByte <= 1) return null;
         const cc = ((rawByte - 2) / 253.0) * 1.05;
         return cc.toFixed(2) + ' ρHV';
     }
 
-    // 3. 1-Hour & 3-Hour Precip Accumulation (DAA / N3P)
-    if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
-        const inches = ((rawByte - 1) / 254.0) * 10.0;
+    // 3. Accumulations (DAA, DTA, etc.) -> 🌟 DYNAMIC CONVERSION USING HEADER SCALE/OFFSET
+    if (['DAA', 'N1P', 'OHA', '1HR', 'N3P', 'DU3', '3HR', 'DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(p)) {
+        const s = (scale && !isNaN(scale) && scale !== 0) ? scale : 1.0;
+        const o = !isNaN(offset) ? offset : 0.0;
+        const inches = ((rawByte - o) / s) * 0.01;
         return inches.toFixed(2) + ' in';
     }
 
-    // 4. Storm Total Accumulation (DTA / STA / NTP)
-    if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
-        const inches = ((rawByte - 1) / 254.0) * 18.0;
-        return inches.toFixed(2) + ' in';
-    }
-
-    // 5. Default: Base Reflectivity (dBZ)
+    // 4. Default: Base Reflectivity (dBZ) -> Fixed standard conversion
     const dbz = Math.round((rawByte - 2) * 0.5 - 32.0);
     return `${dbz} dBZ`;
 }
