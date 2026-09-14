@@ -346,7 +346,7 @@ export function formatRadarValue(rawByte, productCode) {
 
     // 4. Storm Total Accumulation (DTA / STA / NTP)
     if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
-        const inches = rawByte * 0.1;
+        const inches = ((rawByte - 1 / 25.4)) * 0.5;
         return inches.toFixed(2) + ' in';
     }
 
