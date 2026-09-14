@@ -125,15 +125,18 @@ function decompressLevel3Payload(arrayBuffer) {
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
     
+    // 🌟 Extract Exact Radar Scan Time from the RAW Buffer
     let scanDate = extractScanDate(rawBuffer);
     
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
+    // Fallback: If not found in raw, search the decompressed payload
     if (!scanDate) {
         scanDate = extractScanDate(dataBytes.buffer) || new Date(); 
     }
 
+    // Identify product type for selective filtering
     const prod = (stationMeta?.product || 'N0B').toUpperCase();
     const isReflectivity = prod === 'N0B' || prod === 'N0Q' || prod === 'REF';
 
@@ -214,6 +217,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         const targetOffset = rayIndex * numBins;
 
         if (packetCode === 0xAF1F) {
+            // === 4-Bit Run-Length Encoded Nibbles ===
             let binIdx = 0;
             const rleBytesCount = (numUnits * 2) - 6;
             for (let b = 0; b < rleBytesCount && pos < dataBytes.length; b++) {
@@ -229,13 +233,16 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
                 }
             }
         } else {
+            // === 8-Bit Digital Raw Radial Array ===
             const copyLength = Math.min(numUnits, numBins);
             const rawSlice = dataBytes.subarray(pos, pos + copyLength);
             for (let k = 0; k < copyLength; k++) {
                 const val = rawSlice[k];
                 if (isReflectivity) {
+                    // Filter out clear-air ground clutter below 15 dBZ (byte 75 in 8-bit space)
                     radarGrid[targetOffset + k] = val < 75 ? 0 : val;
                 } else {
+                    // Velocity & Accumulation: keep all valid bytes (0 = no signal, 1 = RF)
                     radarGrid[targetOffset + k] = val;
                 }
             }
@@ -244,6 +251,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
 
         filledRays[rayIndex] = 1;
 
+        // Duplicate 360 radials (1.0° beams) into adjacent 0.5° slots for smooth circle
         if (numRadialsInFile <= 360) {
             const nextSlot = (rayIndex + 1) % TARGET_RADIALS;
             radarGrid.set(radarGrid.subarray(targetOffset, targetOffset + numBins), nextSlot * numBins);
@@ -251,6 +259,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         }
     }
 
+    // 4. Fill Missing Rays by Interpolating Adjacent Neighbors
     for (let i = 0; i < TARGET_RADIALS; i++) {
         if (!filledRays[i]) {
             const prev = (i - 1 + TARGET_RADIALS) % TARGET_RADIALS;
@@ -277,6 +286,9 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     };
 }
 
+/**
+ * 🌟 Samples raw byte from single-site radial memory at any geographic (lng, lat)
+ */
 export function sampleRadarSweep(lng, lat, sweep) {
     if (!sweep || !sweep.data || !sweep.lat || !sweep.lon) return null;
 
@@ -304,34 +316,41 @@ export function sampleRadarSweep(lng, lat, sweep) {
     return sweep.data[rayIndex * sweep.numBins + binIndex];
 }
 
+/**
+ * 🌟 Converts raw 8-bit radar gate byte to human-readable physical meteorological quantity
+ */
 export function formatRadarValue(rawByte, productCode) {
     if (rawByte === undefined || rawByte === null || rawByte === 0) return null;
 
     const p = (productCode || 'N0B').toUpperCase();
 
-    if (rawByte === 1 && (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL'))) {
-        return 'RF';
-    }
-
+    // 1. Super-Res Velocity (N0U / N0G)
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
+        if (rawByte === 1) return 'RF'; // Range Folded
         const mph = Math.round((rawByte - 129) * 1.11847);
         return (mph > 0 ? `+${mph}` : `${mph}`) + ' MPH';
     }
 
+    // 2. Correlation Coefficient (N0C / CC / RHO)
     if (p === 'N0C' || p === 'CC' || p === 'RHO') {
         if (rawByte <= 1) return null;
         const cc = ((rawByte - 2) / 253.0) * 1.05;
         return cc.toFixed(2) + ' ρHV';
     }
 
-    if (['DAA', 'N1P', 'OHA', '1HR', 'N3P', 'DU3', '3HR'].includes(p)) {
+    // 3. 1-Hour & 3-Hour Precip Accumulation (DAA / N3P)
+    if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
         const inches = ((rawByte - 1) / 254.0) * 10.0;
         return inches.toFixed(2) + ' in';
     }
 
-    if (['DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(p)) {
+    // 4. Storm Total Accumulation (DTA / STA / NTP)
+    if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
         const inches = ((rawByte - 1) / 254.0) * 18.0;
         return inches.toFixed(2) + ' in';
     }
 
-    const dbz = Math.round((rawByte -
+    // 5. Default: Base Reflectivity (dBZ)
+    const dbz = Math.round((rawByte - 2) * 0.5 - 32.0);
+    return `${dbz} dBZ`;
+}
