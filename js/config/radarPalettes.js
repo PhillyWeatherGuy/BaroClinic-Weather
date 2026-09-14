@@ -141,33 +141,6 @@ export const NWS_CLASSIC_PALETTE_256 = generate256RadarPalette(NWS_CLASSIC_STOPS
  * 2. SUPER-RES VELOCITY PALETTE (MPH)
  * ============================================================================
  */
-
-export const VELOCITY_RAW_PALETTE_STRING = `
-units: MPH
-step: 10
-product: BV
-Scale:   2.23694 
-color: 0 130 106 120 122 48 57
-color: 10 105 0 0 242 1 6 
-color: 40 249 58 84 255 142 212
-color: 55 255 157 206 255 221 176
-color: 60 255 230 169 255 151 86
-color: 80 254 137 80 
-color: 120 97 6 2 
-color: 140 60 0 0
-color: 200 45 0 0
-color: -10 72 112 71 106 125 105
-color: -40 10 248 35 15 99 20
-color: -50 180 240 243 33 253 50
-color: -70  55 226 229  172 239 242
-color: -90 25 1 142 47 215 225
-color: -100 105 2 142 32 1 141 
-color: -120 250 4 130 114 3 141
-color: -140 255 20 180
-color: -200 255 220 220
-RF: 123 0 200
-`;
-
 export const VELOCITY_STOPS = [
     { val: -200.0, r: 255, g: 220, b: 220 },
     { val: -140.0, r: 255, g: 20,  b: 180 },
@@ -270,27 +243,17 @@ export const ACCUM_STORM_TOTAL_LEVELS = [
     17.00, 17.50, 18.00
 ];
 
-/**
- * 🌟 Dynamically generates a 256-color palette based on the file's internal scale and offset
- */
-export function generateDynamicAccumPalette(scale, offset, isStormTotal = false) {
+export function generate256AccumPalette(levels, hexColors, maxInches) {
     const palette = [];
     palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 0 = transparent
     
-    const levels = isStormTotal ? ACCUM_STORM_TOTAL_LEVELS : ACCUM_1H_3H_LEVELS;
-    
-    // Fallback to 100.0 if missing (typical for DAA/DPA)
-    const s = (scale && !isNaN(scale) && scale !== 0) ? scale : 100.0;
-    const o = (!isNaN(offset)) ? offset : 0.0;
-
     for (let i = 1; i < 256; i++) {
-        // NWS Formula: Value = (Byte - Offset) / Scale
-        const valInches = (i - o) / s;
+        const valInches = ((i - 1) / 254.0) * maxInches;
         
-        let colorHex = ACCUM_HEX_COLORS[0];
+        let colorHex = hexColors[0];
         for (let k = 0; k < levels.length; k++) {
             if (valInches >= levels[k]) {
-                colorHex = ACCUM_HEX_COLORS[k];
+                colorHex = hexColors[k];
             }
         }
 
@@ -304,6 +267,9 @@ export function generateDynamicAccumPalette(scale, offset, isStormTotal = false)
     }
     return palette;
 }
+
+export const ACCUM_1H_3H_PALETTE_256 = generate256AccumPalette(ACCUM_1H_3H_LEVELS, ACCUM_HEX_COLORS, 10.0);
+export const ACCUM_STORM_TOTAL_PALETTE_256 = generate256AccumPalette(ACCUM_STORM_TOTAL_LEVELS, ACCUM_HEX_COLORS, 18.0);
 
 /**
  * ============================================================================
@@ -362,7 +328,7 @@ export const CC_PALETTE_256 = generate256CCPalette();
  * 5. DYNAMIC PALETTE SELECTOR BY PRODUCT CODE
  * ============================================================================
  */
-export function getRadarPalette(productCode, scale = 1.0, offset = 0.0) {
+export function getRadarPalette(productCode) {
     const p = (productCode || '').toUpperCase();
 
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
@@ -373,14 +339,12 @@ export function getRadarPalette(productCode, scale = 1.0, offset = 0.0) {
         return CC_PALETTE_256;
     }
 
-    // 🌟 1-Hour & 3-Hour Dynamic Scale Generation
     if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
-        return generateDynamicAccumPalette(scale, offset, false);
+        return ACCUM_1H_3H_PALETTE_256;
     }
 
-    // 🌟 Storm Total Dynamic Scale Generation
     if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
-        return generateDynamicAccumPalette(scale, offset, true);
+        return ACCUM_STORM_TOTAL_PALETTE_256;
     }
 
     return WXTOOLS_PALETTE_256;
