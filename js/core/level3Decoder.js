@@ -285,3 +285,72 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         data: radarGrid
     };
 }
+
+/**
+ * 🌟 Samples raw byte from single-site radial memory at any geographic (lng, lat)
+ */
+export function sampleRadarSweep(lng, lat, sweep) {
+    if (!sweep || !sweep.data || !sweep.lat || !sweep.lon) return null;
+
+    const EARTH_RADIUS = 6371000.0;
+    const dLngRad = (lng - sweep.lon) * (Math.PI / 180.0);
+    const dLatRad = (lat - sweep.lat) * (Math.PI / 180.0);
+    const avgLatRad = ((lat + sweep.lat) * 0.5) * (Math.PI / 180.0);
+
+    const dx = dLngRad * EARTH_RADIUS * Math.cos(avgLatRad);
+    const dy = dLatRad * EARTH_RADIUS;
+    const r = Math.hypot(dx, dy);
+
+    if (r > sweep.maxRangeMeters || r < 1000.0) return null;
+
+    let azimuthRad = Math.atan2(dx, dy);
+    if (azimuthRad < 0.0) azimuthRad += Math.PI * 2;
+
+    const normAzimuth = azimuthRad / (Math.PI * 2);
+    const rayIndex = Math.floor(normAzimuth * sweep.numRadials) % sweep.numRadials;
+    const normRange = r / sweep.maxRangeMeters;
+    const binIndex = Math.floor(normRange * sweep.numBins);
+
+    if (binIndex < 0 || binIndex >= sweep.numBins) return null;
+
+    return sweep.data[rayIndex * sweep.numBins + binIndex];
+}
+
+/**
+ * 🌟 Converts raw 8-bit radar gate byte to human-readable physical meteorological quantity
+ */
+export function formatRadarValue(rawByte, productCode) {
+    if (rawByte === undefined || rawByte === null || rawByte === 0) return null;
+
+    const p = (productCode || 'N0B').toUpperCase();
+
+    // 1. Super-Res Velocity (N0U / N0G)
+    if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
+        if (rawByte === 1) return 'RF'; // Range Folded
+        const mph = Math.round((rawByte - 129) * 1.11847);
+        return (mph > 0 ? `+${mph}` : `${mph}`) + ' MPH';
+    }
+
+    // 2. Correlation Coefficient (N0C / CC / RHO)
+    if (p === 'N0C' || p === 'CC' || p === 'RHO') {
+        if (rawByte <= 1) return null;
+        const cc = ((rawByte - 2) / 253.0) * 1.05;
+        return cc.toFixed(2) + ' ρHV';
+    }
+
+    // 3. 1-Hour & 3-Hour Precip Accumulation (DAA / N3P)
+    if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
+        const inches = ((rawByte - 1) / 254.0) * 10.0;
+        return inches.toFixed(2) + ' in';
+    }
+
+    // 4. Storm Total Accumulation (DTA / STA / NTP)
+    if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
+        const inches = ((rawByte - 1) / 254.0) * 18.0;
+        return inches.toFixed(2) + ' in';
+    }
+
+    // 5. Default: Base Reflectivity (dBZ)
+    const dbz = Math.round((rawByte - 2) * 0.5 - 32.0);
+    return `${dbz} dBZ`;
+}
