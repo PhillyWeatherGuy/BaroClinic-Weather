@@ -3,6 +3,11 @@ import { unzlibSync, inflateSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
 /**
+ * 🌟 Cache of dynamic calibration factors per product from the decoded PDB
+ */
+const PRODUCT_CALIBRATION = {};
+
+/**
  * 🌟 NWS 16-Level Reflectivity Threshold Map (dBZ -> 0..255 Palette Index)
  */
 const LEVEL_16_TO_BYTE = new Uint8Array([
@@ -25,72 +30,55 @@ const LEVEL_16_TO_BYTE = new Uint8Array([
 ]);
 
 /**
- * 🛰️ Parses NEXRAD Level 3 Message Header & Product Description Block (PDB)
- * Extracts scan date, radar coords, and dynamic float32 Scale/Offset factors.
+ * 🛰️ Helper to Extract Exact Scan Date and Dynamic Scale/Offset from NEXRAD Message Header
+ * Scans for Julian Days (since Jan 1, 1970) and Seconds past midnight UTC
  */
-function parseLevel3Header(data) {
-    if (!data) return null;
+function extractScanMeta(buffer) {
     try {
-        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        const searchLen = Math.min(bytes.byteLength, 1024);
-
-        for (let i = 0; i <= searchLen - 68; i++) {
+        const view = buffer instanceof Uint8Array
+            ? new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+            : new DataView(buffer);
+        const searchLen = Math.min(view.byteLength, 512); // Header is always in the first ~100 bytes
+        
+        for (let i = 0; i < searchLen - 8; i++) {
             const msgCode = view.getUint16(i, false);
-
-            // Valid NEXRAD Level 3 product codes (e.g., 94, 138, 153, 170, 172)
-            if (msgCode > 0 && msgCode < 300) {
+            
+            // Common Product Codes are < 200 (e.g., 19 for Base Refl, 153 for Super-Res)
+            if (msgCode > 0 && msgCode < 200) {
                 const julianDays = view.getUint16(i + 2, false);
                 const secondsSinceMidnight = view.getUint32(i + 4, false);
-                const divider = view.getInt16(i + 18, false);
-                const pdbCode = view.getInt16(i + 30, false);
-
-                // Strict validation: Julian days, 24h seconds, PDB divider (-1), matching product codes
-                if (
-                    julianDays >= 10000 && julianDays < 40000 &&
-                    secondsSinceMidnight <= 86400 &&
-                    divider === -1 &&
-                    pdbCode === msgCode
-                ) {
+                
+                // Sanity check: Julian days > 19000 (after 2022) and seconds < 86400 (24h)
+                if (julianDays > 19000 && julianDays < 35000 && secondsSinceMidnight < 86400) {
                     const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
                     const scanDate = new Date(unixMs);
-                    const lat = view.getInt32(i + 20, false) / 1000.0;
-                    const lon = view.getInt32(i + 24, false) / 1000.0;
-                    const heightFeet = view.getInt16(i + 28, false);
 
                     let scale = null;
                     let offset = null;
 
-                    // Dual-Pol products (DAA: 170, DTA: 172, DU3: 173, DOD: 174, DSD: 175, DPR: 176, ZDR: 159, CC: 161, KDP: 163)
-                    // Halfwords 31-32 (bytes 60..63) = Scale (Float32)
-                    // Halfwords 33-34 (bytes 64..67) = Offset (Float32)
-                    if ([159, 161, 163, 170, 172, 173, 174, 175, 176].includes(msgCode)) {
-                        scale = view.getFloat32(i + 60, false);
-                        offset = view.getFloat32(i + 64, false);
-                    } else if (msgCode === 138) {
-                        // DSP: Legacy Digital Storm Total
-                        const hw31 = view.getInt16(i + 60, false);
-                        const hw32 = view.getInt16(i + 62, false);
-                        offset = hw31 / 100.0;
-                        scale = hw32 > 0 ? (100.0 / hw32) : null;
+                    // NOAA ICD 2620001: Halfwords 31-32 (i + 60) = Scale, Halfwords 33-34 (i + 64) = Offset
+                    if (i + 68 <= view.byteLength) {
+                        const s = view.getFloat32(i + 60, false);
+                        const o = view.getFloat32(i + 64, false);
+                        if (Number.isFinite(s) && s > 0) {
+                            scale = s;
+                            offset = Number.isFinite(o) ? o : 0.0;
+                        }
                     }
 
-                    return {
-                        msgCode,
-                        scanDate,
-                        lat,
-                        lon,
-                        heightFeet,
-                        scale: Number.isFinite(scale) ? scale : null,
-                        offset: Number.isFinite(offset) ? offset : null
-                    };
+                    return { scanDate, scale, offset };
                 }
             }
         }
     } catch (e) {
-        console.warn("Could not parse Level 3 message header", e);
+        console.warn("Could not parse Level 3 message header time", e);
     }
     return null;
+}
+
+function extractScanDate(buffer) {
+    const meta = extractScanMeta(buffer);
+    return meta ? meta.scanDate : null;
 }
 
 /**
@@ -163,17 +151,28 @@ function decompressLevel3Payload(arrayBuffer) {
  */
 export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const startTime = performance.now();
-
+    
+    // 🌟 Extract Exact Radar Scan Time and dynamic scale/offset from the RAW Buffer
+    let meta = extractScanMeta(rawBuffer);
+    
     const dataBytes = decompressLevel3Payload(rawBuffer);
     const view = new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength);
 
-    // 🌟 Extract Real Header, Timestamp, Coords, and Dynamic Scaling Factors
-    const headerInfo = parseLevel3Header(rawBuffer) || parseLevel3Header(dataBytes);
-    const scanDate = headerInfo?.scanDate || new Date();
+    // Fallback: If not found in raw, search the decompressed payload
+    if (!meta) {
+        meta = extractScanMeta(dataBytes.buffer);
+    }
+    const scanDate = meta?.scanDate || new Date();
+    const scale = meta?.scale ?? null;
+    const offset = meta?.offset ?? null;
 
     // Identify product type for selective filtering
     const prod = (stationMeta?.product || 'N0B').toUpperCase();
     const isReflectivity = prod === 'N0B' || prod === 'N0Q' || prod === 'REF';
+
+    if (scale !== null) {
+        PRODUCT_CALIBRATION[prod] = { scale, offset };
+    }
 
     // 1. Locate Radial Data Packet Header
     let packetPos = -1;
@@ -188,14 +187,14 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     if (packetPos === -1) {
-        for (let offset = 0; offset <= dataBytes.length - 16; offset++) {
-            const code = view.getUint16(offset, false);
+        for (let offsetPos = 0; offsetPos <= dataBytes.length - 16; offsetPos++) {
+            const code = view.getUint16(offsetPos, false);
             if (code === 0xAF1F || code === 0x0010 || code === 16 || code === 0x001C || code === 28) {
-                const numBins = view.getUint16(offset + 4, false);
-                const numRadials = view.getUint16(offset + 12, false);
+                const numBins = view.getUint16(offsetPos + 4, false);
+                const numRadials = view.getUint16(offsetPos + 12, false);
 
                 if (numBins >= 20 && numBins <= 4000 && numRadials >= 50 && numRadials <= 800) {
-                    packetPos = offset;
+                    packetPos = offsetPos;
                     packetCode = code;
                     break;
                 }
@@ -277,7 +276,7 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
                     // Filter out clear-air ground clutter below 15 dBZ (byte 75 in 8-bit space)
                     radarGrid[targetOffset + k] = val < 75 ? 0 : val;
                 } else {
-                    // Velocity & Accumulation: keep all valid bytes (0 = no signal, 1 = RF / Flag)
+                    // Velocity & Accumulation: keep all valid bytes (0 = no signal, 1 = RF)
                     radarGrid[targetOffset + k] = val;
                 }
             }
@@ -306,19 +305,19 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     }
 
     const elapsed = (performance.now() - startTime).toFixed(1);
-    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [${prod} - 0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates (Scale: ${headerInfo?.scale}, Offset: ${headerInfo?.offset}) in ${elapsed}ms`);
+    console.log(`⚡ [Decoder] Unpacked Level 3 (${stationMeta?.id || 'RADAR'} [${prod} - 0x${packetCode.toString(16).toUpperCase()}]): ${numRadialsInFile} radials × ${numBins} gates (Range: ${maxRangeMeters / 1000}km) in ${elapsed}ms`);
 
     return {
         stationId: stationMeta?.id || "RADAR",
         product: prod,
-        lat: stationMeta?.lat || headerInfo?.lat || 0.0,
-        lon: stationMeta?.lon || headerInfo?.lon || 0.0,
+        lat: stationMeta?.lat || 0.0,
+        lon: stationMeta?.lon || 0.0,
         numRadials: TARGET_RADIALS,
         numBins: numBins,
         maxRangeMeters: maxRangeMeters,
         scanDate: scanDate,
-        scale: headerInfo?.scale ?? null,
-        offset: headerInfo?.offset ?? null,
+        scale: scale,
+        offset: offset,
         data: radarGrid
     };
 }
@@ -354,10 +353,7 @@ export function sampleRadarSweep(lng, lat, sweep) {
 }
 
 /**
- * 🌟 Converts raw 8-bit radar gate byte to human-readable physical meteorological quantity.
- * Supports passing either:
- *   formatRadarValue(rawByte, sweep)
- *   formatRadarValue(rawByte, productCode, scale, offset)
+ * 🌟 Converts raw 8-bit radar gate byte to human-readable physical meteorological quantity
  */
 export function formatRadarValue(rawByte, productOrSweep, optScale = null, optOffset = null) {
     if (rawByte === undefined || rawByte === null || rawByte === 0) return null;
@@ -374,6 +370,12 @@ export function formatRadarValue(rawByte, productOrSweep, optScale = null, optOf
 
     const p = (productCode || 'N0B').toUpperCase();
 
+    // Use cached calibration from decoded file if not passed directly
+    if ((scale === null || scale === undefined) && PRODUCT_CALIBRATION[p]) {
+        scale = PRODUCT_CALIBRATION[p].scale;
+        offset = PRODUCT_CALIBRATION[p].offset;
+    }
+
     // 1. Super-Res Velocity (N0U / N0G)
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
         if (rawByte === 1) return 'RF'; // Range Folded
@@ -384,32 +386,31 @@ export function formatRadarValue(rawByte, productOrSweep, optScale = null, optOf
     // 2. Correlation Coefficient (N0C / CC / RHO)
     if (p === 'N0C' || p === 'CC' || p === 'RHO') {
         if (rawByte <= 1) return null;
-        if (scale !== null && scale > 0) {
-            const cc = (rawByte - (offset ?? 0)) / scale;
-            return cc.toFixed(3) + ' ρHV';
-        }
         const cc = ((rawByte - 2) / 253.0) * 1.05;
         return cc.toFixed(2) + ' ρHV';
     }
 
-    // 3. Precipitation Accumulations (DAA, DTA, DU3/DUA, DSP)
-    const isPrecip = ['DAA', 'DTA', 'DSP', 'DU3', 'DUA', 'OHA', 'STA', 'TOTAL', '1HR', '3HR'].includes(p);
-    if (isPrecip) {
-        // Must have legitimate scaling factor from the PDB
-        if (scale === null || scale === undefined || scale <= 0) {
-            console.warn(`[formatRadarValue] Missing genuine PDB scale factor for ${p}. Value cannot be verified.`);
-            return null;
-        }
-
-        // NOAA ROC Equation: F = (N - OFFSET) / SCALE [F is in units of 0.01 inches]
-        const hundredthsOfInches = (rawByte - (offset ?? 0)) / scale;
-        const inches = hundredthsOfInches * 0.01;
-
+    // 3. 1-Hour & 3-Hour Precip Accumulation (DAA / N3P)
+    if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
+        if (rawByte <= 0) return null;
+        const inches = (scale && scale > 0)
+            ? ((rawByte - (offset || 0)) / scale) * 0.01
+            : (rawByte - 1) * 0.01;
         if (inches <= 0) return null;
-        return `${inches.toFixed(2)} in`;
+        return inches.toFixed(2) + ' in';
     }
 
-    // 4. Default: Base Reflectivity (dBZ)
+    // 4. Storm Total Accumulation (DTA / DSP / NTP)
+    if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
+        if (rawByte <= 0) return null;
+        const inches = (scale && scale > 0)
+            ? ((rawByte - (offset || 0)) / scale) * 0.01
+            : (rawByte - 1) * 0.01;
+        if (inches <= 0) return null;
+        return inches.toFixed(2) + ' in';
+    }
+
+    // 5. Default: Base Reflectivity (dBZ)
     const dbz = Math.round((rawByte - 2) * 0.5 - 32.0);
     return `${dbz} dBZ`;
 }
