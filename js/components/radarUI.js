@@ -348,28 +348,6 @@ function ensureArchiveStyles() {
             padding: 4px 6px;
             text-align: center;
         }
-
-        /* 🌟 Floating Radar Gate Value Cursor Badge */
-        .radar-cursor-badge {
-            position: absolute;
-            pointer-events: none;
-            z-index: 90;
-            background: rgba(11, 15, 25, 0.88);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #38bdf8;
-            font-family: 'Rajdhani', sans-serif;
-            font-weight: 700;
-            font-size: 13px;
-            letter-spacing: 0.5px;
-            padding: 3px 8px;
-            border-radius: 6px;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
-            white-space: nowrap;
-            display: none;
-            transform: translate3d(0, 0, 0);
-        }
     `;
     document.head.appendChild(style);
 }
@@ -394,6 +372,49 @@ export async function initRadarMode(mapInstance) {
     initRadarParamDropdown();
     setupStationLayers(mapInstance);
     setupHoverInspection(mapInstance);
+}
+
+/**
+ * 🌟 1b. Mouse Hover Gate Inspection (Shows dBZ, MPH, CC, or in under cursor)
+ */
+function setupHoverInspection(mapInstance) {
+    if (!mapInstance) return;
+
+    if (!radarCursorBadge) {
+        radarCursorBadge = document.createElement('div');
+        radarCursorBadge.className = 'radar-cursor-badge';
+        mapInstance.getContainer().appendChild(radarCursorBadge);
+    }
+
+    mapInstance.on('mousemove', (e) => {
+        if (activeRadarViewType !== 'local' || !activeStationId) {
+            if (radarCursorBadge) radarCursorBadge.style.display = 'none';
+            return;
+        }
+
+        const currentFrame = singleSiteFrames[currentVisibleIndex];
+        if (!currentFrame || !currentFrame.sweepData) {
+            if (radarCursorBadge) radarCursorBadge.style.display = 'none';
+            return;
+        }
+
+        const rawByte = sampleRadarSweep(e.lngLat.lng, e.lngLat.lat, currentFrame.sweepData);
+        const formatted = formatRadarValue(rawByte, currentFrame.sweepData.product);
+
+        if (!formatted) {
+            if (radarCursorBadge) radarCursorBadge.style.display = 'none';
+            return;
+        }
+
+        radarCursorBadge.textContent = formatted;
+        radarCursorBadge.style.left = `${e.point.x + 14}px`;
+        radarCursorBadge.style.top = `${e.point.y + 14}px`;
+        radarCursorBadge.style.display = 'block';
+    });
+
+    mapInstance.on('mouseout', () => {
+        if (radarCursorBadge) radarCursorBadge.style.display = 'none';
+    });
 }
 
 /**
@@ -1132,6 +1153,7 @@ export function setRadarViewType(type) {
         }
         activeStationId = null;
         stopLocalRadarAutoRefresh();
+        if (radarCursorBadge) radarCursorBadge.style.display = 'none';
 
         // Restore composite layers visibility
         if (radarState.frames) {
@@ -1225,7 +1247,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
-                if (radarMapInstance.getLayer(layerId)) {
+                if (radarMapInstance && radarMapInstance.getLayer(layerId)) {
                     radarMapInstance.setLayoutProperty(layerId, 'visibility', 'none');
                 }
             });
@@ -1522,6 +1544,11 @@ export function destroyRadarMode(mapInstance) {
 
     if (stationHoverPopup) {
         stationHoverPopup.remove();
+    }
+
+    if (radarCursorBadge) {
+        radarCursorBadge.remove();
+        radarCursorBadge = null;
     }
 
     if (singleSiteRadarLayer) {
