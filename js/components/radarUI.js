@@ -2,7 +2,7 @@
 import { radarState, buildRadarTimeline, purgeRadarMemory } from '../core/radarLoader.js';
 import { setBasemapLabelsVisibility } from '../layers/cityOverlay.js';
 import { getRadarStationsGeoJson } from '../config/radarStations.js';
-import { decodeLevel3 } from '../core/level3Decoder.js';
+import { decodeLevel3, sampleRadarSweep, formatRadarValue } from '../core/level3Decoder.js';
 import { createSingleSiteRadarLayer } from '../shaders/singleSiteRadarShader.js';
 import { stateManager } from '../core/stateManager.js';
 import { getRadarPalette } from '../config/radarPalettes.js';
@@ -34,9 +34,10 @@ let selectedDayForArchive = null;
 let selectedDurationHours = 1; // 1, 2, 3, 6, 12, 24
 let calendarViewMode = 'days'; // 'days' | 'months'
 
-// 🌟 Top Radar Dropdown Elements & Station Popup
+// 🌟 Top Radar Dropdown Elements, Tooltips & Station Popup
 let radarModeMenuEl = null;
 let radarParamMenuEl = null;
+let radarCursorBadge = null;
 let stationHoverPopup = null;
 
 const RADAR_PRODUCTS = [
@@ -347,6 +348,28 @@ function ensureArchiveStyles() {
             padding: 4px 6px;
             text-align: center;
         }
+
+        /* 🌟 Floating Radar Gate Value Cursor Badge */
+        .radar-cursor-badge {
+            position: absolute;
+            pointer-events: none;
+            z-index: 90;
+            background: rgba(11, 15, 25, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #38bdf8;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+            white-space: nowrap;
+            display: none;
+            transform: translate3d(0, 0, 0);
+        }
     `;
     document.head.appendChild(style);
 }
@@ -370,6 +393,7 @@ export async function initRadarMode(mapInstance) {
     initRadarModeDropdown();
     initRadarParamDropdown();
     setupStationLayers(mapInstance);
+    setupHoverInspection(mapInstance);
 }
 
 /**
