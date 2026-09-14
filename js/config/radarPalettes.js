@@ -169,75 +169,41 @@ RF: 123 0 200
 `;
 
 export const VELOCITY_STOPS = [
-    // Extreme Inbound (-200 to -140 MPH: Tornado Core)
     { val: -200.0, r: 255, g: 220, b: 220 },
     { val: -140.0, r: 255, g: 20,  b: 180 },
-
-    // Violent Inbound (-140 to -120 MPH: Hot Pink to Magenta)
     { val: -139.9, r: 114, g: 3,   b: 141 },
     { val: -120.0, r: 250, g: 4,   b: 130 },
-
-    // Severe Inbound (-120 to -100 MPH: Deep Purple)
     { val: -119.9, r: 32,  g: 1,   b: 141 },
     { val: -100.0, r: 105, g: 2,   b: 142 },
-
-    // Intense Inbound (-100 to -90 MPH: Indigo to Blue)
     { val: -99.9,  r: 47,  g: 215, b: 225 },
     { val: -90.0,  r: 25,  g: 1,   b: 142 },
-
-    // High Inbound (-90 to -70 MPH: Deep Blue to Ice Blue/Cyan)
     { val: -89.9,  r: 172, g: 239, b: 242 },
     { val: -70.0,  r: 55,  g: 226, b: 229 },
-
-    // Strong Inbound (-70 to -50 MPH: Electric Cyan to Neon Lime)
     { val: -69.9,  r: 172, g: 239, b: 242 },
     { val: -50.0,  r: 180, g: 240, b: 243 },
-
-    // Moderate/Strong Inbound (-50 to -40 MPH: Neon Lime to Vivid Green)
     { val: -49.9,  r: 33,  g: 253, b: 50  },
     { val: -40.0,  r: 10,  g: 248, b: 35  },
-
-    // 🌟 Standard Inbound Storm Winds (-40 to -10 MPH: Rich Vivid Doppler Green!)
     { val: -39.9,  r: 10,  g: 248, b: 35  },
     { val: -10.0,  r: 15,  g: 99,  b: 20  },
-
-    // 🌟 Calm / Dead-Zone Inbound (-10 to 0 MPH: Neutral Gray-Green near 0)
     { val: -9.9,   r: 106, g: 125, b: 105 },
     { val: -0.1,   r: 72,  g: 112, b: 71  },
-
-    // 🌟 Zero Velocity Line (0 MPH: Neutral Gray)
     { val: 0.0,    r: 130, g: 106, b: 120 },
-
-    // 🌟 Calm / Dead-Zone Outbound (0 to +10 MPH: Neutral Gray to Faint Brown/Red)
     { val: 0.1,    r: 130, g: 106, b: 120 },
     { val: 9.9,    r: 122, g: 48,  b: 57  },
-
-    // 🌟 Standard Outbound Storm Winds (+10 to +40 MPH: Dark Red to Crimson Red)
     { val: 10.0,   r: 105, g: 0,   b: 0   },
     { val: 39.9,   r: 242, g: 1,   b: 6   },
-
-    // Strong Outbound (+40 to +55 MPH: Crimson to Salmon/Pink)
     { val: 40.0,   r: 249, g: 58,  b: 84  },
     { val: 54.9,   r: 255, g: 142, b: 212 },
-
-    // Severe Outbound (+55 to +60 MPH: Pink to Cream/Orange)
     { val: 55.0,   r: 255, g: 157, b: 206 },
     { val: 59.9,   r: 255, g: 221, b: 176 },
-
-    // Intense Outbound (+60 to +80 MPH: Yellow to Orange)
     { val: 60.0,   r: 255, g: 230, b: 169 },
     { val: 79.9,   r: 255, g: 151, b: 86  },
-
-    // High Outbound (+80 to +120 MPH: Orange to Maroon)
     { val: 80.0,   r: 254, g: 137, b: 80  },
-    { val: 119.9,  r: 97,  g: 6,   b: 2   },
-
-    // Violent Outbound (+120 to +140 MPH: Maroon to Deep Red)
+    { val: 119.9,  r: 254, g: 137, b: 80  },
     { val: 120.0,  r: 97,  g: 6,   b: 2   },
-    { val: 139.9,  r: 60,  g: 0,   b: 0   },
-
-    // Catastrophic Outbound (+140 to +200 MPH: Deep Red to Dark)
+    { val: 139.9,  r: 97,  g: 6,   b: 2   },
     { val: 140.0,  r: 60,  g: 0,   b: 0   },
+    { val: 199.9,  r: 60,  g: 0,   b: 0   },
     { val: 200.0,  r: 45,  g: 0,   b: 0   }
 ];
 
@@ -245,31 +211,15 @@ export const VELOCITY_RF_COLOR = { r: 123, g: 0, b: 200, a: 255 };
 
 export function generate256VelocityPalette(stops = VELOCITY_STOPS, rfColor = VELOCITY_RF_COLOR) {
     const palette = [];
+    palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 0: Transparent (Clear air)
+    palette.push(rfColor); // Byte 1: Range Folded
 
-    // Byte 0: Transparent (Clear air)
-    palette.push({ r: 0, g: 0, b: 0, a: 0 });
-
-    // Byte 1: Range Folded (RF Purple: 123, 0, 200)
-    palette.push(rfColor);
-
-    // Bytes 2..255: 0.5 m/s per count converted to MPH (1 m/s = 2.23694 MPH)
     for (let i = 2; i < 256; i++) {
         const mph = (i - 129) * 1.11847;
+        if (mph <= stops[0].val) { palette.push({ r: stops[0].r, g: stops[0].g, b: stops[0].b, a: 255 }); continue; }
+        if (mph >= stops[stops.length - 1].val) { const last = stops[stops.length - 1]; palette.push({ r: last.r, g: last.g, b: last.b, a: 255 }); continue; }
 
-        if (mph <= stops[0].val) {
-            palette.push({ r: stops[0].r, g: stops[0].b, a: 255 });
-            continue;
-        }
-
-        if (mph >= stops[stops.length - 1].val) {
-            const last = stops[stops.length - 1];
-            palette.push({ r: last.r, g: last.g, b: last.b, a: 255 });
-            continue;
-        }
-
-        let left = stops[0];
-        let right = stops[stops.length - 1];
-
+        let left = stops[0], right = stops[stops.length - 1];
         for (let j = 0; j < stops.length - 1; j++) {
             if (mph >= stops[j].val && mph <= stops[j + 1].val) {
                 left = stops[j];
@@ -277,10 +227,8 @@ export function generate256VelocityPalette(stops = VELOCITY_STOPS, rfColor = VEL
                 break;
             }
         }
-
         const span = right.val - left.val;
         const t = span > 0 ? (mph - left.val) / span : 0;
-
         palette.push({
             r: Math.round(left.r + t * (right.r - left.r)),
             g: Math.round(left.g + t * (right.g - left.g)),
@@ -288,10 +236,8 @@ export function generate256VelocityPalette(stops = VELOCITY_STOPS, rfColor = VEL
             a: 255
         });
     }
-
     return palette;
 }
-
 export const VELOCITY_PALETTE_256 = generate256VelocityPalette();
 
 /**
@@ -306,9 +252,8 @@ export const ACCUM_HEX_COLORS = [
     "#C67B30", "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841", "#8B7069", "#9D827B",
     "#B19E97", "#BEB5B4", "#A69EB5", "#877E9D", "#756A92", "#635785", "#594176", "#66136B", "#A223AA", "#B627BF",
     "#C038CA", "#C45BCD", "#C574CD"
-]; // Exactly 43 colors
+]; 
 
-// Exactly 43 steps from 0.01 to 10.00 inches
 export const ACCUM_1H_3H_LEVELS = [
     0.01, 0.02, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35,
     0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00, 1.15, 1.30, 1.45,
@@ -317,7 +262,6 @@ export const ACCUM_1H_3H_LEVELS = [
     9.00, 9.50, 10.00
 ];
 
-// Exactly 43 steps from 0.01 to 18.00 inches
 export const ACCUM_STORM_TOTAL_LEVELS = [
     0.01, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.60, 0.75,
     1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.50, 2.75, 3.00, 3.50,
@@ -326,17 +270,27 @@ export const ACCUM_STORM_TOTAL_LEVELS = [
     17.00, 17.50, 18.00
 ];
 
-function generate256AccumPalette(levels, hexColors, maxInches) {
+/**
+ * 🌟 Dynamically generates a 256-color palette based on the file's internal scale and offset
+ */
+export function generateDynamicAccumPalette(scale, offset, isStormTotal = false) {
     const palette = [];
     palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 0 = transparent
+    
+    const levels = isStormTotal ? ACCUM_STORM_TOTAL_LEVELS : ACCUM_1H_3H_LEVELS;
+    
+    // Fallback to 100.0 if missing (typical for DAA/DPA)
+    const s = (scale && !isNaN(scale) && scale !== 0) ? scale : 100.0;
+    const o = (!isNaN(offset)) ? offset : 0.0;
 
     for (let i = 1; i < 256; i++) {
-        const val = ((i - 1) / 254.0) * maxInches;
-
-        let colorHex = hexColors[0];
+        // NWS Formula: Value = (Byte - Offset) / Scale
+        const valInches = (i - o) / s;
+        
+        let colorHex = ACCUM_HEX_COLORS[0];
         for (let k = 0; k < levels.length; k++) {
-            if (val >= levels[k]) {
-                colorHex = hexColors[k];
+            if (valInches >= levels[k]) {
+                colorHex = ACCUM_HEX_COLORS[k];
             }
         }
 
@@ -348,19 +302,14 @@ function generate256AccumPalette(levels, hexColors, maxInches) {
             a: 255
         });
     }
-
     return palette;
 }
-
-export const ACCUM_1H_3H_PALETTE_256 = generate256AccumPalette(ACCUM_1H_3H_LEVELS, ACCUM_HEX_COLORS, 10.0);
-export const ACCUM_STORM_TOTAL_PALETTE_256 = generate256AccumPalette(ACCUM_STORM_TOTAL_LEVELS, ACCUM_HEX_COLORS, 18.0);
 
 /**
  * ============================================================================
  * 4. CORRELATION COEFFICIENT PALETTE (RHO)
  * ============================================================================
  */
-
 export const CC_STOPS = [
     { val: 0.00, r: 15,  g: 15,  b: 140 },
     { val: 0.45, r: 15,  g: 15,  b: 140 },
@@ -378,31 +327,15 @@ export const CC_STOPS = [
 
 export function generate256CCPalette(stops = CC_STOPS) {
     const palette = [];
+    palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 0: Transparent
+    palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 1: Reserved
 
-    // Byte 0: Transparent (no signal / clear air)
-    palette.push({ r: 0, g: 0, b: 0, a: 0 });
-
-    // Byte 1: Reserved / flag (Transparent)
-    palette.push({ r: 0, g: 0, b: 0, a: 0 });
-
-    // Bytes 2..255: Linear scale from 0.00 to 1.05
     for (let i = 2; i < 256; i++) {
         const cc = ((i - 2) / 253.0) * 1.05;
+        if (cc <= stops[0].val) { palette.push({ r: stops[0].r, g: stops[0].g, b: stops[0].b, a: 255 }); continue; }
+        if (cc >= stops[stops.length - 1].val) { const last = stops[stops.length - 1]; palette.push({ r: last.r, g: last.g, b: last.b, a: 255 }); continue; }
 
-        if (cc <= stops[0].val) {
-            palette.push({ r: stops[0].r, g: stops[0].g, b: stops[0].b, a: 255 });
-            continue;
-        }
-
-        if (cc >= stops[stops.length - 1].val) {
-            const last = stops[stops.length - 1];
-            palette.push({ r: last.r, g: last.g, b: last.b, a: 255 });
-            continue;
-        }
-
-        let left = stops[0];
-        let right = stops[stops.length - 1];
-
+        let left = stops[0], right = stops[stops.length - 1];
         for (let j = 0; j < stops.length - 1; j++) {
             if (cc >= stops[j].val && cc <= stops[j + 1].val) {
                 left = stops[j];
@@ -410,10 +343,8 @@ export function generate256CCPalette(stops = CC_STOPS) {
                 break;
             }
         }
-
         const span = right.val - left.val;
         const t = span > 0 ? (cc - left.val) / span : 0;
-
         palette.push({
             r: Math.round(left.r + t * (right.r - left.r)),
             g: Math.round(left.g + t * (right.g - left.g)),
@@ -421,7 +352,6 @@ export function generate256CCPalette(stops = CC_STOPS) {
             a: 255
         });
     }
-
     return palette;
 }
 
@@ -432,7 +362,7 @@ export const CC_PALETTE_256 = generate256CCPalette();
  * 5. DYNAMIC PALETTE SELECTOR BY PRODUCT CODE
  * ============================================================================
  */
-export function getRadarPalette(productCode) {
+export function getRadarPalette(productCode, scale = 1.0, offset = 0.0) {
     const p = (productCode || '').toUpperCase();
 
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
@@ -443,12 +373,14 @@ export function getRadarPalette(productCode) {
         return CC_PALETTE_256;
     }
 
+    // 🌟 1-Hour & 3-Hour Dynamic Scale Generation
     if (p === 'DAA' || p === 'N1P' || p === 'OHA' || p === '1HR' || p === 'N3P' || p === 'DU3' || p === '3HR') {
-        return ACCUM_1H_3H_PALETTE_256;
+        return generateDynamicAccumPalette(scale, offset, false);
     }
 
+    // 🌟 Storm Total Dynamic Scale Generation
     if (p === 'DTA' || p === 'DSP' || p === 'NTP' || p === 'STA' || p === 'TOTAL') {
-        return ACCUM_STORM_TOTAL_PALETTE_256;
+        return generateDynamicAccumPalette(scale, offset, true);
     }
 
     return WXTOOLS_PALETTE_256;
