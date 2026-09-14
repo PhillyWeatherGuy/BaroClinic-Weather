@@ -40,8 +40,9 @@ function extractHeaderInfo(buffer) {
         for (let i = 0; i < searchLen - 8; i++) {
             const msgCode = view.getUint16(i, false);
             
-            // Common Product Codes are < 200 (19=N0B, 154=N0U, 170=DAA, 171=DTA)
-            if (msgCode > 0 && msgCode < 200) {
+            // Only match known product codes to prevent reading garbage compressed data
+            // 19=N0B, 154=N0U, 159=N0C, 170=DAA, 171=DTA
+            if ([19, 154, 159, 170, 171, 78, 80, 138].includes(msgCode)) {
                 const julianDays = view.getUint16(i + 2, false);
                 const secondsSinceMidnight = view.getUint32(i + 4, false);
                 
@@ -51,16 +52,19 @@ function extractHeaderInfo(buffer) {
                     scanDate = new Date(unixMs);
                     
                     // Extract Scale (HW 31,32 -> bytes +60) and Offset (HW 33,34 -> bytes +64)
-                    if (i + 68 <= buffer.byteLength) {
-                        const parsedScale = view.getFloat32(i + 60, false);
-                        const parsedOffset = view.getFloat32(i + 64, false);
-                        
-                        // Prevent garbage Float32 reads by enforcing sane ranges
-                        if (!isNaN(parsedScale) && Math.abs(parsedScale) > 0.01 && Math.abs(parsedScale) < 10000) {
-                            scale = parsedScale;
-                        }
-                        if (!isNaN(parsedOffset) && Math.abs(parsedOffset) < 1000) {
-                            offset = parsedOffset;
+                    // ONLY for dual-pol accumulation products
+                    if (msgCode === 170 || msgCode === 171 || msgCode === 138) {
+                        if (i + 68 <= buffer.byteLength) {
+                            const parsedScale = view.getFloat32(i + 60, false);
+                            const parsedOffset = view.getFloat32(i + 64, false);
+                            
+                            // Prevent garbage Float32 reads by enforcing sane ranges
+                            if (!isNaN(parsedScale) && parsedScale >= 1.0 && parsedScale <= 1000.0) {
+                                scale = parsedScale;
+                            }
+                            if (!isNaN(parsedOffset) && parsedOffset >= -100.0 && parsedOffset <= 100.0) {
+                                offset = parsedOffset;
+                            }
                         }
                     }
                     break; // Found header, stop searching
@@ -161,11 +165,11 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     // Identify product type for selective filtering
     const prod = (stationMeta?.product || 'N0B').toUpperCase();
     const isReflectivity = prod === 'N0B' || prod === 'N0Q' || prod === 'REF';
+    const isStormTotal = ['DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(prod);
 
     // 🌟 Safety net for Accumulation Scale & Offset
     if (['DAA', 'N1P', 'OHA', '1HR', 'N3P', 'DU3', '3HR', 'DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(prod)) {
-        if (scale === null || isNaN(scale) || scale === 0) {
-            const isStormTotal = ['DTA', 'DSP', 'NTP', 'STA', 'TOTAL'].includes(prod);
+        if (scale === null || isNaN(scale) || scale < 1.0 || scale > 1000.0) {
             scale = isStormTotal ? 10.0 : 100.0; // NWS standard fallbacks
         }
         if (offset === null || isNaN(offset)) {
@@ -386,7 +390,7 @@ export function formatRadarValue(rawByte, productCode, scale = 1.0, offset = 0.0
         
         // Strictly enforce the safety fallback so tooltip math never explodes
         let s = scale;
-        if (s === undefined || s === null || isNaN(s) || s === 0 || Math.abs(s) > 100000) {
+        if (s === undefined || s === null || isNaN(s) || s === 0 || Math.abs(s) > 1000.0) {
             s = isStormTotal ? 10.0 : 100.0;
         }
         
