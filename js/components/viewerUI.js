@@ -194,7 +194,8 @@ export function initRadarBoxTool(map) {
                 radarLat: stMeta.lat,
                 radarLon: stMeta.lon,
                 bounds,
-                targetTiltIndex: stateManager.activeTiltIndex || 0
+                targetTiltIndex: stateManager.activeTiltIndex || 0,
+                station: station // 🌟 Explicit station ID anchor
             }, [rawBuffer]);
 
         } catch (err) {
