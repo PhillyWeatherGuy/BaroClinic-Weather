@@ -380,7 +380,7 @@ export function initStormVolumeViewer() {
         controlsBar.innerHTML = `
             <div class="storm-mode-pill">
                 <button class="storm-mode-btn active" id="btn-mode-cloud">☁ Cloud</button>
-                <button class="storm-mode-btn" id="btn-mode-pixels">🧊 Pixels</button>
+                <button class="storm-mode-btn" id="btn-mode-pixels">Pixels</button>
             </div>
             <div class="storm-cutoff-group">
                 <span class="storm-cutoff-label" id="storm-cutoff-label">Cut-off: 15 dBZ</span>
