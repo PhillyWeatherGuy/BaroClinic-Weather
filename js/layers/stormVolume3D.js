@@ -10,7 +10,6 @@ let paletteTexture2D = null;
 let isViewerActive = false;
 let animationFrameId = null;
 
-// Raymarching Vertex Shader
 const vsVolume = `
     out vec3 v_worldPos;
     out vec3 v_localPos;
@@ -23,7 +22,6 @@ const vsVolume = `
     }
 `;
 
-// Raymarching Fragment Shader (GLSL 3.0 ES)
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -38,7 +36,6 @@ const fsVolume = `
     uniform vec3 u_boxSize;
     uniform vec3 u_lightDir;
 
-    // Ray-AABB Bounding Box Intersection
     vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
         vec3 invR = 1.0 / rayDir;
         vec3 tbot = invR * (boxMin - rayOrigin);
@@ -50,7 +47,6 @@ const fsVolume = `
         return vec2(t0, t1);
     }
 
-    // Gradient Normal Estimation for Sunlit Cloud Billows
     vec3 estimateNormal(vec3 uvw, float stepSize) {
         float dX = texture(u_volumeTex, uvw + vec3(stepSize, 0.0, 0.0)).r - 
                    texture(u_volumeTex, uvw - vec3(stepSize, 0.0, 0.0)).r;
@@ -68,14 +64,12 @@ const fsVolume = `
         vec3 halfSize = u_boxSize * 0.5;
         vec2 hit = intersectAABB(rayOrigin, rayDir, -halfSize, halfSize);
 
-        if (hit.x > hit.y || hit.y < 0.0) {
-            discard;
-        }
+        if (hit.x > hit.y || hit.y < 0.0) discard;
 
         float tStart = max(hit.x, 0.0);
         float tEnd = hit.y;
 
-        const int MAX_STEPS = 96;
+        const int MAX_STEPS = 112;
         float tStep = (tEnd - tStart) / float(MAX_STEPS);
         vec3 stepVec = rayDir * tStep;
         vec3 currentPos = rayOrigin + rayDir * tStart;
@@ -96,13 +90,11 @@ const fsVolume = `
                         float diffuse = clamp(dot(normal, u_lightDir), 0.0, 1.0);
                         vec3 litRgb = sampleCol.rgb * (0.35 + 0.65 * diffuse);
 
-                        float stepAlpha = sampleCol.a * 0.45;
+                        float stepAlpha = sampleCol.a * 0.55;
                         accumulatedColor.rgb += (1.0 - accumulatedColor.a) * litRgb * stepAlpha;
                         accumulatedColor.a += (1.0 - accumulatedColor.a) * stepAlpha;
 
-                        if (accumulatedColor.a >= 0.98) {
-                            break;
-                        }
+                        if (accumulatedColor.a >= 0.98) break;
                     }
                 }
             }
@@ -110,17 +102,12 @@ const fsVolume = `
             currentPos += stepVec;
         }
 
-        if (accumulatedColor.a < 0.02) {
-            discard;
-        }
+        if (accumulatedColor.a < 0.02) discard;
 
         fragColor = vec4(accumulatedColor.rgb / max(accumulatedColor.a, 0.0001), accumulatedColor.a);
     }
 `;
 
-/**
- * 🌟 Constructs the High-Contrast Optical Density Transfer Function
- */
 function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
@@ -136,21 +123,17 @@ function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
 
-        // Optical Density Alpha Curve
+        // Solid, sculpted cloud envelope
         if (i < 65) {
-            // < 12 dBZ: Transparent
-            imgData.data[idx + 3] = 0;
+            imgData.data[idx + 3] = 0; // < 12 dBZ: transparent
         } else if (i < 95) {
-            // 12-22 dBZ: Translucent cloud boundary
             const t = (i - 65) / 30.0;
-            imgData.data[idx + 3] = Math.round(40 + t * 60);
+            imgData.data[idx + 3] = Math.round(50 + t * 90); // 12-22 dBZ: visible cloud boundary
         } else if (i < 150) {
-            // 22-45 dBZ: Convective rain core
             const t = (i - 95) / 55.0;
-            imgData.data[idx + 3] = Math.round(100 + t * 110);
+            imgData.data[idx + 3] = Math.round(140 + t * 100); // 22-45 dBZ: dense rain core
         } else {
-            // 50+ dBZ: Opaque hail core
-            imgData.data[idx + 3] = 255;
+            imgData.data[idx + 3] = 255; // 50+ dBZ: solid hail core
         }
     }
 
@@ -164,9 +147,6 @@ function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
     return texture;
 }
 
-/**
- * 🌟 Initializes the Three.js Volumetric Viewer
- */
 export function initStormVolumeViewer() {
     containerEl = document.getElementById('storm-volume-container');
     canvasContainerEl = document.getElementById('storm-volume-canvas-container');
@@ -174,38 +154,27 @@ export function initStormVolumeViewer() {
 
     if (!containerEl || !canvasContainerEl) return;
 
-    if (closeBtn) {
-        closeBtn.onclick = () => {
-            hideStormVolume();
-        };
-    }
-
+    if (closeBtn) closeBtn.onclick = () => hideStormVolume();
     if (renderer) return;
 
-    // Scene & Camera
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100.0);
-    // Elevated perspective looking down towards the ground
-    camera.position.set(0.0, 1.3, 1.8);
+    camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100.0);
+    camera.position.set(0.0, 1.1, 1.9);
 
-    // Hardware WebGL2 Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     canvasContainerEl.appendChild(renderer.domElement);
 
-    // Orbit Controls
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.minDistance = 0.6;
     controls.maxDistance = 5.0;
-    controls.maxPolarAngle = Math.PI * 0.49; // Stay above ground plane
+    controls.maxPolarAngle = Math.PI * 0.49;
     controls.target.set(0.0, 0.0, 0.0);
 
-    // Palette Transfer Function
     paletteTexture2D = createTransferFunctionTexture();
 
-    // Volume Mesh (Unit Cube Base)
     const boxGeometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
     const volumeMaterial = new THREE.ShaderMaterial({
         glslVersion: THREE.GLSL3,
@@ -215,8 +184,8 @@ export function initStormVolumeViewer() {
             u_cameraPos: { value: new THREE.Vector3() },
             u_volumeTex: { value: null },
             u_paletteTex: { value: paletteTexture2D },
-            u_boxSize: { value: new THREE.Vector3(1.0, 0.6, 1.0) },
-            u_lightDir: { value: new THREE.Vector3(0.5, 0.8, 0.6).normalize() }
+            u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
+            u_lightDir: { value: new THREE.Vector3(0.4, 0.85, 0.35).normalize() } // High-angle sun
         },
         transparent: true,
         side: THREE.BackSide
@@ -225,29 +194,23 @@ export function initStormVolumeViewer() {
     stormBoxMesh = new THREE.Mesh(boxGeometry, volumeMaterial);
     scene.add(stormBoxMesh);
 
-    // Reference Ground Grid & Wireframe Box
     wireframeHelper = new THREE.BoxHelper(stormBoxMesh, 0x38bdf8);
     wireframeHelper.material.opacity = 0.35;
     wireframeHelper.material.transparent = true;
     scene.add(wireframeHelper);
 
-    // Flat horizontal ground plane under the storm
     groundGridHelper = new THREE.GridHelper(1.0, 8, 0x38bdf8, 0x1e293b);
-    groundGridHelper.position.y = -0.3;
+    groundGridHelper.position.y = -0.4;
     scene.add(groundGridHelper);
 
-    const resizeObserver = new ResizeObserver(() => {
-        handleResize();
-    });
+    const resizeObserver = new ResizeObserver(() => handleResize());
     resizeObserver.observe(canvasContainerEl);
 }
 
 function handleResize() {
     if (!renderer || !camera || !canvasContainerEl) return;
-    const w = canvasContainerEl.clientWidth;
-    const h = canvasContainerEl.clientHeight;
+    const w = canvasContainerEl.clientWidth, h = canvasContainerEl.clientHeight;
     if (w === 0 || h === 0) return;
-
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
@@ -258,17 +221,12 @@ function animate() {
     animationFrameId = requestAnimationFrame(animate);
 
     if (controls) controls.update();
-
     if (stormBoxMesh && stormBoxMesh.material) {
         stormBoxMesh.material.uniforms.u_cameraPos.value.copy(camera.position);
     }
-
     renderer.render(scene, camera);
 }
 
-/**
- * 🌟 Ingests the 1 MB Voxel Array from level2Worker and renders the storm cell
- */
 export function updateStormVolume(voxelBuffer, bounds) {
     initStormVolumeViewer();
     if (!scene || !voxelBuffer) return;
@@ -281,14 +239,13 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 20.0; // 20 km standard storm cap
+    const heightKm = 20.0;
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 0.75; // Vertical altitude scale
+    const aspectY = (heightKm / maxHoriz) * 0.9;
     const aspectZ = depthKm / maxHoriz;
 
-    // Scale mesh dimensions
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
     stormBoxMesh.material.uniforms.u_boxSize.value.set(aspectX, aspectY, aspectZ);
 
@@ -296,14 +253,9 @@ export function updateStormVolume(voxelBuffer, bounds) {
     groundGridHelper.scale.set(aspectX, 1.0, aspectZ);
     groundGridHelper.position.y = -aspectY * 0.5;
 
-    // 🌟 Upload 1 MB (128 x 64 x 128) 3D Texture with Linear Filtering
     const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
+    if (volumeTexture3D) volumeTexture3D.dispose();
 
-    if (volumeTexture3D) {
-        volumeTexture3D.dispose();
-    }
-
-    // width = 128 (East-West), height = 64 (Altitude), depth = 128 (North-South)
     volumeTexture3D = new Texture3DClass(voxelBuffer, 128, 64, 128);
     volumeTexture3D.format = THREE.RedFormat;
     volumeTexture3D.type = THREE.UnsignedByteType;
@@ -324,24 +276,17 @@ export function updateStormVolume(voxelBuffer, bounds) {
 export function showStormVolume() {
     if (!containerEl) containerEl = document.getElementById('storm-volume-container');
     if (containerEl) containerEl.style.display = 'flex';
-
     isViewerActive = true;
     stateManager.is3DVolumeActive = true;
-
     handleResize();
-
-    if (!animationFrameId) {
-        animate();
-    }
+    if (!animationFrameId) animate();
 }
 
 export function hideStormVolume() {
     if (!containerEl) containerEl = document.getElementById('storm-volume-container');
     if (containerEl) containerEl.style.display = 'none';
-
     isViewerActive = false;
     stateManager.is3DVolumeActive = false;
-
     if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
