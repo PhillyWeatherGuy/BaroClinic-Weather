@@ -26,6 +26,10 @@ let shaderLayerRef = null;
 let highestPreloadedChunk = 0;
 let level2Worker = null;
 
+// 🌟 In-Memory RAM Cache for Level 2 3D Voxel Volumes
+const level2VolumeCache = new Map();
+let syncDebounceTimer = null;
+
 let cursorX = window.innerWidth / 2;
 let cursorY = window.innerHeight / 2;
 window.addEventListener('mousemove', (e) => {
@@ -38,13 +42,34 @@ export function setShaderLayerReference(layer) {
 }
 
 /**
+ * 🌟 Extracts UTC Date (YYYYMMDD) and Time (HHMM) from the active timeline frame
+ */
+function getActiveFrameDateTime(frameIndex = null) {
+    const idx = frameIndex !== null ? frameIndex : (radarState.activeFrameIndex || 0);
+    const frame = radarState.frames && radarState.frames[idx];
+    if (frame && frame.date) {
+        const d = new Date(frame.date);
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        const hh = String(d.getUTCHours()).padStart(2, '0');
+        const mi = String(d.getUTCMinutes()).padStart(2, '0');
+        return {
+            date: `${yyyy}${mm}${dd}`,
+            time: `${hh}${mi}`
+        };
+    }
+    return { date: null, time: null };
+}
+
+/**
  * 🌟 Lazy-instantiates the background Level 2 Web Worker
  */
 function getLevel2Worker() {
     if (!level2Worker) {
         level2Worker = new Worker('./js/core/level2Worker.js', { type: 'module' });
         level2Worker.onmessage = (e) => {
-            const { success, voxelBuffer, tilts, bounds, error } = e.data;
+            const { success, voxelBuffer, tilts, bounds, cacheKey, error } = e.data;
             hideToast();
 
             if (!success) {
@@ -57,11 +82,68 @@ function getLevel2Worker() {
                 updateTiltDropdownUI(tilts);
             }
 
-            // 🌟 Hand 3D volume texture to MapTiler raymarcher
+            // Cache voxel buffer in RAM for instant 0ms scrubbing
+            if (cacheKey && voxelBuffer) {
+                level2VolumeCache.set(cacheKey, voxelBuffer);
+            }
+
             updateStormVolume(voxelBuffer, bounds);
         };
     }
     return level2Worker;
+}
+
+/**
+ * 🌟 Synchronizes the 3D Storm Volume with the active timeline frame/timestamp
+ */
+export async function sync3DVolumeWithCurrentFrame(frameIndex = null) {
+    if (!stateManager.selectedStormBounds) return;
+
+    const bounds = stateManager.selectedStormBounds;
+    const station = stateManager.activeRadarStation || 'KDMX';
+    const stMeta = RADAR_STATIONS.find(s => s.id === station || s.id === 'K' + station) || { lat: 39.9469, lon: -74.4111 };
+
+    const { date, time } = getActiveFrameDateTime(frameIndex);
+    const cacheKey = `${station}_${date || 'live'}_${time || 'live'}`;
+
+    // 🌟 Instant RAM cache return (0ms latency during scrubbing)
+    if (level2VolumeCache.has(cacheKey)) {
+        const cachedBuffer = level2VolumeCache.get(cacheKey);
+        updateStormVolume(cachedBuffer, bounds);
+        return;
+    }
+
+    if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+    syncDebounceTimer = setTimeout(async () => {
+        let url = `${stateManager.BASE_URL}radar-l2?station=${station}`;
+        if (date && time) {
+            url += `&date=${date}&time=${time}`;
+        }
+
+        showToast(`Fetching Level 2 scan (${station})...`);
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`Level 2 scan not found (${resp.status})`);
+            const rawBuffer = await resp.arrayBuffer();
+
+            showToast(`Voxelizing 3D storm cell (${station})...`);
+            const worker = getLevel2Worker();
+
+            worker.postMessage({
+                id: Date.now(),
+                cacheKey,
+                rawBuffer,
+                radarLat: stMeta.lat,
+                radarLon: stMeta.lon,
+                bounds,
+                targetTiltIndex: stateManager.activeTiltIndex || 0,
+                station: station
+            }, [rawBuffer]);
+        } catch (err) {
+            console.error("3D storm fetch failed:", err);
+            showToast(`❌ ${err.message}`);
+        }
+    }, 80);
 }
 
 /**
@@ -172,31 +254,8 @@ export function initRadarBoxTool(map) {
         const station = stMeta.id;
         stateManager.activeRadarStation = station;
 
-        showToast(`Fetching Level 2 volume for ${station} (${stMeta.name})...`);
-
-        try {
-            const url = `${stateManager.BASE_URL}radar-l2?station=${station}`;
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`Level 2 archive not found (${resp.status})`);
-            const rawBuffer = await resp.arrayBuffer();
-
-            showToast(`Voxelizing 3D storm cell from ${station}...`);
-            const worker = getLevel2Worker();
-
-            worker.postMessage({
-                id: Date.now(),
-                rawBuffer,
-                radarLat: stMeta.lat,
-                radarLon: stMeta.lon,
-                bounds,
-                targetTiltIndex: stateManager.activeTiltIndex || 0,
-                station: station
-            }, [rawBuffer]);
-
-        } catch (err) {
-            console.error("3D storm fetch failed:", err);
-            showToast(`❌ ${err.message}`);
-        }
+        // Fetch and render 3D volume for current frame
+        sync3DVolumeWithCurrentFrame(radarState.activeFrameIndex);
     });
 }
 
@@ -265,6 +324,9 @@ function initKeyboardControls(zoomCallback = null) {
             if (nextIdx < 0) nextIdx = radarState.frames.length - 1;
             if (nextIdx >= radarState.frames.length) nextIdx = 0;
             setRadarFrame(nextIdx);
+            if (stateManager.is3DVolumeActive && stateManager.selectedStormBounds) {
+                sync3DVolumeWithCurrentFrame(nextIdx);
+            }
             return;
         }
 
@@ -572,7 +634,6 @@ export function initModelCategoryBar() {
     modelBtn.addEventListener('click', (e) => {
         e.stopPropagation();
 
-        // 🛑 In Radar mode, do not open model category bar
         if (stateManager.activeMode === 'radar') {
             categoryBar.style.display = 'none';
             modelBtn.classList.remove('active', 'open');
@@ -767,7 +828,6 @@ export function initParameterCategoryBar() {
     paramBtn.addEventListener('click', (e) => {
         e.stopPropagation();
 
-        // 🛑 In Radar mode, do not open parameter category bar
         if (stateManager.activeMode === 'radar') {
             paramBar.style.display = 'none';
             paramBtn.classList.remove('active', 'open');
@@ -861,10 +921,12 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
             if (stateManager.activeMode === 'radar') {
                 pauseRadarPlayback();
                 setRadarFrame(targetVal);
+                if (stateManager.is3DVolumeActive && stateManager.selectedStormBounds) {
+                    sync3DVolumeWithCurrentFrame(targetVal);
+                }
                 return;
             }
 
-            // Model Viewer mode:
             if (isPlaying) pausePlayback();
 
             const maxLoadedIdx = getMaxLoadedStepIndex();
@@ -899,6 +961,9 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
                 let prevIdx = radarState.activeFrameIndex - 1;
                 if (prevIdx < 0) prevIdx = radarState.frames.length - 1;
                 setRadarFrame(prevIdx);
+                if (stateManager.is3DVolumeActive && stateManager.selectedStormBounds) {
+                    sync3DVolumeWithCurrentFrame(prevIdx);
+                }
             } else {
                 if (isPlaying) pausePlayback();
                 stepRelative(-1);
@@ -914,6 +979,9 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
                 let nextIdx = radarState.activeFrameIndex + 1;
                 if (nextIdx >= radarState.frames.length) nextIdx = 0;
                 setRadarFrame(nextIdx);
+                if (stateManager.is3DVolumeActive && stateManager.selectedStormBounds) {
+                    sync3DVolumeWithCurrentFrame(nextIdx);
+                }
             } else {
                 if (isPlaying) pausePlayback();
                 stepRelative(1);
@@ -1049,7 +1117,6 @@ function initModelRunDropdown() {
     toggleBtn.onclick = (e) => {
         e.stopPropagation();
 
-        // 🛑 In Radar mode, do not open the model run dropdown
         if (stateManager.activeMode === 'radar') {
             menu.style.display = 'none';
             return;
