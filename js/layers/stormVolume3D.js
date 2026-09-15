@@ -4,7 +4,7 @@ import { stateManager } from '../core/stateManager.js';
 
 let scene, camera, renderer, controls;
 let containerEl, canvasContainerEl;
-let stormBoxMesh, wireframeHelper, groundGridHelper;
+let stormBoxMesh, wireframeHelper;
 let volumeTexture3D = null;
 let paletteTexture2D = null;
 let isViewerActive = false;
@@ -195,10 +195,8 @@ const fsVolume = `
         }
         float groundFade = smoothstep(0.0, 0.035, texCoord.y);
 
-        // 🌟 Atmospheric Lower-Level Expansion:
-        // pow(y, 1.22) stretches the compressed 0-20 kft boundary layer upward
-        // while keeping the anvil top pinned to the exact same ceiling.
-        float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.22);
+        // 🌟 Lift the bottom-to-middle storm core into natural proportion
+        float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.40);
 
         vec3 sampleCoord = vec3(texCoord.x, expandedY, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r * groundFade;
@@ -257,11 +255,11 @@ const fsVolume = `
                     transmittance *= stepTransmittance;
                 } else {
                     // --- MODE 0: REALISTIC ATMOSPHERIC CLOUD ---
-                    // 1. Continuous physical density curve (soft vapor edges -> dense core)
+                    // 1. Continuous physical density curve
                     float normDbz = (sampleValue - u_cutoffMin.w) / max(1.0 - u_cutoffMin.w, 0.001);
                     float density = pow(normDbz, 1.45) * 3.6;
 
-                    // 2. Dual-hemisphere ambient skylight (cool sky above, warm earth-glow below)
+                    // 2. Dual-hemisphere ambient skylight
                     float heightFactor = clamp(currentPosition.y, 0.0, 1.0);
                     vec3 skyLight = mix(vec3(0.35, 0.38, 0.46), vec3(0.58, 0.68, 0.82), heightFactor);
 
@@ -445,12 +443,6 @@ export function initStormVolumeViewer() {
     wireframeHelper.material.transparent = true;
     scene.add(wireframeHelper);
 
-    groundGridHelper = new THREE.GridHelper(1.0, 8, 0x38bdf8, 0x38bdf8);
-    groundGridHelper.material.transparent = true;
-    groundGridHelper.material.opacity = 0.35;
-    groundGridHelper.position.y = -0.4;
-    scene.add(groundGridHelper);
-
     const resizeObserver = new ResizeObserver(() => handleResize());
     resizeObserver.observe(canvasContainerEl);
 
@@ -545,10 +537,10 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
     const heightKm = 18.0;
 
-    // Balanced panoramic aspect ratio (wide spreading anvil, natural height relief)
+    // Balanced panoramic aspect ratio
     const maxHoriz = Math.max(widthKm, depthKm, 12.0);
     const HORIZONTAL_SPREAD = 1.35;
-    const VERTICAL_RELIEF = 1.20;
+    const VERTICAL_RELIEF = 1.35; // Tuned for higher lower-to-middle presence
 
     const aspectX = (widthKm / maxHoriz) * HORIZONTAL_SPREAD;
     const aspectZ = (depthKm / maxHoriz) * HORIZONTAL_SPREAD;
@@ -558,8 +550,6 @@ export function updateStormVolume(voxelBuffer, bounds) {
     stormBoxMesh.material.uniforms.u_boxSize.value.set(aspectX, aspectY, aspectZ);
 
     wireframeHelper.update();
-    groundGridHelper.scale.set(aspectX, 1.0, aspectZ);
-    groundGridHelper.position.y = -aspectY * 0.5;
 
     const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
     if (volumeTexture3D) volumeTexture3D.dispose();
