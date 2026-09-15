@@ -23,7 +23,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader: 360° Omnidirectional Cloud Raymarcher
+// Fragment Shader: 360° Omnidirectional Cloud Raymarcher with Soft Billow Puffiness
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -66,7 +66,7 @@ const fsVolume = `
         return (macroDomes + microPuffs - 0.5) * 0.038;
     }
 
-    // Safe 360° Ray-AABB Intersection (Zero division by zero)
+    // 🌟 Safe 360° Ray-AABB Intersection (Prevents zero-division at cardinal angles)
     vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
         vec3 safeDir = rayDir + sign(rayDir) * 1e-6;
         vec3 invR = 1.0 / safeDir;
@@ -84,7 +84,7 @@ const fsVolume = `
             return 0.0;
         }
 
-        // Multi-Octave Puffy Cloud Perturbation
+        // 🌟 Multi-Octave Puffy Cloud Perturbation
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
         float puff = puffyCloudNoise(sampleCoord);
         sampleCoord += vec3(puff, puff * 0.7, puff);
@@ -93,7 +93,7 @@ const fsVolume = `
         return texture(u_volumeTex, sampleCoord).r;
     }
 
-    // Atmospheric Cloud Transfer Function
+    // 🌟 Atmospheric Cloud Transfer Function: Super-Light Green Fog -> Glowing Dense Core
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
@@ -102,17 +102,22 @@ const fsVolume = `
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
 
+        // 🌟 Drastically reduced green/blue opacity curve
         float alpha = 0.0;
         if (value < 0.38) {
+            // 12-22 dBZ (Blue/Cyan): 2% to 6% opacity (faint glowing atmospheric vapor)
             float t = (value - u_cutoffMin.w) / max(0.38 - u_cutoffMin.w, 0.001);
             alpha = mix(0.02, 0.07, t);
         } else if (value < 0.55) {
+            // 22-38 dBZ (Green/Lime): 10% to 28% opacity (translucent rain shield)
             float t = (value - 0.38) / 0.17;
             alpha = mix(0.08, 0.28, t);
         } else if (value < 0.72) {
+            // 38-50 dBZ (Yellow/Orange): 45% to 75% opacity (dense convective core)
             float t = (value - 0.55) / 0.17;
             alpha = mix(0.35, 0.75, t);
         } else {
+            // 50+ dBZ (Red/Pink/White Hail Core): 95% to 100% solid opacity
             float t = (value - 0.72) / 0.28;
             alpha = mix(0.85, 1.00, t);
         }
@@ -120,7 +125,7 @@ const fsVolume = `
         return vec4(cloudColor, alpha);
     }
 
-    // Surface Normal Estimation
+    // Surface Normal Estimation for Shaded Cloud Domes
     vec3 estimateNormal(vec3 p, float eps) {
         float dX = sampleVolume(p + vec3(eps, 0.0, 0.0)) - sampleVolume(p - vec3(eps, 0.0, 0.0));
         float dY = sampleVolume(p + vec3(0.0, eps, 0.0)) - sampleVolume(p - vec3(0.0, eps, 0.0));
@@ -143,11 +148,11 @@ const fsVolume = `
         float tStart = max(hit.x, 0.0);
         float tEnd = hit.y;
 
-        // Entry and Exit points in physical box space
+        // 🌟 Physical Entry and Exit points
         vec3 frontPos = rayOrigin + rayDir * tStart;
         vec3 backPos = rayOrigin + rayDir * tEnd;
 
-        // Map entry/exit into normalized [0, 1] Texture Space
+        // 🌟 Texture-space traversal vector (Fixes top-down disappearance)
         vec3 uvwStart = (frontPos + halfSize) / u_boxSize;
         vec3 uvwEnd = (backPos + halfSize) / u_boxSize;
         vec3 uvwStep = (uvwEnd - uvwStart) / u_steps;
@@ -155,7 +160,7 @@ const fsVolume = `
         vec3 currentPosition = uvwStart;
         vec3 accumulatedColor = vec3(0.0);
         float transmittance = 1.0;
-        vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30));
+        vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30)); // Overhead warm sun angle
 
         for (int i = 0; i < MAX_STEPS; i++) {
             float sampleValue = sampleVolume(currentPosition);
@@ -164,6 +169,7 @@ const fsVolume = `
                 vec4 sampleColor = colorizeCloud(sampleValue);
 
                 if (sampleColor.a > 0.001) {
+                    // Sunlit Cloud Shading + Ambient Sky Bounce
                     vec3 normal = estimateNormal(currentPosition, 0.022);
                     float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
                     float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
@@ -171,6 +177,7 @@ const fsVolume = `
 
                     vec3 litColor = sampleColor.rgb * illumination;
 
+                    // 🌟 Physically Based Beer-Lambert Optical Transmittance (Glowing Core)
                     float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.4;
                     float stepTransmittance = exp(-stepDensity);
 
@@ -212,6 +219,7 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx] = c.r;
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
+        // Full base color; colorizeCloud() controls dynamic transparency
         imgData.data[idx + 3] = (i < 65) ? 0 : 255;
     }
 
@@ -252,7 +260,7 @@ export function initStormVolumeViewer() {
     controls.dampingFactor = 0.05;
     controls.minDistance = 0.3;
     controls.maxDistance = 6.0;
-    controls.minPolarAngle = 0.0;        // Full overhead top-down view
+    controls.minPolarAngle = 0.0;        // Full overhead view
     controls.maxPolarAngle = Math.PI;    // Full underneath view
     controls.target.set(0.0, 0.0, 0.0);
 
@@ -324,11 +332,12 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 14.0;
+    const heightKm = 14.0; // Convective storm top
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 1.9; // 1.9x vertical exaggeration
+    // 🌟 1.9x Vertical Exaggeration Boost (Stretches the storm upwards into a towering cloud)
+    const aspectY = (heightKm / maxHoriz) * 1.9;
     const aspectZ = depthKm / maxHoriz;
 
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
