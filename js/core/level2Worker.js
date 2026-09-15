@@ -162,7 +162,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
 }
 
 /**
- * 🌟 Bilinear Polar Sampling
+ * 🌟 Bilinear Polar Sampling with Continuous Low-Threshold Support
  */
 function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     if (!sweep) return 0.0;
@@ -192,11 +192,12 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     const bottom = v10 * (1.0 - binT) + v11 * binT;
     const dbz = top * (1.0 - rayT) + bottom * rayT;
 
-    return dbz > 8.0 ? dbz : 0.0;
+    // Preserves delicate mist echoes down to 2 dBZ (instead of hard-cutting at 8 dBZ)
+    return dbz > 2.0 ? dbz : 0.0;
 }
 
 /**
- * 🌟 Constructs Ultra-HD 3D Volume (384 x 96 x 384)
+ * 🌟 Constructs Ultra-HD 3D Volume (384 x 96 x 384) with Hermite & Gaussian Beam Interpolation
  */
 function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX') {
     const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
@@ -255,30 +256,44 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
                     const dbz1 = sampleSweepBilinear(sweepBelow, r, azDeg);
                     const dbz2 = sampleSweepBilinear(sweepAbove, r, azDeg);
                     const span = sweepAbove.elAngle - sweepBelow.elAngle;
-                    const t = Math.max(0.0, Math.min(1.0, (elAngleDeg - sweepBelow.elAngle) / span));
 
-                    if (dbz1 > 0 && dbz2 > 0) {
-                        finalDbz = dbz1 + t * (dbz2 - dbz1);
-                    } else if (dbz1 > 0) {
-                        finalDbz = dbz1 * (1.0 - t * 0.7);
-                    } else if (dbz2 > 0) {
-                        finalDbz = dbz2 * (t * 0.7);
+                    if (dbz1 > 0.0 && dbz2 > 0.0) {
+                        // 🌟 Smooth Hermite C^1 Continuous S-Curve:
+                        // Slope is exactly 0 at both sweep angles, eliminating tilt seams & ribbing lines
+                        const t = Math.max(0.0, Math.min(1.0, (elAngleDeg - sweepBelow.elAngle) / span));
+                        const smoothT = t * t * (3.0 - 2.0 * t);
+                        finalDbz = dbz1 + smoothT * (dbz2 - dbz1);
+                    } else if (dbz1 > 0.0) {
+                        // 🌟 Smooth Gaussian beam falloff into clear air above (no artificial 0.7 cliff)
+                        const diff = elAngleDeg - sweepBelow.elAngle;
+                        const normDiff = diff / Math.max(1.0, span);
+                        finalDbz = dbz1 * Math.exp(-2.2 * normDiff * normDiff);
+                    } else if (dbz2 > 0.0) {
+                        // 🌟 Smooth Gaussian beam falloff into clear air below
+                        const diff = sweepAbove.elAngle - elAngleDeg;
+                        const normDiff = diff / Math.max(1.0, span);
+                        finalDbz = dbz2 * Math.exp(-2.2 * normDiff * normDiff);
                     }
                 } else if (sweepBelow) {
                     const dbz = sampleSweepBilinear(sweepBelow, r, azDeg);
-                    const diff = elAngleDeg - sweepBelow.elAngle;
-                    if (diff < 2.5) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 2.5);
+                    if (dbz > 0.0) {
+                        const diff = elAngleDeg - sweepBelow.elAngle;
+                        if (diff < 3.2) {
+                            finalDbz = dbz * Math.exp(-0.75 * diff * diff);
+                        }
                     }
                 } else if (sweepAbove) {
                     const dbz = sampleSweepBilinear(sweepAbove, r, azDeg);
-                    const diff = sweepAbove.elAngle - elAngleDeg;
-                    if (diff < 1.5) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.5);
+                    if (dbz > 0.0) {
+                        const diff = sweepAbove.elAngle - elAngleDeg;
+                        if (diff < 2.2) {
+                            finalDbz = dbz * Math.exp(-1.1 * diff * diff);
+                        }
                     }
                 }
 
-                if (finalDbz >= 10.0) {
+                // 🌟 Preserves continuous data down to 2 dBZ to prevent outer-shell cutoff
+                if (finalDbz >= 2.0) {
                     const mappedByte = Math.min(255, Math.max(1, Math.round((finalDbz + 32.0) * 2.0)));
                     const memoryIndex = gz * (GRID_X * GRID_Y) + gy * GRID_X + gx;
                     voxels[memoryIndex] = mappedByte;
