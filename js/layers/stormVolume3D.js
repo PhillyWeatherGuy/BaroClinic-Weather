@@ -89,7 +89,10 @@ export function initStormVolumeViewer() {
 
     if (!containerEl || !canvasContainerEl) return;
 
-    if (closeBtn) closeBtn.onclick = () => hideStormVolume();
+    if (closeBtn) {
+        closeBtn.onclick = () => hideStormVolume();
+    }
+    
     if (renderer) return;
 
     scene = new THREE.Scene();
@@ -130,7 +133,8 @@ export function initStormVolumeViewer() {
 
 function handleResize() {
     if (!renderer || !camera || !canvasContainerEl) return;
-    const w = canvasContainerEl.clientWidth, h = canvasContainerEl.clientHeight;
+    const w = canvasContainerEl.clientWidth;
+    const h = canvasContainerEl.clientHeight;
     if (w === 0 || h === 0) return;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -239,4 +243,16 @@ export function showStormVolume() {
     isViewerActive = true;
     stateManager.is3DVolumeActive = true;
     handleResize();
-    if (!animati
+    if (!animationFrameId) animate();
+}
+
+export function hideStormVolume() {
+    if (!containerEl) containerEl = document.getElementById('storm-volume-container');
+    if (containerEl) containerEl.style.display = 'none';
+    isViewerActive = false;
+    stateManager.is3DVolumeActive = false;
+    if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
+}
