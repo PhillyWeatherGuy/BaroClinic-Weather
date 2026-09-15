@@ -44,7 +44,7 @@ function getLevel2Worker() {
     if (!level2Worker) {
         level2Worker = new Worker('./js/core/level2Worker.js', { type: 'module' });
         level2Worker.onmessage = (e) => {
-            const { success, slices, voxelBuffer, tilts, bounds, error } = e.data;
+            const { success, voxelBuffer, tilts, bounds, error } = e.data;
             hideToast();
 
             if (!success) {
@@ -57,8 +57,8 @@ function getLevel2Worker() {
                 updateTiltDropdownUI(tilts);
             }
 
-            // 🌟 Pass the stacked tilt slices to the 3D renderer
-            updateStormVolume(slices || voxelBuffer, bounds);
+            // 🌟 Hand 3D volume texture to MapTiler raymarcher
+            updateStormVolume(voxelBuffer, bounds);
         };
     }
     return level2Worker;
