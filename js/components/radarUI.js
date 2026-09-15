@@ -6,6 +6,7 @@ import { decodeLevel3, sampleRadarSweep, formatRadarValue } from '../core/level3
 import { createSingleSiteRadarLayer } from '../shaders/singleSiteRadarShader.js';
 import { stateManager } from '../core/stateManager.js';
 import { getRadarPalette } from '../config/radarPalettes.js';
+import { sync3DVolumeWithCurrentFrame } from './viewerUI.js';
 
 let radarMapInstance = null;
 let radarPlayInterval = null;
@@ -601,6 +602,11 @@ export function setRadarFrame(frameIndex) {
     }
 
     updateRadarSliderTrack();
+
+    // 🌟 Synchronize 3D Storm Volume with active frame
+    if (stateManager.is3DVolumeActive && stateManager.selectedStormBounds) {
+        sync3DVolumeWithCurrentFrame(frameIndex);
+    }
 }
 
 /**
@@ -1206,10 +1212,6 @@ async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, ar
         const hh = archiveDate.getUTCHours();
         workerUrl += `&date=${yyyy}${mm}${dd}&hour=${hh}`;
     } else {
-        // 🌟 CACHE-BUST: Live requests must never be served from Safari's (or any browser's)
-        // local HTTP cache, since the URL would otherwise be byte-identical every single time
-        // and the browser can silently keep re-serving an old response forever. Archive
-        // requests are intentionally left alone since those scans are immutable and safe to cache.
         workerUrl += `&_t=${Date.now()}`;
     }
 
@@ -1229,7 +1231,6 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
     try {
         pauseRadarPlayback();
 
-        // 🚨 Immediately wipe the old station's radar off the screen!
         if (singleSiteRadarLayer) {
             singleSiteRadarLayer.isVisible = false;
             radarMapInstance.triggerRepaint();
@@ -1257,7 +1258,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         const runLabel = document.getElementById('current-run-label');
         if (runLabel) runLabel.textContent = `Loading ${stationId}...`;
 
-        // 2. Load and render default frame immediately (newest for live, or frame 0 for archive)
+        // 2. Load and render default frame immediately
         const defaultIndex = (radarState.mode === 'live') ? (totalFrames - 1) : 0;
         const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, totalFrames, radarState.archiveDate, dur, currentProd);
         const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon, product: currentProd });
@@ -1314,7 +1315,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
                 .catch(() => {});
         }
 
-        // 5. Kick off (or restart) the auto-refresh loop for this newly-selected live station
+        // 5. Auto-refresh loop
         if (radarState.mode === 'live') {
             startLocalRadarAutoRefresh();
         } else {
@@ -1353,7 +1354,6 @@ function startLocalRadarAutoRefresh() {
                 product: currentProd
             });
 
-            // Guard against a station switch happening mid-fetch
             if (activeRadarViewType !== 'local' || !activeStationId) return;
 
             singleSiteFrames[liveIndex] = {
@@ -1362,7 +1362,6 @@ function startLocalRadarAutoRefresh() {
                 label: 'LIVE'
             };
 
-            // Only push the refreshed sweep to the screen if the user is actually on the LIVE frame
             if (currentVisibleIndex === liveIndex && singleSiteRadarLayer) {
                 singleSiteRadarLayer.setSweepData(sweep);
                 const appClock = document.getElementById('app-clock');
@@ -1460,7 +1459,6 @@ function setupStationLayers(mapInstance) {
         });
     }
 
-    // Hover Tooltip
     mapInstance.on('mouseenter', circleLayerId, (e) => {
         if (activeRadarViewType !== 'local') return;
         mapInstance.getCanvas().style.cursor = 'pointer';
@@ -1481,7 +1479,6 @@ function setupStationLayers(mapInstance) {
         stationHoverPopup.remove();
     });
 
-    // Click to select, fly to station, and load single-site radar
     mapInstance.on('click', circleLayerId, async (e) => {
         if (activeRadarViewType !== 'local') return;
 
@@ -1502,7 +1499,6 @@ function setupStationLayers(mapInstance) {
             modelBtn.querySelector('span').textContent = `Local Radar (${id})`;
         }
 
-        // 🌟 Trigger direct single-site radar download and render
         await loadSingleSiteRadar(id, lat, lon);
     });
 }
