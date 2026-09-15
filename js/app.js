@@ -29,6 +29,7 @@ import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hideP
 
 // 🛰️ Real-Time Radar Engine
 import { initRadarMode, destroyRadarMode } from './components/radarUI.js';
+import { hideStormVolume } from './layers/stormVolume3D.js';
 
 import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
 import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.js';
@@ -470,12 +471,19 @@ export async function switchAppMode(targetMode) {
 
     // 1. Destroy any active radar or forecast model state
     destroyRadarMode(map);
+    hideStormVolume();
     purgeAllAppMemory(customShaderLayer);
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
     }
     if (map.getLayer('radar-gpu-shader')) {
         map.removeLayer('radar-gpu-shader');
+    }
+
+    // Toggle visibility of the floating 3D/Tilt toolbar
+    const radarTools = document.getElementById('radar-tools-container');
+    if (radarTools) {
+        radarTools.style.display = (targetMode === 'radar') ? 'flex' : 'none';
     }
 
     // Grab top dropdown navigation elements
@@ -572,7 +580,8 @@ initViewerUI(
     },
     (newTheme) => { applyTheme(newTheme); },
     (newView) => { applyView(newView); },
-    (direction, x, y) => { handleKeyboardZoom(direction, x, y); }
+    (direction, x, y) => { handleKeyboardZoom(direction, x, y); },
+    map
 );
 
 map.on('error', (e) => {
