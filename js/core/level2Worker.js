@@ -2,7 +2,7 @@
 import { unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
-const GRID_SIZE = 128; // 128 x 128 resolution per tilt slice
+const GRID_SIZE = 256; // 128 x 128 resolution per tilt slice
 const TARGET_RADIALS = 720; // 0.5° Azimuth resolution
 
 const EARTH_RADIUS_METERS = 6371000.0;
