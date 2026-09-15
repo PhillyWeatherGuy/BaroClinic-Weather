@@ -23,7 +23,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader: Luminous MapTiler Raymarcher
+// Fragment Shader: Atmospheric Cloud Raymarcher with Procedural Billow Turbulence
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -41,6 +41,31 @@ const fsVolume = `
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
+    // Fast Procedural 3D Value Noise for Cloud Turbulence
+    float hash(vec3 p) {
+        p = fract(p * 0.3183099 + 0.1);
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+
+    float noise3D(vec3 x) {
+        vec3 i = floor(x);
+        vec3 f = fract(x);
+        f = f * f * (3.0 - 2.0 * f);
+
+        return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
+                       mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                       mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+    }
+
+    // Fractal Brownian Motion for Multi-Scale Cauliflower Puffiness
+    float cloudFBM(vec3 p) {
+        float f = 0.5000 * noise3D(p * 1.0);
+        f += 0.2500 * noise3D(p * 2.0);
+        return f;
+    }
+
     vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
         vec3 invR = 1.0 / rayDir;
         vec3 tbot = invR * (boxMin - rayOrigin);
@@ -56,45 +81,82 @@ const fsVolume = `
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-        vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
+
+        // 🌟 Procedural Billow Perturbation (Carves smooth wax into puffy cumulus domes)
+        vec3 noiseOffset = (vec3(
+            cloudFBM(texCoord * 16.0),
+            cloudFBM(texCoord * 16.0 + 31.4),
+            cloudFBM(texCoord * 16.0 + 62.8)
+        ) - 0.5) * 0.018;
+
+        vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z) + noiseOffset;
+        sampleCoord = clamp(sampleCoord, 0.0, 1.0);
+
         return texture(u_volumeTex, sampleCoord).r;
     }
 
-    // MapTiler Edge Softener (Starts at 18 dBZ / byte 90)
-    const float EDGE_SIZE = 0.025;
-    vec4 colorize(float value) {
+    // Atmospheric Cloud Transfer Function: Soft White Vapor -> Green Rain -> Fiery Core
+    const float EDGE_SIZE = 0.035;
+    vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
         }
 
-        float smoother = max(
+        // Feathered boundary gradient
+        float edgeFade = max(
             smoothstep(u_cutoffMin.w, u_cutoffMin.w + EDGE_SIZE, value),
             1.0 - smoothstep(u_cutoffMax.w - EDGE_SIZE, u_cutoffMax.w, value)
         );
 
-        vec4 color = texture(u_paletteTex, vec2(value, 0.5));
-        color.a *= smoother;
-        return color;
+        vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
+
+        // Outer cloud vapor (12-24 dBZ / normalized 0.30 - 0.44): Blend into natural cloud-white
+        vec3 cloudColor = paletteColor.rgb;
+        if (value < 0.44) {
+            float whiteMix = 1.0 - smoothstep(0.30, 0.44, value);
+            vec3 softWhite = vec3(0.92, 0.95, 0.98);
+            cloudColor = mix(cloudColor, softWhite, whiteMix * 0.75);
+        }
+
+        float alpha = edgeFade * (value > 0.45 ? 1.0 : smoothstep(u_cutoffMin.w, 0.45, value));
+        return vec4(cloudColor, alpha);
     }
 
-    #define MAX_STEPS 80
+    // Gradient Normal Estimation for Sunlit Cloud Domes
+    vec3 estimateNormal(vec3 p, float eps) {
+        float dX = sampleVolume(p + vec3(eps, 0.0, 0.0)) - sampleVolume(p - vec3(eps, 0.0, 0.0));
+        float dY = sampleVolume(p + vec3(0.0, eps, 0.0)) - sampleVolume(p - vec3(0.0, eps, 0.0));
+        float dZ = sampleVolume(p + vec3(0.0, 0.0, eps)) - sampleVolume(p - vec3(0.0, 0.0, eps));
+        return normalize(-vec3(dX, dY, dZ));
+    }
+
+    #define MAX_STEPS 88
     void march(vec3 currentPosition, vec3 dir, float rayLength) {
         float stepSize = rayLength / u_steps;
         vec3 step = normalize(dir) * stepSize;
         vec4 accumulatedColor = vec4(0.0);
         float accumulatedLength = 0.0;
+        vec3 sunDir = normalize(vec3(0.45, 0.85, 0.28)); // Overhead sun angle
 
         for (int i = 0; i < MAX_STEPS; i++) {
             float sampleValue = sampleVolume(currentPosition);
-            vec4 sampleColor = colorize(sampleValue);
+            vec4 sampleColor = colorizeCloud(sampleValue);
 
             if (sampleColor.a > 0.01) {
+                // Directional Sunlight & Sky Bounce Shading
+                vec3 normal = estimateNormal(currentPosition, 0.018);
+                float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
+                float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
+                vec3 illumination = vec3(0.40) + vec3(0.60) * sunLight + vec3(0.12, 0.16, 0.22) * skyLight;
+
+                vec3 litRgb = sampleColor.rgb * illumination;
+
                 // Soft atmospheric step opacity
-                float stepAlpha = sampleColor.a * (32.0 / u_steps) * 0.75;
-                
-                // Pure Luminous Fluid Mixing (No dark multiplication)
+                float stepAlpha = sampleColor.a * (32.0 / u_steps) * 0.85;
+
+                // Optical fluid mixing
                 float factor = stepAlpha * (1.0 - accumulatedColor.a);
-                accumulatedColor.rgb += factor * sampleColor.rgb * 1.35;
+                accumulatedColor.rgb += factor * litRgb * 1.35;
                 accumulatedColor.a += factor;
             }
 
@@ -137,7 +199,7 @@ const fsVolume = `
 `;
 
 /**
- * 🌟 Creates 256x1 Palette with Clean 18 dBZ Cutoff
+ * 🌟 Creates 256x1 Palette with Clean 18 dBZ Threshold
  */
 function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
@@ -153,9 +215,7 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx] = c.r;
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
-
-        // < 18 dBZ (byte 90): completely transparent (removes dark navy/grey haze)
-        imgData.data[idx + 3] = (i < 90) ? 0 : 255;
+        imgData.data[idx + 3] = (i < 80) ? 0 : 255;
     }
 
     ctx.putImageData(imgData, 0, 0);
@@ -211,8 +271,8 @@ export function initStormVolumeViewer() {
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
             u_steps: { value: 64.0 },
             u_opacity: { value: 1.0 },
-            // Cutoff threshold starts at ~18 dBZ (0.35 in normalized space)
-            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.35) },
+            // Cutoff threshold starts at ~15 dBZ (0.30 in normalized space)
+            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.30) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
         },
         transparent: true,
@@ -270,7 +330,7 @@ export function updateStormVolume(voxelBuffer, bounds) {
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 1.15; // Vertical scale
+    const aspectY = (heightKm / maxHoriz) * 1.15;
     const aspectZ = depthKm / maxHoriz;
 
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
