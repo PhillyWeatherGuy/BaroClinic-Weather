@@ -86,18 +86,17 @@ const fsVolume = `
             vec3 uvw = (currentPos + halfSize) / u_boxSize;
 
             if (all(greaterThanEqual(uvw, vec3(0.0))) && all(lessThanEqual(uvw, vec3(1.0)))) {
-                // Hardware Trilinear Sampling (0.0 to 1.0)
                 float rawVal = texture(u_volumeTex, uvw).r;
 
-                if (rawVal > 0.08) {
+                if (rawVal > 0.04) {
                     vec4 sampleCol = texture(u_paletteTex, vec2(rawVal, 0.5));
 
                     if (sampleCol.a > 0.01) {
                         vec3 normal = estimateNormal(uvw, 0.012);
                         float diffuse = clamp(dot(normal, u_lightDir), 0.0, 1.0);
-                        vec3 litRgb = sampleCol.rgb * (0.4 + 0.6 * diffuse);
+                        vec3 litRgb = sampleCol.rgb * (0.35 + 0.65 * diffuse);
 
-                        float stepAlpha = sampleCol.a * 0.35;
+                        float stepAlpha = sampleCol.a * 0.45;
                         accumulatedColor.rgb += (1.0 - accumulatedColor.a) * litRgb * stepAlpha;
                         accumulatedColor.a += (1.0 - accumulatedColor.a) * stepAlpha;
 
@@ -115,13 +114,12 @@ const fsVolume = `
             discard;
         }
 
-        // Un-premultiply to preserve vivid colors under standard WebGL alpha blending
         fragColor = vec4(accumulatedColor.rgb / max(accumulatedColor.a, 0.0001), accumulatedColor.a);
     }
 `;
 
 /**
- * 🌟 Constructs the Optical Density Transfer Function Texture
+ * 🌟 Constructs the High-Contrast Optical Density Transfer Function
  */
 function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
@@ -143,15 +141,15 @@ function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
             // < 12 dBZ: Transparent
             imgData.data[idx + 3] = 0;
         } else if (i < 95) {
-            // 12-22 dBZ: Wispy anvil vapor (10% to 25% opacity)
+            // 12-22 dBZ: Translucent cloud boundary
             const t = (i - 65) / 30.0;
-            imgData.data[idx + 3] = Math.round(25 + t * 40);
+            imgData.data[idx + 3] = Math.round(40 + t * 60);
         } else if (i < 150) {
-            // 22-45 dBZ: Convective rain core (35% to 75% opacity)
+            // 22-45 dBZ: Convective rain core
             const t = (i - 95) / 55.0;
-            imgData.data[idx + 3] = Math.round(75 + t * 115);
+            imgData.data[idx + 3] = Math.round(100 + t * 110);
         } else {
-            // 50+ dBZ: Dense hail core (100% opacity)
+            // 50+ dBZ: Opaque hail core
             imgData.data[idx + 3] = 255;
         }
     }
@@ -186,8 +184,9 @@ export function initStormVolumeViewer() {
 
     // Scene & Camera
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100.0);
-    camera.position.set(0.0, -1.8, 1.2);
+    camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100.0);
+    // Elevated perspective looking down towards the ground
+    camera.position.set(0.0, 1.3, 1.8);
 
     // Hardware WebGL2 Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
@@ -200,7 +199,7 @@ export function initStormVolumeViewer() {
     controls.dampingFactor = 0.05;
     controls.minDistance = 0.6;
     controls.maxDistance = 5.0;
-    controls.maxPolarAngle = Math.PI * 0.52;
+    controls.maxPolarAngle = Math.PI * 0.49; // Stay above ground plane
     controls.target.set(0.0, 0.0, 0.0);
 
     // Palette Transfer Function
@@ -216,7 +215,7 @@ export function initStormVolumeViewer() {
             u_cameraPos: { value: new THREE.Vector3() },
             u_volumeTex: { value: null },
             u_paletteTex: { value: paletteTexture2D },
-            u_boxSize: { value: new THREE.Vector3(1.0, 1.0, 0.5) },
+            u_boxSize: { value: new THREE.Vector3(1.0, 0.6, 1.0) },
             u_lightDir: { value: new THREE.Vector3(0.5, 0.8, 0.6).normalize() }
         },
         transparent: true,
@@ -232,9 +231,9 @@ export function initStormVolumeViewer() {
     wireframeHelper.material.transparent = true;
     scene.add(wireframeHelper);
 
+    // Flat horizontal ground plane under the storm
     groundGridHelper = new THREE.GridHelper(1.0, 8, 0x38bdf8, 0x1e293b);
-    groundGridHelper.rotation.x = Math.PI * 0.5;
-    groundGridHelper.position.z = -0.25;
+    groundGridHelper.position.y = -0.3;
     scene.add(groundGridHelper);
 
     const resizeObserver = new ResizeObserver(() => {
@@ -282,28 +281,30 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 20.0;
+    const heightKm = 20.0; // 20 km standard storm cap
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = depthKm / maxHoriz;
-    const aspectZ = (heightKm / maxHoriz) * 0.7;
+    const aspectY = (heightKm / maxHoriz) * 0.75; // Vertical altitude scale
+    const aspectZ = depthKm / maxHoriz;
 
+    // Scale mesh dimensions
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
     stormBoxMesh.material.uniforms.u_boxSize.value.set(aspectX, aspectY, aspectZ);
 
     wireframeHelper.update();
-    groundGridHelper.scale.set(aspectX, aspectY, 1.0);
-    groundGridHelper.position.z = -aspectZ * 0.5;
+    groundGridHelper.scale.set(aspectX, 1.0, aspectZ);
+    groundGridHelper.position.y = -aspectY * 0.5;
 
-    // 🌟 Three.js 3D Texture class compatibility check
+    // 🌟 Upload 1 MB (128 x 64 x 128) 3D Texture with Linear Filtering
     const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
 
     if (volumeTexture3D) {
         volumeTexture3D.dispose();
     }
 
-    volumeTexture3D = new Texture3DClass(voxelBuffer, 128, 128, 64);
+    // width = 128 (East-West), height = 64 (Altitude), depth = 128 (North-South)
+    volumeTexture3D = new Texture3DClass(voxelBuffer, 128, 64, 128);
     volumeTexture3D.format = THREE.RedFormat;
     volumeTexture3D.type = THREE.UnsignedByteType;
     volumeTexture3D.minFilter = THREE.LinearFilter;
