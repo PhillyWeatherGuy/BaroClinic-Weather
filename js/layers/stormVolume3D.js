@@ -194,7 +194,13 @@ const fsVolume = `
             return 0.0;
         }
         float groundFade = smoothstep(0.0, 0.035, texCoord.y);
-        vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
+
+        // 🌟 Atmospheric Lower-Level Expansion:
+        // pow(y, 1.22) stretches the compressed 0-20 kft boundary layer upward
+        // while keeping the anvil top pinned to the exact same ceiling.
+        float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.22);
+
+        vec3 sampleCoord = vec3(texCoord.x, expandedY, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r * groundFade;
     }
 
