@@ -2,10 +2,10 @@
 import { unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
-// Grid Dimensions (128 x 128 x 64 = 1,048,576 bytes = 1 MB)
-const GRID_X = 128;
-const GRID_Y = 128;
-const GRID_Z = 64;
+// Grid Dimensions: 128 (East-West) x 64 (Vertical Altitude) x 128 (North-South) = 1 MB
+const GRID_X = 128; // East - West (Longitude)
+const GRID_Y = 64;  // Altitude / Height (0 to 20 km)
+const GRID_Z = 128; // North - South (Latitude)
 const MAX_ALTITUDE_METERS = 20000.0; // 20 km (~65.6 kft)
 
 // 4/3 Effective Earth Radius for Standard Atmospheric Refraction
@@ -21,14 +21,12 @@ function decompressLevel2(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
     const decompressedChunks = [];
 
-    // 1. Raw GZIP file
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             return unzlibSync(bytes);
         } catch (e) {}
     }
 
-    // 2. Archive II Chunked Format (24-byte volume header followed by chunk records)
     let pos = 0;
     const isArchiveHeader = bytes.length > 24 &&
         bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56; // "AR2V"
@@ -45,7 +43,6 @@ function decompressLevel2(arrayBuffer) {
 
         if (chunkSize === 0) continue;
 
-        // If negative, chunk is uncompressed
         if (chunkSize < 0) {
             chunkSize = -chunkSize;
             if (pos + chunkSize > bytes.length) break;
@@ -56,7 +53,6 @@ function decompressLevel2(arrayBuffer) {
 
         if (pos + chunkSize > bytes.length) break;
 
-        // BZIP2 Chunk
         if (bytes[pos] === 0x42 && bytes[pos + 1] === 0x5a && bytes[pos + 2] === 0x68) {
             try {
                 const sub = bytes.subarray(pos, pos + chunkSize);
@@ -90,7 +86,7 @@ function decompressLevel2(arrayBuffer) {
 }
 
 /**
- * 🛰️ Parses Message 31 sweeps using Table XVII-A ICAO Radar Identifier Anchor
+ * 🛰️ Parses Message 31 sweeps, applies 3D beam width dilation, and places storm upright
  */
 function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0, stationId = 'KDMX') {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
@@ -104,6 +100,10 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
     const lngSpan = Math.max(maxLng - minLng, 0.001);
     const latSpan = Math.max(maxLat - minLat, 0.001);
 
+    const midLat = (minLat + maxLat) * 0.5;
+    const boxWidthMeters = Math.max(lngSpan * 111320.0 * Math.cos(midLat * DEG_TO_RAD), 1000.0);
+    const boxDepthMeters = Math.max(latSpan * 111320.0, 1000.0);
+
     const detectedTiltsMap = new Map();
     let selectedTiltRadialGrid = null;
     const TARGET_RADIALS = 720;
@@ -111,7 +111,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
 
     let gateCountProcessed = 0;
 
-    // Station code 4-byte ASCII anchor (Table XVII-A bytes 0..3)
     const sCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
     const c0 = sCode.charCodeAt(0);
     const c1 = sCode.charCodeAt(1);
@@ -121,7 +120,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
     const limit = rawBytes.length - 120;
 
     for (let i = 0; i <= limit; i++) {
-        // Fast 4-byte match on station ID
         if (
             rawBytes[i] === c0 &&
             rawBytes[i + 1] === c1 &&
@@ -135,7 +133,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
             const elAngle = view.getFloat32(hdrPos + 24, false);
             const dataBlockCount = view.getUint16(hdrPos + 30, false);
 
-            // Sanity check Table XVII-A fields
             if (
                 azAngle >= 0.0 && azAngle <= 360.0 &&
                 elIndex >= 1 && elIndex <= 35 &&
@@ -146,7 +143,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                     detectedTiltsMap.set(elIndex, parseFloat(elAngle.toFixed(2)));
                 }
 
-                // Locate Reflectivity ("DREF" or "REF") block pointer
                 let refOffset = -1;
                 for (let b = 0; b < dataBlockCount; b++) {
                     const ptrPos = hdrPos + 32 + (b * 4);
@@ -175,7 +171,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                     const scale = view.getFloat32(refOffset + 20, false) || 2.0;
                     const offsetVal = view.getFloat32(refOffset + 24, false) || 66.0;
 
-                    // 2D slice extraction
                     const isSelected2DTilt = (elIndex === (targetTiltIndex + 1));
                     if (isSelected2DTilt) {
                         if (!selectedTiltRadialGrid) {
@@ -188,7 +183,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                         selectedTiltRadialGrid.set(gateBytes, targetRayOffset);
                     }
 
-                    // 3D Voxel Coordinate Projection
                     const sinEl = Math.sin(elAngle * DEG_TO_RAD);
                     const cosEl = Math.cos(elAngle * DEG_TO_RAD);
                     const sinAz = Math.sin(azAngle * DEG_TO_RAD);
@@ -200,14 +194,12 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
 
                     for (let g = 0; g < availableGates; g++) {
                         const rawVal = rawBytes[dataStart + g];
-                        if (rawVal <= 1) continue; // 0 = below SNR, 1 = range folded
+                        if (rawVal <= 1) continue;
 
                         const dbz = (rawVal - offsetVal) / scale;
-                        if (dbz < 10.0) continue; // Noise floor threshold
+                        if (dbz < 12.0) continue; // Noise cutoff
 
-                        // Map to standard 0..255 byte scale
                         const mappedByte = Math.min(255, Math.max(1, Math.round((dbz + 32.0) * 2.0)));
-
                         const slantRange = firstGateMeters + (g * gateSpacingMeters);
 
                         // 4/3 Earth Radius Beam Refraction Model
@@ -226,31 +218,49 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                         const gateLat = radarLat + (dy / EARTH_RADIUS_METERS) * RAD_TO_DEG;
                         const gateLng = radarLon + (dx / (EARTH_RADIUS_METERS * radarCosLat)) * RAD_TO_DEG;
 
-                        // Bounding Box Filter
                         if (gateLng < minLng || gateLng > maxLng || gateLat < minLat || gateLat > maxLat) {
                             continue;
                         }
 
+                        // 🌟 CORRECT AXIS MAPPING:
+                        // gx: East-West (X)
+                        // gy: Altitude (Y) - Up/Down
+                        // gz: North-South (Z) - Ground depth
                         const gx = Math.min(GRID_X - 1, Math.max(0, Math.floor(((gateLng - minLng) / lngSpan) * GRID_X)));
-                        const gy = Math.min(GRID_Y - 1, Math.max(0, Math.floor(((gateLat - minLat) / latSpan) * GRID_Y)));
-                        const gz = Math.min(GRID_Z - 1, Math.max(0, Math.floor((heightMeters / MAX_ALTITUDE_METERS) * GRID_Z)));
+                        const gy = Math.min(GRID_Y - 1, Math.max(0, Math.floor((heightMeters / MAX_ALTITUDE_METERS) * GRID_Y)));
+                        const gz = Math.min(GRID_Z - 1, Math.max(0, Math.floor(((gateLat - minLat) / latSpan) * GRID_Z)));
 
-                        // Vertical beam thickness splat to bridge conical gaps
-                        const beamThickness = Math.max(1, Math.floor((slantRange * 0.0087 / MAX_ALTITUDE_METERS) * GRID_Z));
+                        // 🌟 Real Physical Beam Width Splatting (Bridges gaps between beams)
+                        const beamRadiusMeters = Math.max(250.0, slantRange * 0.009);
+                        const rx = Math.max(1, Math.min(4, Math.ceil((beamRadiusMeters / boxWidthMeters) * GRID_X)));
+                        const rz = Math.max(1, Math.min(4, Math.ceil((beamRadiusMeters / boxDepthMeters) * GRID_Z)));
+                        const ry = Math.max(1, Math.min(3, Math.ceil((beamRadiusMeters / MAX_ALTITUDE_METERS) * GRID_Y)));
 
-                        for (let dz = -beamThickness; dz <= beamThickness; dz++) {
-                            const targetZ = gz + dz;
-                            if (targetZ >= 0 && targetZ < GRID_Z) {
-                                const vIdx = targetZ * (GRID_X * GRID_Y) + gy * GRID_X + gx;
-                                if (mappedByte > voxels[vIdx]) {
-                                    voxels[vIdx] = mappedByte;
-                                    gateCountProcessed++;
+                        for (let dz = -rz; dz <= rz; dz++) {
+                            const tz = gz + dz;
+                            if (tz < 0 || tz >= GRID_Z) continue;
+
+                            for (let dy = -ry; dy <= ry; dy++) {
+                                const ty = gy + dy;
+                                if (ty < 0 || ty >= GRID_Y) continue;
+
+                                for (let dx = -rx; dx <= rx; dx++) {
+                                    const tx = gx + dx;
+                                    if (tx < 0 || tx >= GRID_X) continue;
+
+                                    if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) + (dz * dz) / (rz * rz) <= 1.0) {
+                                        // Z * (GRID_X * GRID_Y) + Y * GRID_X + X
+                                        const idx = tz * (GRID_X * GRID_Y) + ty * GRID_X + tx;
+                                        if (mappedByte > voxels[idx]) {
+                                            voxels[idx] = mappedByte;
+                                            gateCountProcessed++;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // Advance search index past this radial
                     i += 100;
                 }
             }
@@ -261,7 +271,7 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
         .sort((a, b) => a[0] - b[0])
         .map(([index, el]) => ({ index: index - 1, elevation: el }));
 
-    console.log(`📡 [Level 2 Worker] Integrated ${gateCountProcessed} storm gates for ${sCode}.`);
+    console.log(`📡 [Level 2 Worker] Integrated ${gateCountProcessed} filled gates for ${sCode}.`);
 
     return {
         voxels,
