@@ -23,7 +23,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader: Glowing Convective Cloud Raymarcher with Multi-Octave Billows
+// Fragment Shader: 360° Omnidirectional Cloud Raymarcher with Soft Billow Puffiness
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -41,7 +41,7 @@ const fsVolume = `
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
-    // Fast 3D Noise for Cloud Billow Turbulence
+    // Smooth 3D Value Noise for Organic Cauliflower Puffiness
     float hash(vec3 p) {
         p = fract(p * 0.3183099 + 0.1);
         p *= 17.0;
@@ -59,15 +59,17 @@ const fsVolume = `
                        mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
     }
 
-    // Multi-Scale Billow Noise (Large Cumulus Domes + Micro Puffs)
-    float puffyCloudNoise(vec3 p) {
-        float macroDomes = noise3D(p * 4.5) * 0.65;
-        float microPuffs = noise3D(p * 12.0) * 0.35;
-        return (macroDomes + microPuffs - 0.5) * 0.038;
+    // Multi-Scale Cloud Billows (Smooth macro dome + soft turbulent puffs)
+    float cloudTurbulence(vec3 p) {
+        float f = noise3D(p * 5.0) * 0.65;
+        f += noise3D(p * 11.0) * 0.35;
+        return f;
     }
 
+    // 🌟 Safe 360° Ray-AABB Intersection (Zero division by zero)
     vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
-        vec3 invR = 1.0 / rayDir;
+        vec3 safeDir = rayDir + sign(rayDir) * 1e-6;
+        vec3 invR = 1.0 / safeDir;
         vec3 tbot = invR * (boxMin - rayOrigin);
         vec3 ttop = invR * (boxMax - rayOrigin);
         vec3 tmin = min(ttop, tbot);
@@ -77,21 +79,40 @@ const fsVolume = `
         return vec2(t0, t1);
     }
 
-    float sampleVolume(vec3 texCoord) {
+    // Base Macro Density (Smooth for clean normal estimation)
+    float sampleBaseDensity(vec3 texCoord) {
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-
-        // 🌟 Multi-Octave Puffy Cloud Perturbation
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
-        float puff = puffyCloudNoise(sampleCoord);
-        sampleCoord += vec3(puff, puff * 0.7, puff);
-        sampleCoord = clamp(sampleCoord, 0.0, 1.0);
-
         return texture(u_volumeTex, sampleCoord).r;
     }
 
-    // 🌟 Atmospheric Cloud Transfer Function: Super-Light Green Fog -> Glowing Dense Core
+    // Puffy Cloud Density (Combines smooth base volume with soft billow displacement)
+    float samplePuffyDensity(vec3 texCoord) {
+        float base = sampleBaseDensity(texCoord);
+        if (base <= u_cutoffMin.w) return 0.0;
+
+        // Apply billow noise strictly to the outer cloud envelope to scallop the edges
+        vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
+        float billow = cloudTurbulence(sampleCoord);
+        
+        // Gentle displacement that dissolves flat hulls into puffy cumulus clouds
+        float puffMod = (billow - 0.5) * 0.04 * (1.0 - smoothstep(0.25, 0.70, base));
+        return clamp(base + puffMod, 0.0, 1.0);
+    }
+
+    // Smooth Macro Surface Normals (Zero vertical comb/whisker artifacts)
+    vec3 estimateSmoothNormal(vec3 p, float eps) {
+        float dX = sampleBaseDensity(p + vec3(eps, 0.0, 0.0)) - sampleBaseDensity(p - vec3(eps, 0.0, 0.0));
+        float dY = sampleBaseDensity(p + vec3(0.0, eps, 0.0)) - sampleBaseDensity(p - vec3(0.0, eps, 0.0));
+        float dZ = sampleBaseDensity(p + vec3(0.0, 0.0, eps)) - sampleBaseDensity(p - vec3(0.0, 0.0, eps));
+        vec3 n = -vec3(dX, dY, dZ);
+        float len = length(n);
+        return len > 0.0001 ? n / len : vec3(0.0, 1.0, 0.0);
+    }
+
+    // 🌟 Natural Cloud Transfer Function (Creamy White Anvil -> Emerald Rain -> Fiery Core)
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
@@ -100,35 +121,34 @@ const fsVolume = `
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
 
-        // 🌟 Drastically reduced green/blue opacity curve
+        // Outer cloud vapor (12-24 dBZ): Soft, natural cloud-white mist
+        if (value < 0.44) {
+            float whiteMix = 1.0 - smoothstep(u_cutoffMin.w, 0.44, value);
+            vec3 softWhite = vec3(0.94, 0.96, 0.98);
+            cloudColor = mix(cloudColor, softWhite, whiteMix * 0.85);
+        }
+
+        // Smooth non-linear density curve (Translucent outer mist -> Dense hail core)
         float alpha = 0.0;
-        if (value < 0.38) {
-            // 12-22 dBZ (Blue/Cyan): 2% to 6% opacity (faint glowing atmospheric vapor)
-            float t = (value - u_cutoffMin.w) / max(0.38 - u_cutoffMin.w, 0.001);
-            alpha = mix(0.02, 0.07, t);
-        } else if (value < 0.55) {
-            // 22-38 dBZ (Green/Lime): 10% to 28% opacity (translucent rain shield)
-            float t = (value - 0.38) / 0.17;
-            alpha = mix(0.08, 0.28, t);
-        } else if (value < 0.72) {
-            // 38-50 dBZ (Yellow/Orange): 45% to 75% opacity (dense convective core)
-            float t = (value - 0.55) / 0.17;
-            alpha = mix(0.35, 0.75, t);
+        if (value < 0.40) {
+            // 12-22 dBZ: 2% to 6% opacity
+            float t = (value - u_cutoffMin.w) / max(0.40 - u_cutoffMin.w, 0.001);
+            alpha = mix(0.02, 0.06, t);
+        } else if (value < 0.58) {
+            // 22-38 dBZ (Rain Shield): 10% to 32% opacity
+            float t = (value - 0.40) / 0.18;
+            alpha = mix(0.07, 0.32, t);
+        } else if (value < 0.74) {
+            // 38-50 dBZ (Convective Core): 45% to 80% opacity
+            float t = (value - 0.58) / 0.16;
+            alpha = mix(0.38, 0.80, t);
         } else {
-            // 50+ dBZ (Red/Pink/White Hail Core): 95% to 100% solid opacity
-            float t = (value - 0.72) / 0.28;
+            // 50+ dBZ (Hail Core): 95% to 100% solid opacity
+            float t = (value - 0.74) / 0.26;
             alpha = mix(0.85, 1.00, t);
         }
 
         return vec4(cloudColor, alpha);
-    }
-
-    // Surface Normal Estimation for Shaded Cloud Domes
-    vec3 estimateNormal(vec3 p, float eps) {
-        float dX = sampleVolume(p + vec3(eps, 0.0, 0.0)) - sampleVolume(p - vec3(eps, 0.0, 0.0));
-        float dY = sampleVolume(p + vec3(0.0, eps, 0.0)) - sampleVolume(p - vec3(0.0, eps, 0.0));
-        float dZ = sampleVolume(p + vec3(0.0, 0.0, eps)) - sampleVolume(p - vec3(0.0, 0.0, eps));
-        return normalize(-vec3(dX, dY, dZ));
     }
 
     #define MAX_STEPS 96
@@ -138,31 +158,35 @@ const fsVolume = `
         vec3 accumulatedColor = vec3(0.0);
         float transmittance = 1.0;
         float accumulatedLength = 0.0;
-        vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30)); // Overhead warm sun angle
+
+        // Dynamic overhead sun angle
+        vec3 sunDir = normalize(vec3(0.35, 0.90, 0.25));
 
         for (int i = 0; i < MAX_STEPS; i++) {
-            float sampleValue = sampleVolume(currentPosition);
+            float sampleValue = samplePuffyDensity(currentPosition);
 
             if (sampleValue > u_cutoffMin.w) {
                 vec4 sampleColor = colorizeCloud(sampleValue);
 
                 if (sampleColor.a > 0.001) {
-                    // Sunlit Cloud Shading + Ambient Sky Bounce
-                    vec3 normal = estimateNormal(currentPosition, 0.022);
+                    // Smooth normal on base volume eliminates comb fibers
+                    vec3 normal = estimateSmoothNormal(currentPosition, 0.025);
+                    
+                    // Atmospheric Sunlight + Sky Bounce Illumination
                     float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
                     float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
-                    vec3 illumination = vec3(0.45) + vec3(0.55) * sunLight + vec3(0.15, 0.18, 0.22) * skyLight;
+                    vec3 illumination = vec3(0.42) + vec3(0.58) * sunLight + vec3(0.14, 0.18, 0.24) * skyLight;
 
                     vec3 litColor = sampleColor.rgb * illumination;
 
-                    // 🌟 Physically Based Beer-Lambert Optical Transmittance (Glowing Core)
-                    float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.4;
+                    // Beer-Lambert Optical Transmittance (Glowing internal core)
+                    float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.35;
                     float stepTransmittance = exp(-stepDensity);
 
-                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * 1.5;
+                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * 1.4;
                     transmittance *= stepTransmittance;
 
-                    if (transmittance < 0.03) {
+                    if (transmittance < 0.02) {
                         break;
                     }
                 }
@@ -224,7 +248,6 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx] = c.r;
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
-        // Full base color; colorizeCloud() controls dynamic transparency
         imgData.data[idx + 3] = (i < 65) ? 0 : 255;
     }
 
@@ -252,19 +275,21 @@ export function initStormVolumeViewer() {
     if (renderer) return;
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100.0);
+    camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100.0); // 0.01 near plane prevents camera clipping
     camera.position.set(0.0, 1.1, 1.9);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     canvasContainerEl.appendChild(renderer.domElement);
 
+    // 🌟 Full 360° Omnidirectional Orbital Controls
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.minDistance = 0.5;
-    controls.maxDistance = 5.0;
-    controls.maxPolarAngle = Math.PI * 0.49;
+    controls.minDistance = 0.3;
+    controls.maxDistance = 6.0;
+    controls.minPolarAngle = Math.PI * 0.05; // Full pitch capability
+    controls.maxPolarAngle = Math.PI * 0.95; // Allows looking from below horizon
     controls.target.set(0.0, 0.0, 0.0);
 
     paletteTexture2D = createRadarPaletteTexture();
@@ -281,7 +306,6 @@ export function initStormVolumeViewer() {
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
             u_steps: { value: 72.0 },
             u_opacity: { value: 1.0 },
-            // Cutoff threshold starts at ~12 dBZ
             u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.25) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
         },
@@ -317,6 +341,7 @@ function handleResize() {
 function animate() {
     if (!isViewerActive) return;
     animationFrameId = requestAnimationFrame(animate);
+
     if (controls) controls.update();
     if (stormBoxMesh && stormBoxMesh.material) {
         stormBoxMesh.material.uniforms.u_cameraPos.value.copy(camera.position);
@@ -336,12 +361,11 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 14.0; // Convective storm top
+    const heightKm = 14.0;
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    // 🌟 1.9x Vertical Exaggeration Boost (Stretches the storm upwards into a towering cloud)
-    const aspectY = (heightKm / maxHoriz) * 1.9;
+    const aspectY = (heightKm / maxHoriz) * 1.9; // 1.9x vertical exaggeration
     const aspectZ = depthKm / maxHoriz;
 
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
