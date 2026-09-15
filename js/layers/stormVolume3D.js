@@ -193,7 +193,7 @@ const fsVolume = `
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-        float groundFade = smoothstep(0.0, 0.03, texCoord.y);
+        float groundFade = smoothstep(0.0, 0.025, texCoord.y);
 
         // Gentle lower-level vertical expansion (anchored at ground and ceiling)
         float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.45);
@@ -256,13 +256,11 @@ const fsVolume = `
                 } else {
                     // --- MODE 0: TRANSLUCENT GLOWING ATMOSPHERIC CLOUD ---
                     float normDbz = (sampleValue - u_cutoffMin.w) / max(1.0 - u_cutoffMin.w, 0.001);
-                    float edgeSoft = smoothstep(0.0, 0.08, normDbz);
+                    float edgeSoft = smoothstep(0.0, 0.06, normDbz);
 
-                    // 🌟 Dual-Tier Density:
-                    // Low/Mid reflectivities (< 45 dBZ) are translucent like smoke, letting the ray
-                    // penetrate deep inside the hook. Severe cores (> 55 dBZ) ramp up to solid mass.
-                    float mistDensity = pow(normDbz, 2.8) * 1.8;
-                    float coreDensity = smoothstep(0.55, 0.85, sampleValue) * 3.4;
+                    // 🌟 Tuned mist curve: brings back the light blue/green shroud without muddying the core
+                    float mistDensity = pow(normDbz, 1.85) * 1.35;
+                    float coreDensity = smoothstep(0.50, 0.82, sampleValue) * 3.8;
                     float density = (mistDensity + coreDensity) * edgeSoft;
 
                     // Dual-hemisphere ambient skylight
@@ -273,8 +271,7 @@ const fsVolume = `
                     float sunPenetration = exp(-density * 0.35);
                     vec3 directSun = vec3(1.15, 1.10, 1.00) * (sunPenetration * 0.75 + forwardScatter * 0.45);
 
-                    // 🌟 Core Luminescence: Hail core & tornado vortex (60+ dBZ) radiates outward,
-                    // glowing through the amber cloud just like Bram's render!
+                    // Core Luminescence: Hail core & tornado vortex (60+ dBZ) radiates outward
                     float coreIntensity = smoothstep(0.66, 0.88, sampleValue);
                     vec3 coreGlow = palColor.rgb * coreIntensity * 1.6;
 
@@ -306,7 +303,7 @@ const fsVolume = `
 `;
 
 /**
- * 🌟 Creates 256x1 Palette
+ * 🌟 Creates 256x1 Palette with Luminous Neon Baby Blue for Low dBZ
  */
 function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
@@ -316,9 +313,21 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
     const imgData = ctx.createImageData(256, 1);
 
     for (let i = 0; i < 256; i++) {
-        const c = palette256[i] || { r: 0, g: 0, b: 0, a: 0 };
-        const idx = i * 4;
+        let c = palette256[i] || { r: 0, g: 0, b: 0, a: 0 };
 
+        // 🌟 Replace dull grayish-blue with vibrant Neon Baby Blue (5 to 18 dBZ ~ bytes 68 to 102)
+        if (i >= 68 && i <= 102) {
+            const t = (i - 68) / 34.0;
+            // Smooth gradient from glowing Neon Baby Blue (0, 230, 255) to bright Cyan-Teal (10, 210, 210)
+            c = {
+                r: Math.round(0 * (1.0 - t) + 15 * t),
+                g: Math.round(230 * (1.0 - t) + 215 * t),
+                b: Math.round(255 * (1.0 - t) + 180 * t),
+                a: 255
+            };
+        }
+
+        const idx = i * 4;
         imgData.data[idx] = c.r;
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
@@ -409,7 +418,8 @@ export function initStormVolumeViewer() {
 
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100.0);
-    camera.position.set(0.0, 0.95, 2.35);
+    // 🌟 Moved camera in closer (from 2.35 down to 1.68) so the storm fills the screen natively
+    camera.position.set(0.0, 0.68, 1.68);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -548,10 +558,11 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
     const heightKm = 18.0;
 
-    // Balanced panoramic aspect ratio (wide spreading anvil, natural height relief)
+    // Balanced panoramic aspect ratio scaled uniformly 1x1 to look bigger
     const maxHoriz = Math.max(widthKm, depthKm, 12.0);
-    const HORIZONTAL_SPREAD = 1.35;
-    const VERTICAL_RELIEF = 1.58;
+    const UNIFORM_SCALE = 1.15; // 🌟 1x1 uniform scale-up across all 3 axes
+    const HORIZONTAL_SPREAD = 1.35 * UNIFORM_SCALE;
+    const VERTICAL_RELIEF = 1.58 * UNIFORM_SCALE;
 
     const aspectX = (widthKm / maxHoriz) * HORIZONTAL_SPREAD;
     const aspectZ = (depthKm / maxHoriz) * HORIZONTAL_SPREAD;
