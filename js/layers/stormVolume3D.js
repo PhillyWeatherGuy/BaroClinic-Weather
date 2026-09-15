@@ -23,7 +23,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader: 360° Omnidirectional Cloud Raymarcher with Soft Billow Puffiness
+// Fragment Shader: 360° Omnidirectional Cloud Raymarcher
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -41,7 +41,7 @@ const fsVolume = `
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
-    // Smooth 3D Value Noise for Organic Cauliflower Puffiness
+    // Fast 3D Noise for Cloud Billow Turbulence
     float hash(vec3 p) {
         p = fract(p * 0.3183099 + 0.1);
         p *= 17.0;
@@ -59,14 +59,14 @@ const fsVolume = `
                        mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
     }
 
-    // Multi-Scale Cloud Billows (Smooth macro dome + soft turbulent puffs)
-    float cloudTurbulence(vec3 p) {
-        float f = noise3D(p * 5.0) * 0.65;
-        f += noise3D(p * 11.0) * 0.35;
-        return f;
+    // Multi-Scale Billow Noise (Large Cumulus Domes + Micro Puffs)
+    float puffyCloudNoise(vec3 p) {
+        float macroDomes = noise3D(p * 4.5) * 0.65;
+        float microPuffs = noise3D(p * 12.0) * 0.35;
+        return (macroDomes + microPuffs - 0.5) * 0.038;
     }
 
-    // 🌟 Safe 360° Ray-AABB Intersection (Zero division by zero)
+    // Safe 360° Ray-AABB Intersection (Zero division by zero)
     vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
         vec3 safeDir = rayDir + sign(rayDir) * 1e-6;
         vec3 invR = 1.0 / safeDir;
@@ -79,40 +79,21 @@ const fsVolume = `
         return vec2(t0, t1);
     }
 
-    // Base Macro Density (Smooth for clean normal estimation)
-    float sampleBaseDensity(vec3 texCoord) {
+    float sampleVolume(vec3 texCoord) {
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
+
+        // Multi-Octave Puffy Cloud Perturbation
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
+        float puff = puffyCloudNoise(sampleCoord);
+        sampleCoord += vec3(puff, puff * 0.7, puff);
+        sampleCoord = clamp(sampleCoord, 0.0, 1.0);
+
         return texture(u_volumeTex, sampleCoord).r;
     }
 
-    // Puffy Cloud Density (Combines smooth base volume with soft billow displacement)
-    float samplePuffyDensity(vec3 texCoord) {
-        float base = sampleBaseDensity(texCoord);
-        if (base <= u_cutoffMin.w) return 0.0;
-
-        // Apply billow noise strictly to the outer cloud envelope to scallop the edges
-        vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
-        float billow = cloudTurbulence(sampleCoord);
-        
-        // Gentle displacement that dissolves flat hulls into puffy cumulus clouds
-        float puffMod = (billow - 0.5) * 0.04 * (1.0 - smoothstep(0.25, 0.70, base));
-        return clamp(base + puffMod, 0.0, 1.0);
-    }
-
-    // Smooth Macro Surface Normals (Zero vertical comb/whisker artifacts)
-    vec3 estimateSmoothNormal(vec3 p, float eps) {
-        float dX = sampleBaseDensity(p + vec3(eps, 0.0, 0.0)) - sampleBaseDensity(p - vec3(eps, 0.0, 0.0));
-        float dY = sampleBaseDensity(p + vec3(0.0, eps, 0.0)) - sampleBaseDensity(p - vec3(0.0, eps, 0.0));
-        float dZ = sampleBaseDensity(p + vec3(0.0, 0.0, eps)) - sampleBaseDensity(p - vec3(0.0, 0.0, eps));
-        vec3 n = -vec3(dX, dY, dZ);
-        float len = length(n);
-        return len > 0.0001 ? n / len : vec3(0.0, 1.0, 0.0);
-    }
-
-    // 🌟 Natural Cloud Transfer Function (Creamy White Anvil -> Emerald Rain -> Fiery Core)
+    // Atmospheric Cloud Transfer Function
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
@@ -121,93 +102,33 @@ const fsVolume = `
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
 
-        // Outer cloud vapor (12-24 dBZ): Soft, natural cloud-white mist
-        if (value < 0.44) {
-            float whiteMix = 1.0 - smoothstep(u_cutoffMin.w, 0.44, value);
-            vec3 softWhite = vec3(0.94, 0.96, 0.98);
-            cloudColor = mix(cloudColor, softWhite, whiteMix * 0.85);
-        }
-
-        // Smooth non-linear density curve (Translucent outer mist -> Dense hail core)
         float alpha = 0.0;
-        if (value < 0.40) {
-            // 12-22 dBZ: 2% to 6% opacity
-            float t = (value - u_cutoffMin.w) / max(0.40 - u_cutoffMin.w, 0.001);
-            alpha = mix(0.02, 0.06, t);
-        } else if (value < 0.58) {
-            // 22-38 dBZ (Rain Shield): 10% to 32% opacity
-            float t = (value - 0.40) / 0.18;
-            alpha = mix(0.07, 0.32, t);
-        } else if (value < 0.74) {
-            // 38-50 dBZ (Convective Core): 45% to 80% opacity
-            float t = (value - 0.58) / 0.16;
-            alpha = mix(0.38, 0.80, t);
+        if (value < 0.38) {
+            float t = (value - u_cutoffMin.w) / max(0.38 - u_cutoffMin.w, 0.001);
+            alpha = mix(0.02, 0.07, t);
+        } else if (value < 0.55) {
+            float t = (value - 0.38) / 0.17;
+            alpha = mix(0.08, 0.28, t);
+        } else if (value < 0.72) {
+            float t = (value - 0.55) / 0.17;
+            alpha = mix(0.35, 0.75, t);
         } else {
-            // 50+ dBZ (Hail Core): 95% to 100% solid opacity
-            float t = (value - 0.74) / 0.26;
+            float t = (value - 0.72) / 0.28;
             alpha = mix(0.85, 1.00, t);
         }
 
         return vec4(cloudColor, alpha);
     }
 
-    #define MAX_STEPS 96
-    void march(vec3 currentPosition, vec3 dir, float rayLength) {
-        float stepSize = rayLength / u_steps;
-        vec3 step = normalize(dir) * stepSize;
-        vec3 accumulatedColor = vec3(0.0);
-        float transmittance = 1.0;
-        float accumulatedLength = 0.0;
-
-        // Dynamic overhead sun angle
-        vec3 sunDir = normalize(vec3(0.35, 0.90, 0.25));
-
-        for (int i = 0; i < MAX_STEPS; i++) {
-            float sampleValue = samplePuffyDensity(currentPosition);
-
-            if (sampleValue > u_cutoffMin.w) {
-                vec4 sampleColor = colorizeCloud(sampleValue);
-
-                if (sampleColor.a > 0.001) {
-                    // Smooth normal on base volume eliminates comb fibers
-                    vec3 normal = estimateSmoothNormal(currentPosition, 0.025);
-                    
-                    // Atmospheric Sunlight + Sky Bounce Illumination
-                    float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
-                    float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
-                    vec3 illumination = vec3(0.42) + vec3(0.58) * sunLight + vec3(0.14, 0.18, 0.24) * skyLight;
-
-                    vec3 litColor = sampleColor.rgb * illumination;
-
-                    // Beer-Lambert Optical Transmittance (Glowing internal core)
-                    float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.35;
-                    float stepTransmittance = exp(-stepDensity);
-
-                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * 1.4;
-                    transmittance *= stepTransmittance;
-
-                    if (transmittance < 0.02) {
-                        break;
-                    }
-                }
-            }
-
-            currentPosition += step;
-            accumulatedLength += stepSize;
-
-            if (accumulatedLength >= rayLength) {
-                break;
-            }
-        }
-
-        float finalAlpha = (1.0 - transmittance) * u_opacity;
-        if (finalAlpha < 0.01) {
-            discard;
-        }
-
-        fragColor = vec4(accumulatedColor, finalAlpha);
+    // Surface Normal Estimation
+    vec3 estimateNormal(vec3 p, float eps) {
+        float dX = sampleVolume(p + vec3(eps, 0.0, 0.0)) - sampleVolume(p - vec3(eps, 0.0, 0.0));
+        float dY = sampleVolume(p + vec3(0.0, eps, 0.0)) - sampleVolume(p - vec3(0.0, eps, 0.0));
+        float dZ = sampleVolume(p + vec3(0.0, 0.0, eps)) - sampleVolume(p - vec3(0.0, 0.0, eps));
+        return normalize(-vec3(dX, dY, dZ));
     }
 
+    #define MAX_STEPS 96
     void main() {
         vec3 rayOrigin = u_cameraPos;
         vec3 rayDir = normalize(v_worldPos - rayOrigin);
@@ -221,13 +142,56 @@ const fsVolume = `
 
         float tStart = max(hit.x, 0.0);
         float tEnd = hit.y;
-        float rayLength = tEnd - tStart;
 
+        // Entry and Exit points in physical box space
         vec3 frontPos = rayOrigin + rayDir * tStart;
-        vec3 currentPosition = (frontPos + halfSize) / u_boxSize;
-        vec3 unitDir = rayDir / u_boxSize;
+        vec3 backPos = rayOrigin + rayDir * tEnd;
 
-        march(currentPosition, unitDir, rayLength);
+        // Map entry/exit into normalized [0, 1] Texture Space
+        vec3 uvwStart = (frontPos + halfSize) / u_boxSize;
+        vec3 uvwEnd = (backPos + halfSize) / u_boxSize;
+        vec3 uvwStep = (uvwEnd - uvwStart) / u_steps;
+
+        vec3 currentPosition = uvwStart;
+        vec3 accumulatedColor = vec3(0.0);
+        float transmittance = 1.0;
+        vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30));
+
+        for (int i = 0; i < MAX_STEPS; i++) {
+            float sampleValue = sampleVolume(currentPosition);
+
+            if (sampleValue > u_cutoffMin.w) {
+                vec4 sampleColor = colorizeCloud(sampleValue);
+
+                if (sampleColor.a > 0.001) {
+                    vec3 normal = estimateNormal(currentPosition, 0.022);
+                    float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
+                    float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
+                    vec3 illumination = vec3(0.45) + vec3(0.55) * sunLight + vec3(0.15, 0.18, 0.22) * skyLight;
+
+                    vec3 litColor = sampleColor.rgb * illumination;
+
+                    float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.4;
+                    float stepTransmittance = exp(-stepDensity);
+
+                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * 1.5;
+                    transmittance *= stepTransmittance;
+
+                    if (transmittance < 0.03) {
+                        break;
+                    }
+                }
+            }
+
+            currentPosition += uvwStep;
+        }
+
+        float finalAlpha = (1.0 - transmittance) * u_opacity;
+        if (finalAlpha < 0.01) {
+            discard;
+        }
+
+        fragColor = vec4(accumulatedColor, finalAlpha);
     }
 `;
 
@@ -282,14 +246,14 @@ export function initStormVolumeViewer() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     canvasContainerEl.appendChild(renderer.domElement);
 
-    // 🌟 Full 360° Omnidirectional Orbital Controls
+    // 🌟 360° Omnidirectional Controls (Full pitch and yaw range)
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.minDistance = 0.3;
     controls.maxDistance = 6.0;
-    controls.minPolarAngle = Math.PI * 0.05; // Full pitch capability
-    controls.maxPolarAngle = Math.PI * 0.95; // Allows looking from below horizon
+    controls.minPolarAngle = 0.0;        // Full overhead top-down view
+    controls.maxPolarAngle = Math.PI;    // Full underneath view
     controls.target.set(0.0, 0.0, 0.0);
 
     paletteTexture2D = createRadarPaletteTexture();
@@ -341,7 +305,6 @@ function handleResize() {
 function animate() {
     if (!isViewerActive) return;
     animationFrameId = requestAnimationFrame(animate);
-
     if (controls) controls.update();
     if (stormBoxMesh && stormBoxMesh.material) {
         stormBoxMesh.material.uniforms.u_cameraPos.value.copy(camera.position);
