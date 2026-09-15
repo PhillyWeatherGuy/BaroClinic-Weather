@@ -44,7 +44,7 @@ function getLevel2Worker() {
     if (!level2Worker) {
         level2Worker = new Worker('./js/core/level2Worker.js', { type: 'module' });
         level2Worker.onmessage = (e) => {
-            const { success, voxelBuffer, tilts, bounds, error } = e.data;
+            const { success, slices, voxelBuffer, tilts, bounds, error } = e.data;
             hideToast();
 
             if (!success) {
@@ -57,8 +57,8 @@ function getLevel2Worker() {
                 updateTiltDropdownUI(tilts);
             }
 
-            // Launch Three.js 3D volume view
-            updateStormVolume(voxelBuffer, bounds);
+            // 🌟 Pass the stacked tilt slices to the 3D renderer
+            updateStormVolume(slices || voxelBuffer, bounds);
         };
     }
     return level2Worker;
@@ -69,43 +69,8 @@ function getLevel2Worker() {
  */
 export function initRadarBoxTool(map) {
     const boxBtn = document.getElementById('btn-box-select');
-    const demoBtn = document.getElementById('btn-load-supercell-demo');
     const dragBoxEl = document.getElementById('radar-drag-box');
     if (!boxBtn || !map) return;
-
-    // 🌟 One-Click Historic Demo: June 19, 2015 KUDX Supercell (Bram's Video Case)
-    if (demoBtn) {
-        demoBtn.onclick = async () => {
-            showToast("Querying June 19, 2015 KUDX Supercell from NOAA S3...");
-            const bounds = [-103.85, 44.25, -103.15, 44.75]; // Sturgis / Nisland, SD
-            stateManager.activeRadarStation = 'KUDX';
-
-            // Fly camera over the storm
-            map.flyTo({ center: [-103.50, 44.50], zoom: 8.5 });
-
-            try {
-                // Query S3 dynamically by station, date, and approximate minute (02:37 UTC)
-                const url = `${stateManager.BASE_URL}radar-l2?station=KUDX&date=20150620&time=0237`;
-                const resp = await fetch(url);
-                if (!resp.ok) throw new Error(`Could not fetch S3 scan (${resp.status})`);
-                const rawBuffer = await resp.arrayBuffer();
-
-                showToast("Generating volumetric cloud...");
-                const worker = getLevel2Worker();
-                worker.postMessage({
-                    id: Date.now(),
-                    rawBuffer,
-                    radarLat: 44.125,
-                    radarLon: -102.8297,
-                    bounds,
-                    station: 'KUDX'
-                }, [rawBuffer]);
-            } catch (err) {
-                console.error("Demo load failed:", err);
-                showToast(`❌ ${err.message}`);
-            }
-        };
-    }
 
     let isDrawing = false;
     let startX = 0, startY = 0;
@@ -169,7 +134,6 @@ export function initRadarBoxTool(map) {
 
         if (dragBoxEl) dragBoxEl.style.display = 'none';
 
-        // Disarm box tool
         stateManager.boxSelectActive = false;
         boxBtn.classList.remove('active');
         document.body.classList.remove('radar-box-armed');
@@ -180,10 +144,8 @@ export function initRadarBoxTool(map) {
         const minY = Math.min(startY, endY);
         const maxY = Math.max(startY, endY);
 
-        // Ignore accidental tiny clicks (< 15px)
         if (maxX - minX < 15 || maxY - minY < 15) return;
 
-        // Convert screen pixel bounds to Geographic Coordinates
         const rect = mapContainer.getBoundingClientRect();
         const swPoint = [minX - rect.left, maxY - rect.top];
         const nePoint = [maxX - rect.left, minY - rect.top];
@@ -194,7 +156,6 @@ export function initRadarBoxTool(map) {
         const bounds = [sw.lng, sw.lat, ne.lng, ne.lat];
         stateManager.selectedStormBounds = bounds;
 
-        // Automatically find the closest radar station to the center of the drawn box
         const centerLng = (sw.lng + ne.lng) * 0.5;
         const centerLat = (sw.lat + ne.lat) * 0.5;
 
