@@ -9,6 +9,7 @@ let volumeTexture3D = null;
 let paletteTexture2D = null;
 let isViewerActive = false;
 let isFullscreen = false;
+let renderMode = 'cloud'; // 'cloud' | 'pixels'
 let animationFrameId = null;
 
 function ensureControlStyles() {
@@ -50,25 +51,59 @@ function ensureControlStyles() {
             background: rgba(56, 189, 248, 0.2);
             border-color: rgba(56, 189, 248, 0.5);
         }
-        .storm-cutoff-pill {
+        .storm-controls-bar {
             position: absolute;
             bottom: 14px;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
             align-items: center;
-            gap: 10px;
-            background: rgba(11, 15, 25, 0.88);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(56, 189, 248, 0.35);
-            border-radius: 20px;
-            padding: 6px 14px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+            gap: 12px;
+            background: rgba(11, 15, 25, 0.90);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 24px;
+            padding: 5px 12px;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.8);
             z-index: 20;
             font-family: 'Rajdhani', sans-serif;
             user-select: none;
             -webkit-user-select: none;
+        }
+        .storm-mode-pill {
+            display: flex;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 2px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            gap: 2px;
+        }
+        .storm-mode-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .storm-mode-btn:hover {
+            color: #fff;
+        }
+        .storm-mode-btn.active {
+            background: rgba(56, 189, 248, 0.3) !important;
+            color: #38bdf8 !important;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+        }
+        .storm-cutoff-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .storm-cutoff-label {
             font-size: 12px;
@@ -76,10 +111,10 @@ function ensureControlStyles() {
             color: #38bdf8;
             letter-spacing: 0.5px;
             white-space: nowrap;
-            min-width: 95px;
+            min-width: 90px;
         }
         .storm-cutoff-range {
-            width: 110px;
+            width: 100px;
             accent-color: #38bdf8;
             cursor: pointer;
             height: 4px;
@@ -116,7 +151,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader with Blue-Noise Ray Dithering (Zero Wood-Grain Lines)
+// Dual-Mode Fragment Shader: Smooth Atmospheric Cloud ↔ Crisp Super-Res Pixels
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -131,17 +166,17 @@ const fsVolume = `
     uniform vec3 u_boxSize;
     uniform float u_steps;
     uniform float u_opacity;
+    uniform float u_renderMode; // 0.0 = Smooth Cloud, 1.0 = Crisp Raw Pixels
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
-    // Fast Screen-Space Dither Hash (Destroys wood-grain lines and contour bands)
+    // Fast Dither Hash
     float ditherHash(vec2 p) {
         vec3 p3 = fract(vec3(p.xyx) * 0.1031);
         p3 += dot(p3, p3.yzx + 33.33);
         return fract((p3.x + p3.y) * p3.z);
     }
 
-    // Safe 360° Ray-AABB Intersection
     vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
         vec3 safeDir = rayDir + sign(rayDir) * 1e-6;
         vec3 invR = 1.0 / safeDir;
@@ -158,24 +193,28 @@ const fsVolume = `
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-        // Soft ground fade to keep floor see-through
         float groundFade = smoothstep(0.0, 0.035, texCoord.y);
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r * groundFade;
     }
 
-    // Smoothstep Edge Feathering
     const float EDGE_SIZE = 0.025;
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
         }
 
+        // Mode 1: Crisp Raw Super-Res Pixels (Zero feathering, 100% discrete gate colors)
+        if (u_renderMode > 0.5) {
+            vec4 palCol = texture(u_paletteTex, vec2(value, 0.5));
+            return vec4(palCol.rgb, 1.0);
+        }
+
+        // Mode 0: Smooth Cloud Vapor (Soft boundary feathering)
         float softFade = smoothstep(u_cutoffMin.w, u_cutoffMin.w + EDGE_SIZE, value);
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
 
-        // Natural cloud density progression
         float alpha = 0.0;
         if (value < 0.38) {
             float t = (value - u_cutoffMin.w) / max(0.38 - u_cutoffMin.w, 0.001);
@@ -223,9 +262,8 @@ const fsVolume = `
         vec3 uvwEnd = (backPos + halfSize) / u_boxSize;
         vec3 uvwStep = (uvwEnd - uvwStart) / u_steps;
 
-        // 🌟 Screen-Space Jitter: offsets ray starting position to eliminate banding lines
         float dither = ditherHash(gl_FragCoord.xy);
-        vec3 currentPosition = uvwStart + uvwStep * dither;
+        vec3 currentPosition = uvwStart + (u_renderMode > 0.5 ? vec3(0.0) : uvwStep * dither);
 
         vec3 accumulatedColor = vec3(0.0);
         float transmittance = 1.0;
@@ -245,10 +283,10 @@ const fsVolume = `
 
                     vec3 litColor = sampleColor.rgb * illumination;
 
-                    float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.35;
+                    float stepDensity = sampleColor.a * (u_renderMode > 0.5 ? 0.70 : (48.0 / u_steps) * 1.35);
                     float stepTransmittance = exp(-stepDensity);
 
-                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * 1.5;
+                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * (u_renderMode > 0.5 ? 1.0 : 1.5);
                     transmittance *= stepTransmittance;
 
                     if (transmittance < 0.02) {
@@ -334,18 +372,30 @@ export function initStormVolumeViewer() {
         closeBtn.onclick = () => hideStormVolume();
     }
 
-    let cutoffControl = containerEl.querySelector('.storm-cutoff-pill');
-    if (!cutoffControl) {
-        cutoffControl = document.createElement('div');
-        cutoffControl.className = 'storm-cutoff-pill';
-        cutoffControl.innerHTML = `
-            <span class="storm-cutoff-label" id="storm-cutoff-label">Cut-off: 15 dBZ</span>
-            <input class="storm-cutoff-range" id="storm-cutoff-slider" type="range" min="5" max="55" value="15" step="1">
+    // 🌟 Dual-Mode Controls Bar (Cloud vs Pixels + Cutoff Slider)
+    let controlsBar = containerEl.querySelector('.storm-controls-bar');
+    if (!controlsBar) {
+        controlsBar = document.createElement('div');
+        controlsBar.className = 'storm-controls-bar';
+        controlsBar.innerHTML = `
+            <div class="storm-mode-pill">
+                <button class="storm-mode-btn active" id="btn-mode-cloud">☁ Cloud</button>
+                <button class="storm-mode-btn" id="btn-mode-pixels">🧊 Pixels</button>
+            </div>
+            <div class="storm-cutoff-group">
+                <span class="storm-cutoff-label" id="storm-cutoff-label">Cut-off: 15 dBZ</span>
+                <input class="storm-cutoff-range" id="storm-cutoff-slider" type="range" min="5" max="55" value="15" step="1">
+            </div>
         `;
-        containerEl.appendChild(cutoffControl);
+        containerEl.appendChild(controlsBar);
 
-        const slider = cutoffControl.querySelector('#storm-cutoff-slider');
-        const label = cutoffControl.querySelector('#storm-cutoff-label');
+        const btnCloud = controlsBar.querySelector('#btn-mode-cloud');
+        const btnPixels = controlsBar.querySelector('#btn-mode-pixels');
+        const slider = controlsBar.querySelector('#storm-cutoff-slider');
+        const label = controlsBar.querySelector('#storm-cutoff-label');
+
+        btnCloud.onclick = () => setStormRenderMode('cloud');
+        btnPixels.onclick = () => setStormRenderMode('pixels');
 
         slider.oninput = (e) => {
             const dbz = parseFloat(e.target.value);
@@ -390,6 +440,7 @@ export function initStormVolumeViewer() {
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
             u_steps: { value: 96.0 },
             u_opacity: { value: 1.0 },
+            u_renderMode: { value: 0.0 }, // 0.0 = Cloud, 1.0 = Pixels
             u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.25) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
         },
@@ -419,6 +470,31 @@ export function initStormVolumeViewer() {
             toggleStormFullscreen(false);
         }
     });
+}
+
+/**
+ * 🌟 Seamless 0ms Switch between Smooth Cloud and Raw Super-Res Pixels
+ */
+export function setStormRenderMode(mode) {
+    renderMode = mode;
+    const btnCloud = document.getElementById('btn-mode-cloud');
+    const btnPixels = document.getElementById('btn-mode-pixels');
+
+    if (btnCloud && btnPixels) {
+        btnCloud.classList.toggle('active', mode === 'cloud');
+        btnPixels.classList.toggle('active', mode === 'pixels');
+    }
+
+    if (stormBoxMesh && stormBoxMesh.material) {
+        stormBoxMesh.material.uniforms.u_renderMode.value = (mode === 'pixels') ? 1.0 : 0.0;
+    }
+
+    if (volumeTexture3D) {
+        const filterType = (mode === 'pixels') ? THREE.NearestFilter : THREE.LinearFilter;
+        volumeTexture3D.minFilter = filterType;
+        volumeTexture3D.magFilter = filterType;
+        volumeTexture3D.needsUpdate = true;
+    }
 }
 
 export function toggleStormFullscreen(forceState = null) {
@@ -495,12 +571,14 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
     if (volumeTexture3D) volumeTexture3D.dispose();
 
-    // 🌟 Uploads 256 x 96 x 256 High-Definition 3D Volume
-    volumeTexture3D = new Texture3DClass(voxelBuffer, 256, 96, 256);
+    // 🌟 Uploads Ultra-HD 384 x 96 x 384 3D Volume Texture
+    volumeTexture3D = new Texture3DClass(voxelBuffer, 384, 96, 384);
     volumeTexture3D.format = THREE.RedFormat;
     volumeTexture3D.type = THREE.UnsignedByteType;
-    volumeTexture3D.minFilter = THREE.LinearFilter;
-    volumeTexture3D.magFilter = THREE.LinearFilter;
+    
+    const filterType = (renderMode === 'pixels') ? THREE.NearestFilter : THREE.LinearFilter;
+    volumeTexture3D.minFilter = filterType;
+    volumeTexture3D.magFilter = filterType;
     volumeTexture3D.wrapS = THREE.ClampToEdgeWrapping;
     volumeTexture3D.wrapT = THREE.ClampToEdgeWrapping;
     volumeTexture3D.wrapR = THREE.ClampToEdgeWrapping;
