@@ -118,7 +118,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader: 360° Omnidirectional Cloud Raymarcher
+// Fragment Shader with 100% See-Through Floor
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -179,31 +179,26 @@ const fsVolume = `
             return 0.0;
         }
 
+        // 🌟 Completely dissolves the flat ground carpet so the floor is 100% see-through
+        float groundFade = smoothstep(0.0, 0.035, texCoord.y);
+
+        // Multi-Octave Puffy Cloud Perturbation
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
         float puff = puffyCloudNoise(sampleCoord);
         sampleCoord += vec3(puff, puff * 0.7, puff);
         sampleCoord = clamp(sampleCoord, 0.0, 1.0);
 
-        return texture(u_volumeTex, sampleCoord).r;
+        return texture(u_volumeTex, sampleCoord).r * groundFade;
     }
 
-    // Soft Gradual dBZ Fadeout
-    const float FADE_RANGE = 0.055;
+    // Atmospheric Cloud Transfer Function
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
         }
 
-        float softFade = smoothstep(u_cutoffMin.w, u_cutoffMin.w + FADE_RANGE, value);
-
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
-
-        if (value < 0.44) {
-            float whiteMix = 1.0 - smoothstep(u_cutoffMin.w, 0.44, value);
-            vec3 softWhite = vec3(0.94, 0.96, 0.98);
-            cloudColor = mix(cloudColor, softWhite, whiteMix * 0.85);
-        }
 
         float alpha = 0.0;
         if (value < 0.38) {
@@ -220,7 +215,7 @@ const fsVolume = `
             alpha = mix(0.85, 1.00, t);
         }
 
-        return vec4(cloudColor, alpha * softFade);
+        return vec4(cloudColor, alpha);
     }
 
     // Surface Normal Estimation
@@ -335,7 +330,7 @@ export function initStormVolumeViewer() {
     if (!containerEl || !canvasContainerEl) return;
     ensureControlStyles();
 
-    // 🌟 Fullscreen Button Injection & Handling
+    // Fullscreen Action Button
     if (headerEl && !document.getElementById('btn-fullscreen-storm-3d')) {
         const actionsContainer = document.createElement('div');
         actionsContainer.className = 'storm-header-actions';
@@ -362,7 +357,7 @@ export function initStormVolumeViewer() {
         closeBtn.onclick = () => hideStormVolume();
     }
 
-    // 🌟 Interactive dBZ Cut-Off Slider Pill
+    // Interactive dBZ Cut-Off Slider
     let cutoffControl = containerEl.querySelector('.storm-cutoff-pill');
     if (!cutoffControl) {
         cutoffControl = document.createElement('div');
@@ -434,14 +429,16 @@ export function initStormVolumeViewer() {
     wireframeHelper.material.transparent = true;
     scene.add(wireframeHelper);
 
-    groundGridHelper = new THREE.GridHelper(1.0, 8, 0x38bdf8, 0x1e293b);
+    // 🌟 Transparent Ground Gridlines (See-through floor)
+    groundGridHelper = new THREE.GridHelper(1.0, 8, 0x38bdf8, 0x38bdf8);
+    groundGridHelper.material.transparent = true;
+    groundGridHelper.material.opacity = 0.35;
     groundGridHelper.position.y = -0.4;
     scene.add(groundGridHelper);
 
     const resizeObserver = new ResizeObserver(() => handleResize());
     resizeObserver.observe(canvasContainerEl);
 
-    // Escape key listener to exit fullscreen
     window.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && isFullscreen) {
             toggleStormFullscreen(false);
@@ -553,7 +550,7 @@ export function hideStormVolume() {
     if (!containerEl) containerEl = document.getElementById('storm-volume-container');
     if (containerEl) {
         containerEl.style.display = 'none';
-        toggleStormFullscreen(false); // Reset fullscreen on close
+        toggleStormFullscreen(false);
     }
     isViewerActive = false;
     stateManager.is3DVolumeActive = false;
