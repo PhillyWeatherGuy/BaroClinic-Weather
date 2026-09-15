@@ -4,119 +4,53 @@ import { stateManager } from '../core/stateManager.js';
 
 let scene, camera, renderer, controls;
 let containerEl, canvasContainerEl;
-let stormBoxMesh, wireframeHelper, groundGridHelper;
-let volumeTexture3D = null;
+let stackedPlanesGroup, wireframeHelper, groundGridHelper;
 let paletteTexture2D = null;
 let isViewerActive = false;
 let animationFrameId = null;
 
-const vsVolume = `
-    out vec3 v_worldPos;
-    out vec3 v_localPos;
-
+// Vertex Shader for 3D Stacked Tilt Planes
+const vsSlicePlane = `
+    varying vec2 v_uv;
     void main() {
-        v_localPos = position;
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        v_worldPos = worldPosition.xyz;
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+        v_uv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
 
-// Raymarching Fragment Shader with Hemispheric Cloud Lighting
-const fsVolume = `
+// Fragment Shader with 1:1 Radar Color Mapping & Clear-Air Transparency
+const fsSlicePlane = `
     precision highp float;
-    precision highp sampler3D;
-
-    in vec3 v_worldPos;
-    in vec3 v_localPos;
-    out vec4 fragColor;
-
-    uniform vec3 u_cameraPos;
-    uniform sampler3D u_volumeTex;
+    uniform sampler2D u_dataTex;
     uniform sampler2D u_paletteTex;
-    uniform vec3 u_boxSize;
-    uniform vec3 u_lightDir;
-
-    vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
-        vec3 invR = 1.0 / rayDir;
-        vec3 tbot = invR * (boxMin - rayOrigin);
-        vec3 ttop = invR * (boxMax - rayOrigin);
-        vec3 tmin = min(ttop, tbot);
-        vec3 tmax = max(ttop, tbot);
-        float t0 = max(max(tmin.x, tmin.y), tmin.z);
-        float t1 = min(min(tmax.x, tmax.y), tmax.z);
-        return vec2(t0, t1);
-    }
-
-    // Normal estimation with broader step size to capture smooth cloud domes
-    vec3 estimateNormal(vec3 uvw, float stepSize) {
-        float dX = texture(u_volumeTex, uvw + vec3(stepSize, 0.0, 0.0)).r - 
-                   texture(u_volumeTex, uvw - vec3(stepSize, 0.0, 0.0)).r;
-        float dY = texture(u_volumeTex, uvw + vec3(0.0, stepSize, 0.0)).r - 
-                   texture(u_volumeTex, uvw - vec3(0.0, stepSize, 0.0)).r;
-        float dZ = texture(u_volumeTex, uvw + vec3(0.0, 0.0, stepSize)).r - 
-                   texture(u_volumeTex, uvw - vec3(0.0, 0.0, stepSize)).r;
-        return normalize(-vec3(dX, dY, dZ));
-    }
+    uniform float u_opacity;
+    varying vec2 v_uv;
 
     void main() {
-        vec3 rayOrigin = u_cameraPos;
-        vec3 rayDir = normalize(v_worldPos - rayOrigin);
+        // v_uv.y inverted to align North with -Z
+        vec2 sampleUv = vec2(v_uv.x, 1.0 - v_uv.y);
+        float rawVal = texture2D(u_dataTex, sampleUv).r;
 
-        vec3 halfSize = u_boxSize * 0.5;
-        vec2 hit = intersectAABB(rayOrigin, rayDir, -halfSize, halfSize);
-
-        if (hit.x > hit.y || hit.y < 0.0) discard;
-
-        float tStart = max(hit.x, 0.0);
-        float tEnd = hit.y;
-
-        const int MAX_STEPS = 128;
-        float tStep = (tEnd - tStart) / float(MAX_STEPS);
-        vec3 stepVec = rayDir * tStep;
-        vec3 currentPos = rayOrigin + rayDir * tStart;
-
-        vec4 accumulatedColor = vec4(0.0);
-
-        for (int i = 0; i < MAX_STEPS; i++) {
-            vec3 uvw = (currentPos + halfSize) / u_boxSize;
-
-            if (all(greaterThanEqual(uvw, vec3(0.0))) && all(lessThanEqual(uvw, vec3(1.0)))) {
-                float rawVal = texture(u_volumeTex, uvw).r;
-
-                if (rawVal > 0.03) {
-                    vec4 sampleCol = texture(u_paletteTex, vec2(rawVal, 0.5));
-
-                    if (sampleCol.a > 0.01) {
-                        // Broader sampling step captures the smooth cloud curvature
-                        vec3 normal = estimateNormal(uvw, 0.022);
-                        
-                        // Hemispheric atmospheric lighting: warm sunlight above + sky bounce
-                        float sunDiffuse = clamp(dot(normal, u_lightDir), 0.0, 1.0);
-                        float skyBounce = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
-                        vec3 lighting = vec3(0.35) + vec3(0.65) * sunDiffuse + vec3(0.15, 0.20, 0.25) * skyBounce;
-
-                        vec3 litRgb = sampleCol.rgb * lighting;
-
-                        float stepAlpha = sampleCol.a * 0.42;
-                        accumulatedColor.rgb += (1.0 - accumulatedColor.a) * litRgb * stepAlpha;
-                        accumulatedColor.a += (1.0 - accumulatedColor.a) * stepAlpha;
-
-                        if (accumulatedColor.a >= 0.98) break;
-                    }
-                }
-            }
-
-            currentPos += stepVec;
+        // Discard clear-air / below-threshold pixels (< 10 dBZ)
+        if (rawVal < 0.05) {
+            discard;
         }
 
-        if (accumulatedColor.a < 0.02) discard;
+        float palU = (rawVal * 255.0 + 0.5) / 256.0;
+        vec4 color = texture2D(u_paletteTex, vec2(palU, 0.5));
 
-        fragColor = vec4(accumulatedColor.rgb / max(accumulatedColor.a, 0.0001), accumulatedColor.a);
+        if (color.a < 0.01) {
+            discard;
+        }
+
+        gl_FragColor = vec4(color.rgb, color.a * u_opacity);
     }
 `;
 
-function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
+/**
+ * 🌟 Creates 256x1 Palette Lookup Texture
+ */
+function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 1;
@@ -131,30 +65,23 @@ function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
 
-        // Smooth continuous cloud density ramp
-        if (i < 65) {
-            imgData.data[idx + 3] = 0; // < 12 dBZ
-        } else if (i < 95) {
-            const t = (i - 65) / 30.0;
-            imgData.data[idx + 3] = Math.round(30 + t * 70); // 12-22 dBZ: misty anvil edges
-        } else if (i < 150) {
-            const t = (i - 95) / 55.0;
-            imgData.data[idx + 3] = Math.round(100 + t * 110); // 22-45 dBZ: dense core
-        } else {
-            imgData.data[idx + 3] = 255; // 50+ dBZ: solid hail core
-        }
+        // Clear air transparent, precipitation fully opaque & vibrant
+        imgData.data[idx + 3] = (i < 65) ? 0 : 255;
     }
 
     ctx.putImageData(imgData, 0, 0);
 
     const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.magFilter = THREE.NearestFilter;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     return texture;
 }
 
+/**
+ * 🌟 Initializes the Three.js 3D Viewer
+ */
 export function initStormVolumeViewer() {
     containerEl = document.getElementById('storm-volume-container');
     canvasContainerEl = document.getElementById('storm-volume-canvas-container');
@@ -167,7 +94,7 @@ export function initStormVolumeViewer() {
 
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100.0);
-    camera.position.set(0.0, 1.2, 2.0);
+    camera.position.set(0.0, 1.4, 1.9);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -176,39 +103,25 @@ export function initStormVolumeViewer() {
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.minDistance = 0.6;
+    controls.minDistance = 0.5;
     controls.maxDistance = 5.0;
-    controls.maxPolarAngle = Math.PI * 0.49;
+    controls.maxPolarAngle = Math.PI * 0.49; // Keep camera above ground
     controls.target.set(0.0, 0.0, 0.0);
 
-    paletteTexture2D = createTransferFunctionTexture();
+    paletteTexture2D = createRadarPaletteTexture();
 
+    stackedPlanesGroup = new THREE.Group();
+    scene.add(stackedPlanesGroup);
+
+    // Bounding Box Helper (Wireframe)
     const boxGeometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
-    const volumeMaterial = new THREE.ShaderMaterial({
-        glslVersion: THREE.GLSL3,
-        vertexShader: vsVolume,
-        fragmentShader: fsVolume,
-        uniforms: {
-            u_cameraPos: { value: new THREE.Vector3() },
-            u_volumeTex: { value: null },
-            u_paletteTex: { value: paletteTexture2D },
-            u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
-            u_lightDir: { value: new THREE.Vector3(0.4, 0.88, 0.25).normalize() } // Overhead sun
-        },
-        transparent: true,
-        side: THREE.BackSide
-    });
-
-    stormBoxMesh = new THREE.Mesh(boxGeometry, volumeMaterial);
-    scene.add(stormBoxMesh);
-
-    wireframeHelper = new THREE.BoxHelper(stormBoxMesh, 0x38bdf8);
-    wireframeHelper.material.opacity = 0.35;
-    wireframeHelper.material.transparent = true;
+    const boxMaterial = new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, opacity: 0.35, transparent: true });
+    wireframeHelper = new THREE.Mesh(boxGeometry, boxMaterial);
     scene.add(wireframeHelper);
 
+    // Ground Grid Helper
     groundGridHelper = new THREE.GridHelper(1.0, 8, 0x38bdf8, 0x1e293b);
-    groundGridHelper.position.y = -0.4;
+    groundGridHelper.position.y = -0.5;
     scene.add(groundGridHelper);
 
     const resizeObserver = new ResizeObserver(() => handleResize());
@@ -227,17 +140,16 @@ function handleResize() {
 function animate() {
     if (!isViewerActive) return;
     animationFrameId = requestAnimationFrame(animate);
-
     if (controls) controls.update();
-    if (stormBoxMesh && stormBoxMesh.material) {
-        stormBoxMesh.material.uniforms.u_cameraPos.value.copy(camera.position);
-    }
     renderer.render(scene, camera);
 }
 
-export function updateStormVolume(voxelBuffer, bounds) {
+/**
+ * 🌟 Renders the Stacked Tilt Planes from level2Worker
+ */
+export function updateStormVolume(slicesOrBuffer, bounds) {
     initStormVolumeViewer();
-    if (!scene || !voxelBuffer) return;
+    if (!scene) return;
 
     const minLng = Math.min(bounds[0], bounds[2]);
     const maxLng = Math.max(bounds[0], bounds[2]);
@@ -247,36 +159,76 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 20.0;
+    const heightKm = 20.0; // 20 km ceiling
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 0.95;
+    const aspectY = (heightKm / maxHoriz) * 0.9;
     const aspectZ = depthKm / maxHoriz;
 
-    stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
-    stormBoxMesh.material.uniforms.u_boxSize.value.set(aspectX, aspectY, aspectZ);
-
-    wireframeHelper.update();
+    // Update Bounding Box & Ground Grid dimensions
+    wireframeHelper.scale.set(aspectX, aspectY, aspectZ);
     groundGridHelper.scale.set(aspectX, 1.0, aspectZ);
     groundGridHelper.position.y = -aspectY * 0.5;
 
-    const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
-    if (volumeTexture3D) volumeTexture3D.dispose();
+    // Clear previous plane meshes and textures
+    while (stackedPlanesGroup.children.length > 0) {
+        const mesh = stackedPlanesGroup.children[0];
+        if (mesh.material) {
+            if (mesh.material.uniforms?.u_dataTex?.value) {
+                mesh.material.uniforms.u_dataTex.value.dispose();
+            }
+            mesh.material.dispose();
+        }
+        if (mesh.geometry) mesh.geometry.dispose();
+        stackedPlanesGroup.remove(mesh);
+    }
 
-    volumeTexture3D = new Texture3DClass(voxelBuffer, 128, 64, 128);
-    volumeTexture3D.format = THREE.RedFormat;
-    volumeTexture3D.type = THREE.UnsignedByteType;
-    volumeTexture3D.minFilter = THREE.LinearFilter;
-    volumeTexture3D.magFilter = THREE.LinearFilter;
-    volumeTexture3D.wrapS = THREE.ClampToEdgeWrapping;
-    volumeTexture3D.wrapT = THREE.ClampToEdgeWrapping;
-    volumeTexture3D.wrapR = THREE.ClampToEdgeWrapping;
-    volumeTexture3D.unpackAlignment = 1;
-    volumeTexture3D.needsUpdate = true;
+    const slices = Array.isArray(slicesOrBuffer) ? slicesOrBuffer : [];
 
-    stormBoxMesh.material.uniforms.u_volumeTex.value = volumeTexture3D;
-    stormBoxMesh.material.needsUpdate = true;
+    // Build each stacked elevation plane
+    const planeGeom = new THREE.PlaneGeometry(aspectX, aspectZ);
+
+    slices.forEach((slice) => {
+        if (!slice.data) return;
+
+        const dataTex = new THREE.DataTexture(
+            slice.data,
+            128,
+            128,
+            THREE.RedFormat,
+            THREE.UnsignedByteType
+        );
+        dataTex.minFilter = THREE.LinearFilter;
+        dataTex.magFilter = THREE.LinearFilter;
+        dataTex.unpackAlignment = 1;
+        dataTex.needsUpdate = true;
+
+        const sliceMat = new THREE.ShaderMaterial({
+            vertexShader: vsSlicePlane,
+            fragmentShader: fsSlicePlane,
+            uniforms: {
+                u_dataTex: { value: dataTex },
+                u_paletteTex: { value: paletteTexture2D },
+                u_opacity: { value: 0.92 }
+            },
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+
+        const planeMesh = new THREE.Mesh(planeGeom, sliceMat);
+        planeMesh.rotation.x = -Math.PI * 0.5; // Lie flat in horizontal X-Z plane
+
+        // Map physical altitude (0 to 20,000 meters) to vertical Y axis
+        const altNorm = Math.min(1.0, Math.max(0.0, slice.altitudeMeters / 20000.0));
+        const yPos = (altNorm * aspectY) - (aspectY * 0.5);
+        planeMesh.position.set(0.0, yPos, 0.0);
+
+        stackedPlanesGroup.add(planeMesh);
+    });
+
+    console.log(`⚡ [3D Viewer] Mounted ${slices.length} stacked radar tilts in 3D viewport.`);
 
     showStormVolume();
 }
