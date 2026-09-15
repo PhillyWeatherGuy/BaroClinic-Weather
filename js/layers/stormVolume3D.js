@@ -62,7 +62,6 @@ const fsVolume = `
     }
 
     void main() {
-        // Ray origin & direction in object space
         vec3 rayOrigin = u_cameraPos;
         vec3 rayDir = normalize(v_worldPos - rayOrigin);
 
@@ -76,8 +75,7 @@ const fsVolume = `
         float tStart = max(hit.x, 0.0);
         float tEnd = hit.y;
 
-        // Raymarching loop settings (Bounded step count for 60 FPS laptop performance)
-        const int MAX_STEPS = 84;
+        const int MAX_STEPS = 96;
         float tStep = (tEnd - tStart) / float(MAX_STEPS);
         vec3 stepVec = rayDir * tStep;
         vec3 currentPos = rayOrigin + rayDir * tStart;
@@ -85,29 +83,24 @@ const fsVolume = `
         vec4 accumulatedColor = vec4(0.0);
 
         for (int i = 0; i < MAX_STEPS; i++) {
-            // Map physical coordinates [-halfSize, halfSize] to Texture UVW [0, 1]
             vec3 uvw = (currentPos + halfSize) / u_boxSize;
 
             if (all(greaterThanEqual(uvw, vec3(0.0))) && all(lessThanEqual(uvw, vec3(1.0)))) {
-                // Hardware Trilinear Sampling (Smooth vapor)
+                // Hardware Trilinear Sampling (0.0 to 1.0)
                 float rawVal = texture(u_volumeTex, uvw).r;
 
-                if (rawVal > 0.05) {
-                    // Sample color & optical density from palette transfer function
+                if (rawVal > 0.08) {
                     vec4 sampleCol = texture(u_paletteTex, vec2(rawVal, 0.5));
 
-                    if (sampleCol.a > 0.001) {
-                        // Directional Sunlight & Shading
-                        vec3 normal = estimateNormal(uvw, 0.015);
+                    if (sampleCol.a > 0.01) {
+                        vec3 normal = estimateNormal(uvw, 0.012);
                         float diffuse = clamp(dot(normal, u_lightDir), 0.0, 1.0);
-                        vec3 litRgb = sampleCol.rgb * (0.45 + 0.55 * diffuse);
+                        vec3 litRgb = sampleCol.rgb * (0.4 + 0.6 * diffuse);
 
-                        // Front-to-back optical absorption (Beer-Lambert model)
-                        float alpha = sampleCol.a * 0.25;
-                        accumulatedColor.rgb += (1.0 - accumulatedColor.a) * litRgb * alpha;
-                        accumulatedColor.a += (1.0 - accumulatedColor.a) * alpha;
+                        float stepAlpha = sampleCol.a * 0.35;
+                        accumulatedColor.rgb += (1.0 - accumulatedColor.a) * litRgb * stepAlpha;
+                        accumulatedColor.a += (1.0 - accumulatedColor.a) * stepAlpha;
 
-                        // Early Ray Termination (Stops once opaque core is hit)
                         if (accumulatedColor.a >= 0.98) {
                             break;
                         }
@@ -118,11 +111,12 @@ const fsVolume = `
             currentPos += stepVec;
         }
 
-        if (accumulatedColor.a < 0.01) {
+        if (accumulatedColor.a < 0.02) {
             discard;
         }
 
-        fragColor = accumulatedColor;
+        // Un-premultiply to preserve vivid colors under standard WebGL alpha blending
+        fragColor = vec4(accumulatedColor.rgb / max(accumulatedColor.a, 0.0001), accumulatedColor.a);
     }
 `;
 
@@ -146,20 +140,19 @@ function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
 
         // Optical Density Alpha Curve
         if (i < 65) {
-            // < 12 dBZ: Transparent clear-air
+            // < 12 dBZ: Transparent
             imgData.data[idx + 3] = 0;
-        } else if (i < 100) {
-            // 12-25 dBZ: Faint, wispy cloud vapor (2% to 8% opacity)
-            const t = (i - 65) / 35.0;
-            imgData.data[idx + 3] = Math.round(5 + t * 15);
-        } else if (i < 160) {
-            // 25-45 dBZ: Rain core (20% to 55% opacity)
-            const t = (i - 100) / 60.0;
-            imgData.data[idx + 3] = Math.round(20 + t * 120);
+        } else if (i < 95) {
+            // 12-22 dBZ: Wispy anvil vapor (10% to 25% opacity)
+            const t = (i - 65) / 30.0;
+            imgData.data[idx + 3] = Math.round(25 + t * 40);
+        } else if (i < 150) {
+            // 22-45 dBZ: Convective rain core (35% to 75% opacity)
+            const t = (i - 95) / 55.0;
+            imgData.data[idx + 3] = Math.round(75 + t * 115);
         } else {
-            // 50+ dBZ: Dense, solid hail core & updraft (80% to 100% opacity)
-            const t = (i - 160) / 95.0;
-            imgData.data[idx + 3] = Math.round(180 + t * 75);
+            // 50+ dBZ: Dense hail core (100% opacity)
+            imgData.data[idx + 3] = 255;
         }
     }
 
@@ -189,25 +182,25 @@ export function initStormVolumeViewer() {
         };
     }
 
-    if (renderer) return; // Already initialized
+    if (renderer) return;
 
     // Scene & Camera
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100.0);
+    camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100.0);
     camera.position.set(0.0, -1.8, 1.2);
 
     // Hardware WebGL2 Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Clamped for laptop performance
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     canvasContainerEl.appendChild(renderer.domElement);
 
     // Orbit Controls
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.minDistance = 0.8;
+    controls.minDistance = 0.6;
     controls.maxDistance = 5.0;
-    controls.maxPolarAngle = Math.PI * 0.52; // Prevent flipping below ground
+    controls.maxPolarAngle = Math.PI * 0.52;
     controls.target.set(0.0, 0.0, 0.0);
 
     // Palette Transfer Function
@@ -227,7 +220,7 @@ export function initStormVolumeViewer() {
             u_lightDir: { value: new THREE.Vector3(0.5, 0.8, 0.6).normalize() }
         },
         transparent: true,
-        side: THREE.BackSide // Renders from inside-out for robust intersection
+        side: THREE.BackSide
     });
 
     stormBoxMesh = new THREE.Mesh(boxGeometry, volumeMaterial);
@@ -244,7 +237,6 @@ export function initStormVolumeViewer() {
     groundGridHelper.position.z = -0.25;
     scene.add(groundGridHelper);
 
-    // Resize Observer
     const resizeObserver = new ResizeObserver(() => {
         handleResize();
     });
@@ -269,7 +261,6 @@ function animate() {
     if (controls) controls.update();
 
     if (stormBoxMesh && stormBoxMesh.material) {
-        // Update camera position uniform in object space
         stormBoxMesh.material.uniforms.u_cameraPos.value.copy(camera.position);
     }
 
@@ -283,20 +274,21 @@ export function updateStormVolume(voxelBuffer, bounds) {
     initStormVolumeViewer();
     if (!scene || !voxelBuffer) return;
 
-    const [minLng, minLat, maxLng, maxLat] = bounds;
+    const minLng = Math.min(bounds[0], bounds[2]);
+    const maxLng = Math.max(bounds[0], bounds[2]);
+    const minLat = Math.min(bounds[1], bounds[3]);
+    const maxLat = Math.max(bounds[1], bounds[3]);
 
-    // Calculate real-world spatial aspect ratio (Width km x Depth km x 20 km Height)
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 20.0; // 20 km standard storm cap
+    const heightKm = 20.0;
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
     const aspectY = depthKm / maxHoriz;
-    const aspectZ = (heightKm / maxHoriz) * 0.7; // Vertical scale factor
+    const aspectZ = (heightKm / maxHoriz) * 0.7;
 
-    // Update geometry dimensions
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
     stormBoxMesh.material.uniforms.u_boxSize.value.set(aspectX, aspectY, aspectZ);
 
@@ -304,12 +296,14 @@ export function updateStormVolume(voxelBuffer, bounds) {
     groundGridHelper.scale.set(aspectX, aspectY, 1.0);
     groundGridHelper.position.z = -aspectZ * 0.5;
 
-    // 🌟 Upload 1 MB (128 x 128 x 64) 3D Texture with Linear Filtering (Hardware Trilinear Smoothing)
+    // 🌟 Three.js 3D Texture class compatibility check
+    const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
+
     if (volumeTexture3D) {
         volumeTexture3D.dispose();
     }
 
-    volumeTexture3D = new THREE.DataTexture3D(voxelBuffer, 128, 128, 64);
+    volumeTexture3D = new Texture3DClass(voxelBuffer, 128, 128, 64);
     volumeTexture3D.format = THREE.RedFormat;
     volumeTexture3D.type = THREE.UnsignedByteType;
     volumeTexture3D.minFilter = THREE.LinearFilter;
@@ -321,6 +315,7 @@ export function updateStormVolume(voxelBuffer, bounds) {
     volumeTexture3D.needsUpdate = true;
 
     stormBoxMesh.material.uniforms.u_volumeTex.value = volumeTexture3D;
+    stormBoxMesh.material.needsUpdate = true;
 
     showStormVolume();
 }
