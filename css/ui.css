@@ -1138,3 +1138,14 @@ body.radar-box-armed #map canvas {
     text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
     letter-spacing: 0.5px;
 }
+
+/* 🛑 DISABLE 3D RADAR ON MOBILE */
+@media (max-width: 1023px), (hover: none) and (pointer: coarse) {
+    #btn-box-select,
+    #btn-load-supercell-demo,
+    #storm-volume-container,
+    #radar-drag-box {
+        display: none !important;
+        pointer-events: none !important;
+    }
+}
