@@ -10,6 +10,7 @@ let paletteTexture2D = null;
 let isViewerActive = false;
 let animationFrameId = null;
 
+// Vertex Shader
 const vsVolume = `
     out vec3 v_worldPos;
     out vec3 v_localPos;
@@ -22,7 +23,7 @@ const vsVolume = `
     }
 `;
 
-// MapTiler 3D Raymarching Fragment Shader
+// Fragment Shader: Luminous MapTiler Raymarcher
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -55,12 +56,12 @@ const fsVolume = `
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-        // Invert Y so North is aligned with -Z
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r;
     }
 
-    const float EDGE_SIZE = 0.02;
+    // MapTiler Edge Softener (Starts at 18 dBZ / byte 90)
+    const float EDGE_SIZE = 0.025;
     vec4 colorize(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
@@ -76,7 +77,7 @@ const fsVolume = `
         return color;
     }
 
-    #define MAX_STEPS 72
+    #define MAX_STEPS 80
     void march(vec3 currentPosition, vec3 dir, float rayLength) {
         float stepSize = rayLength / u_steps;
         vec3 step = normalize(dir) * stepSize;
@@ -87,26 +88,29 @@ const fsVolume = `
             float sampleValue = sampleVolume(currentPosition);
             vec4 sampleColor = colorize(sampleValue);
 
-            if (sampleColor.a > 0.0) {
-                // MapTiler Secret 1: Step-Alpha Scaling
-                sampleColor.a = min(1.0, sampleColor.a * (36.0 / u_steps));
-
-                // MapTiler Secret 2: Weighted-Average Fluid Blending
-                float factor = sampleColor.a * (1.0 - accumulatedColor.a);
-                accumulatedColor.rgb = (accumulatedColor.a * accumulatedColor.rgb + factor * sampleColor.rgb) / max(accumulatedColor.a + factor, 0.0001);
-                accumulatedColor.a = accumulatedColor.a + factor;
+            if (sampleColor.a > 0.01) {
+                // Soft atmospheric step opacity
+                float stepAlpha = sampleColor.a * (32.0 / u_steps) * 0.75;
+                
+                // Pure Luminous Fluid Mixing (No dark multiplication)
+                float factor = stepAlpha * (1.0 - accumulatedColor.a);
+                accumulatedColor.rgb += factor * sampleColor.rgb * 1.35;
+                accumulatedColor.a += factor;
             }
 
             currentPosition += step;
             accumulatedLength += stepSize;
 
-            if (accumulatedLength >= rayLength || accumulatedColor.a >= 0.98) {
+            if (accumulatedLength >= rayLength || accumulatedColor.a >= 0.96) {
                 break;
             }
         }
 
-        fragColor = accumulatedColor;
-        fragColor.a *= u_opacity;
+        if (accumulatedColor.a < 0.01) {
+            discard;
+        }
+
+        fragColor = vec4(accumulatedColor.rgb / max(accumulatedColor.a, 0.001), accumulatedColor.a * u_opacity);
     }
 
     void main() {
@@ -132,6 +136,9 @@ const fsVolume = `
     }
 `;
 
+/**
+ * 🌟 Creates 256x1 Palette with Clean 18 dBZ Cutoff
+ */
 function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
@@ -146,7 +153,9 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx] = c.r;
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
-        imgData.data[idx + 3] = (i < 65) ? 0 : 255;
+
+        // < 18 dBZ (byte 90): completely transparent (removes dark navy/grey haze)
+        imgData.data[idx + 3] = (i < 90) ? 0 : 255;
     }
 
     ctx.putImageData(imgData, 0, 0);
@@ -166,7 +175,10 @@ export function initStormVolumeViewer() {
 
     if (!containerEl || !canvasContainerEl) return;
 
-    if (closeBtn) closeBtn.onclick = () => hideStormVolume();
+    if (closeBtn) {
+        closeBtn.onclick = () => hideStormVolume();
+    }
+
     if (renderer) return;
 
     scene = new THREE.Scene();
@@ -199,7 +211,8 @@ export function initStormVolumeViewer() {
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
             u_steps: { value: 64.0 },
             u_opacity: { value: 1.0 },
-            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.04) },
+            // Cutoff threshold starts at ~18 dBZ (0.35 in normalized space)
+            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.35) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
         },
         transparent: true,
@@ -253,11 +266,11 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 20.0;
+    const heightKm = 14.0; // Scaled to convective tropospheric storm top
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 0.95;
+    const aspectY = (heightKm / maxHoriz) * 1.15; // Vertical scale
     const aspectZ = depthKm / maxHoriz;
 
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
@@ -270,7 +283,6 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
     if (volumeTexture3D) volumeTexture3D.dispose();
 
-    // 🌟 Uploads continuous 128 x 64 x 128 (X, Y, Z) 3D Texture with Linear Hardware Trilinear Filtering
     volumeTexture3D = new Texture3DClass(voxelBuffer, 128, 64, 128);
     volumeTexture3D.format = THREE.RedFormat;
     volumeTexture3D.type = THREE.UnsignedByteType;
