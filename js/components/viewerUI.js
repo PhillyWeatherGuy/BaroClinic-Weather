@@ -5,13 +5,15 @@ import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js
 import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 import { updatePolarPalette } from '../layers/polarMap.js';
 
-// 🛰️ Radar Imports (Fixed Path)
+// 🛰️ Radar Imports
 import { radarState } from '../core/radarLoader.js';
 import { 
     setRadarFrame, 
     toggleRadarPlayback, 
     pauseRadarPlayback 
 } from './radarUI.js';
+import { RADAR_STATIONS } from '../config/radarStations.js';
+import { updateStormVolume } from '../layers/stormVolume3D.js';
 
 let onStepChangeCallback = null;
 let onThemeChangeCallback = null;
@@ -22,6 +24,7 @@ let playInterval = null;
 const PLAYBACK_SPEED_MS = 200;
 let shaderLayerRef = null;
 let highestPreloadedChunk = 0;
+let level2Worker = null;
 
 let cursorX = window.innerWidth / 2;
 let cursorY = window.innerHeight / 2;
@@ -32,6 +35,207 @@ window.addEventListener('mousemove', (e) => {
 
 export function setShaderLayerReference(layer) {
     shaderLayerRef = layer;
+}
+
+/**
+ * 🌟 Lazy-instantiates the background Level 2 Web Worker
+ */
+function getLevel2Worker() {
+    if (!level2Worker) {
+        level2Worker = new Worker('./js/core/level2Worker.js', { type: 'module' });
+        level2Worker.onmessage = (e) => {
+            const { success, voxelBuffer, tilts, bounds, error } = e.data;
+            hideToast();
+
+            if (!success) {
+                showToast(`❌ ${error || 'Failed to process 3D volume'}`);
+                return;
+            }
+
+            if (tilts && tilts.length > 0) {
+                stateManager.availableTilts = tilts;
+                updateTiltDropdownUI(tilts);
+            }
+
+            // Launch Three.js 3D volume view
+            updateStormVolume(voxelBuffer, bounds);
+        };
+    }
+    return level2Worker;
+}
+
+/**
+ * 🌟 Initializes the Drag-Box Selection Tool for 3D Storm Cells
+ */
+export function initRadarBoxTool(map) {
+    const boxBtn = document.getElementById('btn-box-select');
+    const dragBoxEl = document.getElementById('radar-drag-box');
+    if (!boxBtn || !map) return;
+
+    let isDrawing = false;
+    let startX = 0, startY = 0;
+
+    boxBtn.onclick = (e) => {
+        e.stopPropagation();
+        stateManager.boxSelectActive = !stateManager.boxSelectActive;
+
+        if (stateManager.boxSelectActive) {
+            boxBtn.classList.add('active');
+            document.body.classList.add('radar-box-armed');
+            map.dragPan.disable();
+        } else {
+            boxBtn.classList.remove('active');
+            document.body.classList.remove('radar-box-armed');
+            map.dragPan.enable();
+            if (dragBoxEl) dragBoxEl.style.display = 'none';
+        }
+    };
+
+    const mapContainer = map.getContainer();
+
+    mapContainer.addEventListener('mousedown', (e) => {
+        if (!stateManager.boxSelectActive || e.button !== 0) return;
+        isDrawing = true;
+        startX = e.clientX;
+        startY = e.clientY;
+
+        if (dragBoxEl) {
+            dragBoxEl.style.left = `${startX}px`;
+            dragBoxEl.style.top = `${startY}px`;
+            dragBoxEl.style.width = '0px';
+            dragBoxEl.style.height = '0px';
+            dragBoxEl.style.display = 'block';
+        }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isDrawing || !dragBoxEl) return;
+
+        const currentX = e.clientX;
+        const currentY = e.clientY;
+
+        const minX = Math.min(startX, currentX);
+        const maxX = Math.max(startX, currentX);
+        const minY = Math.min(startY, currentY);
+        const maxY = Math.max(startY, currentY);
+
+        dragBoxEl.style.left = `${minX}px`;
+        dragBoxEl.style.top = `${minY}px`;
+        dragBoxEl.style.width = `${maxX - minX}px`;
+        dragBoxEl.style.height = `${maxY - minY}px`;
+    });
+
+    window.addEventListener('mouseup', async (e) => {
+        if (!isDrawing) return;
+        isDrawing = false;
+
+        const endX = e.clientX;
+        const endY = e.clientY;
+
+        if (dragBoxEl) dragBoxEl.style.display = 'none';
+
+        // Disarm box tool
+        stateManager.boxSelectActive = false;
+        boxBtn.classList.remove('active');
+        document.body.classList.remove('radar-box-armed');
+        map.dragPan.enable();
+
+        const minX = Math.min(startX, endX);
+        const maxX = Math.max(startX, endX);
+        const minY = Math.min(startY, endY);
+        const maxY = Math.max(startY, endY);
+
+        // Ignore accidental tiny clicks (< 15px)
+        if (maxX - minX < 15 || maxY - minY < 15) return;
+
+        // Convert screen pixel bounds to Geographic Coordinates
+        const rect = mapContainer.getBoundingClientRect();
+        const swPoint = [minX - rect.left, maxY - rect.top];
+        const nePoint = [maxX - rect.left, minY - rect.top];
+
+        const sw = map.unproject(swPoint);
+        const ne = map.unproject(nePoint);
+
+        const bounds = [sw.lng, sw.lat, ne.lng, ne.lat];
+        stateManager.selectedStormBounds = bounds;
+
+        const station = stateManager.activeRadarStation || 'KDIX';
+        const stMeta = RADAR_STATIONS.find(s => s.id === station || s.id === 'K' + station) || { lat: 39.9469, lon: -74.4111 };
+
+        showToast(`Fetching Level 2 volume for ${station}...`);
+
+        try {
+            const url = `${stateManager.BASE_URL}radar-l2?station=${station}`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`Level 2 archive not found (${resp.status})`);
+            const rawBuffer = await resp.arrayBuffer();
+
+            showToast("Voxelizing 3D storm cell...");
+            const worker = getLevel2Worker();
+
+            // Hand off to background thread with zero-copy transferable memory
+            worker.postMessage({
+                id: Date.now(),
+                rawBuffer,
+                radarLat: stMeta.lat,
+                radarLon: stMeta.lon,
+                bounds,
+                targetTiltIndex: stateManager.activeTiltIndex || 0
+            }, [rawBuffer]);
+
+        } catch (err) {
+            console.error("3D storm fetch failed:", err);
+            showToast(`❌ ${err.message}`);
+        }
+    });
+}
+
+/**
+ * 🌟 Initializes the Multi-Tilt Dropdown Selector
+ */
+export function initTiltSelector() {
+    const toggleBtn = document.getElementById('btn-tilt-toggle');
+    const menu = document.getElementById('tilt-dropdown-menu');
+    const label = document.getElementById('current-tilt-label');
+    if (!toggleBtn || !menu) return;
+
+    toggleBtn.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = menu.style.display === 'flex' || menu.style.display === 'block';
+        menu.style.display = isOpen ? 'none' : 'flex';
+    };
+
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && !toggleBtn.contains(e.target)) {
+            menu.style.display = 'none';
+        }
+    });
+}
+
+function updateTiltDropdownUI(tilts) {
+    const menu = document.getElementById('tilt-dropdown-menu');
+    const label = document.getElementById('current-tilt-label');
+    if (!menu || !tilts) return;
+
+    menu.innerHTML = '';
+    tilts.forEach((t) => {
+        const item = document.createElement('button');
+        item.className = `run-dropdown-item ${t.index === stateManager.activeTiltIndex ? 'active' : ''}`;
+        item.innerHTML = `<span>Tilt ${t.index + 1}: ${t.elevation}°</span><span class="check-icon">✓</span>`;
+
+        item.onclick = (e) => {
+            e.stopPropagation();
+            menu.querySelectorAll('.run-dropdown-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            if (label) label.textContent = `${t.elevation}°`;
+            menu.style.display = 'none';
+
+            stateManager.activeTiltIndex = t.index;
+            console.log(`📡 Switched to radar tilt ${t.index + 1} (${t.elevation}°)`);
+        };
+
+        menu.appendChild(item);
+    });
 }
 
 function initKeyboardControls(zoomCallback = null) {
@@ -617,7 +821,7 @@ export function initParameterCategoryBar() {
     });
 }
 
-export function initViewerUI(stepCallback, themeCallback = null, viewCallback = null, zoomCallback = null) {
+export function initViewerUI(stepCallback, themeCallback = null, viewCallback = null, zoomCallback = null, mapInstance = null) {
     onStepChangeCallback = stepCallback;
     onThemeChangeCallback = themeCallback;
 
@@ -633,6 +837,11 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
     initThemeToggle();
     initViewSelector(viewCallback);
     initKeyboardControls(zoomCallback);
+    initTiltSelector();
+
+    if (mapInstance) {
+        initRadarBoxTool(mapInstance);
+    }
 
     // 🌟 Unified Slider Input (Auto-routes between Model Viewer and Radar)
     if (slider) {
