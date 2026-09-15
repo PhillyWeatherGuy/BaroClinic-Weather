@@ -18,12 +18,11 @@ const vsSlicePlane = `
     }
 `;
 
-// Fragment Shader with 1:1 Radar Color Mapping & Clear-Air Transparency
+// Fragment Shader with 1:1 Raw Pixel Mapping
 const fsSlicePlane = `
     precision highp float;
     uniform sampler2D u_dataTex;
     uniform sampler2D u_paletteTex;
-    uniform float u_opacity;
     varying vec2 v_uv;
 
     void main() {
@@ -36,19 +35,20 @@ const fsSlicePlane = `
             discard;
         }
 
-        float palU = (rawVal * 255.0 + 0.5) / 256.0;
-        vec4 color = texture2D(u_paletteTex, vec2(palU, 0.5));
+        // Discrete step lookup in 256-color palette (Zero color blurring)
+        vec4 color = texture2D(u_paletteTex, vec2(rawVal, 0.5));
 
         if (color.a < 0.01) {
             discard;
         }
 
-        gl_FragColor = vec4(color.rgb, color.a * u_opacity);
+        // 100% crisp solid radar color
+        gl_FragColor = vec4(color.rgb, 1.0);
     }
 `;
 
 /**
- * 🌟 Creates 256x1 Palette Lookup Texture
+ * 🌟 Creates 256x1 Raw Discrete Palette Texture (Nearest Filtering)
  */
 function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
@@ -65,7 +65,7 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
 
-        // Clear air transparent, precipitation fully opaque & vibrant
+        // Byte < 65 is clear air (< 10 dBZ), everything else is 100% solid
         imgData.data[idx + 3] = (i < 65) ? 0 : 255;
     }
 
@@ -96,16 +96,16 @@ export function initStormVolumeViewer() {
     camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100.0);
     camera.position.set(0.0, 1.4, 1.9);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
     canvasContainerEl.appendChild(renderer.domElement);
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.minDistance = 0.5;
+    controls.minDistance = 0.4;
     controls.maxDistance = 5.0;
-    controls.maxPolarAngle = Math.PI * 0.49; // Keep camera above ground
+    controls.maxPolarAngle = Math.PI * 0.49; // Stay above ground plane
     controls.target.set(0.0, 0.0, 0.0);
 
     paletteTexture2D = createRadarPaletteTexture();
@@ -145,7 +145,7 @@ function animate() {
 }
 
 /**
- * 🌟 Renders the Stacked Tilt Planes from level2Worker
+ * 🌟 Renders the Stacked Tilt Planes with 1:1 Raw Pixel Nearest-Filtering
  */
 export function updateStormVolume(slicesOrBuffer, bounds) {
     initStormVolumeViewer();
@@ -159,14 +159,13 @@ export function updateStormVolume(slicesOrBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 20.0; // 20 km ceiling
+    const heightKm = 20.0;
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
     const aspectY = (heightKm / maxHoriz) * 0.9;
     const aspectZ = depthKm / maxHoriz;
 
-    // Update Bounding Box & Ground Grid dimensions
     wireframeHelper.scale.set(aspectX, aspectY, aspectZ);
     groundGridHelper.scale.set(aspectX, 1.0, aspectZ);
     groundGridHelper.position.y = -aspectY * 0.5;
@@ -185,22 +184,24 @@ export function updateStormVolume(slicesOrBuffer, bounds) {
     }
 
     const slices = Array.isArray(slicesOrBuffer) ? slicesOrBuffer : [];
-
-    // Build each stacked elevation plane
     const planeGeom = new THREE.PlaneGeometry(aspectX, aspectZ);
 
     slices.forEach((slice) => {
         if (!slice.data) return;
 
+        const size = Math.round(Math.sqrt(slice.data.length)) || 256;
+
+        // 🌟 Raw Pixel Nearest-Filtering (No blur, sharp super-res gates)
         const dataTex = new THREE.DataTexture(
             slice.data,
-            128,
-            128,
+            size,
+            size,
             THREE.RedFormat,
             THREE.UnsignedByteType
         );
-        dataTex.minFilter = THREE.LinearFilter;
-        dataTex.magFilter = THREE.LinearFilter;
+        dataTex.minFilter = THREE.NearestFilter;
+        dataTex.magFilter = THREE.NearestFilter;
+        dataTex.generateMipmaps = false;
         dataTex.unpackAlignment = 1;
         dataTex.needsUpdate = true;
 
@@ -209,8 +210,7 @@ export function updateStormVolume(slicesOrBuffer, bounds) {
             fragmentShader: fsSlicePlane,
             uniforms: {
                 u_dataTex: { value: dataTex },
-                u_paletteTex: { value: paletteTexture2D },
-                u_opacity: { value: 0.92 }
+                u_paletteTex: { value: paletteTexture2D }
             },
             transparent: true,
             depthWrite: false,
@@ -218,9 +218,9 @@ export function updateStormVolume(slicesOrBuffer, bounds) {
         });
 
         const planeMesh = new THREE.Mesh(planeGeom, sliceMat);
-        planeMesh.rotation.x = -Math.PI * 0.5; // Lie flat in horizontal X-Z plane
+        planeMesh.rotation.x = -Math.PI * 0.5;
 
-        // Map physical altitude (0 to 20,000 meters) to vertical Y axis
+        // Position along vertical Y axis at true physical altitude
         const altNorm = Math.min(1.0, Math.max(0.0, slice.altitudeMeters / 20000.0));
         const yPos = (altNorm * aspectY) - (aspectY * 0.5);
         planeMesh.position.set(0.0, yPos, 0.0);
@@ -228,7 +228,7 @@ export function updateStormVolume(slicesOrBuffer, bounds) {
         stackedPlanesGroup.add(planeMesh);
     });
 
-    console.log(`⚡ [3D Viewer] Mounted ${slices.length} stacked radar tilts in 3D viewport.`);
+    console.log(`⚡ [3D Viewer] Mounted ${slices.length} raw pixel radar tilts.`);
 
     showStormVolume();
 }
@@ -239,16 +239,4 @@ export function showStormVolume() {
     isViewerActive = true;
     stateManager.is3DVolumeActive = true;
     handleResize();
-    if (!animationFrameId) animate();
-}
-
-export function hideStormVolume() {
-    if (!containerEl) containerEl = document.getElementById('storm-volume-container');
-    if (containerEl) containerEl.style.display = 'none';
-    isViewerActive = false;
-    stateManager.is3DVolumeActive = false;
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-    }
-}
+    if (!animati
