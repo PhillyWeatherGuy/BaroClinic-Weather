@@ -11,13 +11,11 @@ let isViewerActive = false;
 let isFullscreen = false;
 let animationFrameId = null;
 
-// Ensure styling for the interactive dBZ cut-off slider & Fullscreen mode
 function ensureControlStyles() {
     if (document.getElementById('storm-cutoff-slider-styles')) return;
     const style = document.createElement('style');
     style.id = 'storm-cutoff-slider-styles';
     style.textContent = `
-        /* Fullscreen Viewport Mode */
         #storm-volume-container.fullscreen {
             top: 0 !important;
             left: 0 !important;
@@ -118,7 +116,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader with 100% See-Through Floor
+// Fragment Shader with Blue-Noise Ray Dithering (Zero Wood-Grain Lines)
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -136,29 +134,11 @@ const fsVolume = `
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
-    // Fast 3D Noise for Cloud Billow Turbulence
-    float hash(vec3 p) {
-        p = fract(p * 0.3183099 + 0.1);
-        p *= 17.0;
-        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-    }
-
-    float noise3D(vec3 x) {
-        vec3 i = floor(x);
-        vec3 f = fract(x);
-        f = f * f * (3.0 - 2.0 * f);
-
-        return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
-                       mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
-                   mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
-                       mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
-    }
-
-    // Multi-Scale Billow Noise
-    float puffyCloudNoise(vec3 p) {
-        float macroDomes = noise3D(p * 4.5) * 0.65;
-        float microPuffs = noise3D(p * 12.0) * 0.35;
-        return (macroDomes + microPuffs - 0.5) * 0.038;
+    // Fast Screen-Space Dither Hash (Destroys wood-grain lines and contour bands)
+    float ditherHash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
     }
 
     // Safe 360° Ray-AABB Intersection
@@ -178,47 +158,42 @@ const fsVolume = `
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-
-        // 🌟 Completely dissolves the flat ground carpet so the floor is 100% see-through
+        // Soft ground fade to keep floor see-through
         float groundFade = smoothstep(0.0, 0.035, texCoord.y);
-
-        // Multi-Octave Puffy Cloud Perturbation
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
-        float puff = puffyCloudNoise(sampleCoord);
-        sampleCoord += vec3(puff, puff * 0.7, puff);
-        sampleCoord = clamp(sampleCoord, 0.0, 1.0);
-
         return texture(u_volumeTex, sampleCoord).r * groundFade;
     }
 
-    // Atmospheric Cloud Transfer Function
+    // Smoothstep Edge Feathering
+    const float EDGE_SIZE = 0.025;
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
         }
 
+        float softFade = smoothstep(u_cutoffMin.w, u_cutoffMin.w + EDGE_SIZE, value);
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
 
+        // Natural cloud density progression
         float alpha = 0.0;
         if (value < 0.38) {
             float t = (value - u_cutoffMin.w) / max(0.38 - u_cutoffMin.w, 0.001);
-            alpha = mix(0.02, 0.07, t);
+            alpha = mix(0.03, 0.08, t);
         } else if (value < 0.55) {
             float t = (value - 0.38) / 0.17;
-            alpha = mix(0.08, 0.28, t);
+            alpha = mix(0.10, 0.35, t);
         } else if (value < 0.72) {
             float t = (value - 0.55) / 0.17;
-            alpha = mix(0.35, 0.75, t);
+            alpha = mix(0.40, 0.80, t);
         } else {
             float t = (value - 0.72) / 0.28;
             alpha = mix(0.85, 1.00, t);
         }
 
-        return vec4(cloudColor, alpha);
+        return vec4(cloudColor, alpha * softFade);
     }
 
-    // Surface Normal Estimation
     vec3 estimateNormal(vec3 p, float eps) {
         float dX = sampleVolume(p + vec3(eps, 0.0, 0.0)) - sampleVolume(p - vec3(eps, 0.0, 0.0));
         float dY = sampleVolume(p + vec3(0.0, eps, 0.0)) - sampleVolume(p - vec3(0.0, eps, 0.0));
@@ -226,7 +201,7 @@ const fsVolume = `
         return normalize(-vec3(dX, dY, dZ));
     }
 
-    #define MAX_STEPS 96
+    #define MAX_STEPS 112
     void main() {
         vec3 rayOrigin = u_cameraPos;
         vec3 rayDir = normalize(v_worldPos - rayOrigin);
@@ -248,7 +223,10 @@ const fsVolume = `
         vec3 uvwEnd = (backPos + halfSize) / u_boxSize;
         vec3 uvwStep = (uvwEnd - uvwStart) / u_steps;
 
-        vec3 currentPosition = uvwStart;
+        // 🌟 Screen-Space Jitter: offsets ray starting position to eliminate banding lines
+        float dither = ditherHash(gl_FragCoord.xy);
+        vec3 currentPosition = uvwStart + uvwStep * dither;
+
         vec3 accumulatedColor = vec3(0.0);
         float transmittance = 1.0;
         vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30));
@@ -260,20 +238,20 @@ const fsVolume = `
                 vec4 sampleColor = colorizeCloud(sampleValue);
 
                 if (sampleColor.a > 0.001) {
-                    vec3 normal = estimateNormal(currentPosition, 0.022);
+                    vec3 normal = estimateNormal(currentPosition, 0.015);
                     float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
                     float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
                     vec3 illumination = vec3(0.45) + vec3(0.55) * sunLight + vec3(0.15, 0.18, 0.22) * skyLight;
 
                     vec3 litColor = sampleColor.rgb * illumination;
 
-                    float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.4;
+                    float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.35;
                     float stepTransmittance = exp(-stepDensity);
 
                     accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * 1.5;
                     transmittance *= stepTransmittance;
 
-                    if (transmittance < 0.03) {
+                    if (transmittance < 0.02) {
                         break;
                     }
                 }
@@ -292,7 +270,7 @@ const fsVolume = `
 `;
 
 /**
- * 🌟 Creates 256x1 Palette with Clean 12 dBZ Cutoff
+ * 🌟 Creates 256x1 Palette
  */
 function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
     const canvas = document.createElement('canvas');
@@ -330,7 +308,6 @@ export function initStormVolumeViewer() {
     if (!containerEl || !canvasContainerEl) return;
     ensureControlStyles();
 
-    // Fullscreen Action Button
     if (headerEl && !document.getElementById('btn-fullscreen-storm-3d')) {
         const actionsContainer = document.createElement('div');
         actionsContainer.className = 'storm-header-actions';
@@ -357,7 +334,6 @@ export function initStormVolumeViewer() {
         closeBtn.onclick = () => hideStormVolume();
     }
 
-    // Interactive dBZ Cut-Off Slider
     let cutoffControl = containerEl.querySelector('.storm-cutoff-pill');
     if (!cutoffControl) {
         cutoffControl = document.createElement('div');
@@ -412,7 +388,7 @@ export function initStormVolumeViewer() {
             u_volumeTex: { value: null },
             u_paletteTex: { value: paletteTexture2D },
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
-            u_steps: { value: 72.0 },
+            u_steps: { value: 96.0 },
             u_opacity: { value: 1.0 },
             u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.25) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
@@ -429,7 +405,6 @@ export function initStormVolumeViewer() {
     wireframeHelper.material.transparent = true;
     scene.add(wireframeHelper);
 
-    // 🌟 Transparent Ground Gridlines (See-through floor)
     groundGridHelper = new THREE.GridHelper(1.0, 8, 0x38bdf8, 0x38bdf8);
     groundGridHelper.material.transparent = true;
     groundGridHelper.material.opacity = 0.35;
@@ -520,7 +495,8 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
     if (volumeTexture3D) volumeTexture3D.dispose();
 
-    volumeTexture3D = new Texture3DClass(voxelBuffer, 128, 64, 128);
+    // 🌟 Uploads 256 x 96 x 256 High-Definition 3D Volume
+    volumeTexture3D = new Texture3DClass(voxelBuffer, 256, 96, 256);
     volumeTexture3D.format = THREE.RedFormat;
     volumeTexture3D.type = THREE.UnsignedByteType;
     volumeTexture3D.minFilter = THREE.LinearFilter;
