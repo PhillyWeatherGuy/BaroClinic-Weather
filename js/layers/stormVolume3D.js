@@ -151,7 +151,7 @@ const vsVolume = `
     }
 `;
 
-// Dual-Mode Fragment Shader: Smooth Atmospheric Cloud ↔ Crisp Super-Res Pixels
+// Dual-Mode Fragment Shader: Cinematic Atmospheric Cloud ↔ Crisp Super-Res Pixels
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -170,7 +170,35 @@ const fsVolume = `
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
-    // Fast Dither Hash
+    // Fast 3D Noise for organic cloud-edge billow micro-turbulence
+    float hash13(vec3 p3) {
+        p3 = fract(p3 * 0.1031);
+        p3 += dot(p3, p3.zyx + 31.32);
+        return fract((p3.x + p3.y) * p3.z);
+    }
+
+    float noise3D(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+
+        float n000 = hash13(i + vec3(0.0, 0.0, 0.0));
+        float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+
+        return mix(
+            mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+            mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+            f.z
+        );
+    }
+
+    // Interleaved Dither Hash to remove ray-slice banding
     float ditherHash(vec2 p) {
         vec3 p3 = fract(vec3(p.xyx) * 0.1031);
         p3 += dot(p3, p3.yzx + 33.33);
@@ -189,58 +217,58 @@ const fsVolume = `
         return vec2(t0, t1);
     }
 
-    float sampleVolume(vec3 texCoord) {
+    float sampleRawVolume(vec3 texCoord) {
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-        float groundFade = smoothstep(0.0, 0.035, texCoord.y);
+        float groundFade = smoothstep(0.0, 0.03, texCoord.y);
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r * groundFade;
     }
 
-    const float EDGE_SIZE = 0.025;
-    vec4 colorizeCloud(float value) {
-        if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
-            return vec4(0.0);
-        }
+    // Sample Density: Applies soft micro-turbulence only along low-reflectivity cloud edges
+    float sampleCloudDensity(vec3 texCoord) {
+        float rawVal = sampleRawVolume(texCoord);
+        if (rawVal <= u_cutoffMin.w) return 0.0;
 
-        // Mode 1: Crisp Raw Super-Res Pixels (Zero feathering, 100% discrete gate colors)
         if (u_renderMode > 0.5) {
-            vec4 palCol = texture(u_paletteTex, vec2(value, 0.5));
-            return vec4(palCol.rgb, 1.0);
+            return rawVal; // Pure raw voxels in pixel inspection mode
         }
 
-        // Mode 0: Smooth Cloud Vapor (Soft boundary feathering)
-        float softFade = smoothstep(u_cutoffMin.w, u_cutoffMin.w + EDGE_SIZE, value);
-        vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
-        vec3 cloudColor = paletteColor.rgb;
-
-        float alpha = 0.0;
-        if (value < 0.38) {
-            float t = (value - u_cutoffMin.w) / max(0.38 - u_cutoffMin.w, 0.001);
-            alpha = mix(0.03, 0.08, t);
-        } else if (value < 0.55) {
-            float t = (value - 0.38) / 0.17;
-            alpha = mix(0.10, 0.35, t);
-        } else if (value < 0.72) {
-            float t = (value - 0.55) / 0.17;
-            alpha = mix(0.40, 0.80, t);
-        } else {
-            float t = (value - 0.72) / 0.28;
-            alpha = mix(0.85, 1.00, t);
+        // Apply billow perturbation only near diffuse outer boundaries (15-35 dBZ)
+        float edgeZone = smoothstep(0.55, 0.22, rawVal);
+        if (edgeZone > 0.01) {
+            float billowNoise = noise3D(texCoord * 44.0) * 0.032;
+            rawVal = clamp(rawVal + billowNoise * edgeZone, 0.0, 1.0);
         }
 
-        return vec4(cloudColor, alpha * softFade);
+        return rawVal;
     }
 
-    vec3 estimateNormal(vec3 p, float eps) {
-        float dX = sampleVolume(p + vec3(eps, 0.0, 0.0)) - sampleVolume(p - vec3(eps, 0.0, 0.0));
-        float dY = sampleVolume(p + vec3(0.0, eps, 0.0)) - sampleVolume(p - vec3(0.0, eps, 0.0));
-        float dZ = sampleVolume(p + vec3(0.0, 0.0, eps)) - sampleVolume(p - vec3(0.0, 0.0, eps));
-        return normalize(-vec3(dX, dY, dZ));
+    // Henyey-Greenstein forward phase function for atmospheric cloud edge illumination
+    float henyeyGreenstein(float cosAngle, float g) {
+        float g2 = g * g;
+        return (1.0 - g2) / (4.0 * 3.14159265 * pow(1.0 + g2 - 2.0 * g * cosAngle, 1.5));
     }
 
-    #define MAX_STEPS 112
+    // Secondary Light March: measures how deeply buried a point is inside the storm
+    float marchSunShadow(vec3 pos, vec3 sunDir) {
+        float shadowDepth = 0.0;
+        vec3 lightStep = sunDir * 0.028;
+        vec3 cur = pos + lightStep;
+
+        for (int s = 0; s < 5; s++) {
+            float d = sampleRawVolume(cur);
+            if (d > u_cutoffMin.w) {
+                shadowDepth += (d - u_cutoffMin.w) * 2.2;
+            }
+            cur += lightStep;
+        }
+
+        return exp(-shadowDepth);
+    }
+
+    #define MAX_STEPS 128
     void main() {
         vec3 rayOrigin = u_cameraPos;
         vec3 rayDir = normalize(v_worldPos - rayOrigin);
@@ -267,31 +295,48 @@ const fsVolume = `
 
         vec3 accumulatedColor = vec3(0.0);
         float transmittance = 1.0;
-        vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30));
+
+        // High-angled solar directional light
+        vec3 sunDir = normalize(vec3(0.40, 0.80, 0.35));
+        float cosTheta = dot(rayDir, sunDir);
+        float phaseGlow = henyeyGreenstein(cosTheta, 0.38);
 
         for (int i = 0; i < MAX_STEPS; i++) {
-            float sampleValue = sampleVolume(currentPosition);
+            float val = sampleCloudDensity(currentPosition);
 
-            if (sampleValue > u_cutoffMin.w) {
-                vec4 sampleColor = colorizeCloud(sampleValue);
+            if (val > u_cutoffMin.w) {
+                vec4 palCol = texture(u_paletteTex, vec2(val, 0.5));
 
-                if (sampleColor.a > 0.001) {
-                    vec3 normal = estimateNormal(currentPosition, 0.015);
-                    float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
-                    float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
-                    vec3 illumination = vec3(0.45) + vec3(0.55) * sunLight + vec3(0.15, 0.18, 0.22) * skyLight;
-
-                    vec3 litColor = sampleColor.rgb * illumination;
-
-                    float stepDensity = sampleColor.a * (u_renderMode > 0.5 ? 0.70 : (48.0 / u_steps) * 1.35);
+                if (u_renderMode > 0.5) {
+                    // --- MODE 1: CRISP RAW SUPER-RES PIXELS ---
+                    float stepDensity = 0.75;
                     float stepTransmittance = exp(-stepDensity);
-
-                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance) * (u_renderMode > 0.5 ? 1.0 : 1.5);
+                    accumulatedColor += transmittance * palCol.rgb * (1.0 - stepTransmittance);
                     transmittance *= stepTransmittance;
+                } else {
+                    // --- MODE 0: CINEMATIC VOLUMETRIC CLOUD ---
+                    // Smooth exponential density curve (eliminates hard shell hulls)
+                    float normDbz = (val - u_cutoffMin.w) / max(1.0 - u_cutoffMin.w, 0.001);
+                    float density = pow(normDbz, 1.5) * 3.8;
 
-                    if (transmittance < 0.02) {
-                        break;
-                    }
+                    // Light march self-shadowing & atmospheric ambient
+                    float sunPenetration = marchSunShadow(currentPosition, sunDir);
+                    float skyLight = clamp(currentPosition.y * 0.6 + 0.4, 0.25, 1.0);
+                    vec3 ambient = vec3(0.42, 0.46, 0.56) * skyLight;
+                    vec3 directSun = vec3(1.12, 1.08, 0.98) * (sunPenetration + phaseGlow * 0.45);
+
+                    vec3 litColor = palCol.rgb * (ambient + directSun);
+
+                    // Physical Beer-Lambert optical extinction
+                    float stepOpticalDepth = density * (48.0 / u_steps);
+                    float stepTransmittance = exp(-stepOpticalDepth);
+
+                    accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance);
+                    transmittance *= stepTransmittance;
+                }
+
+                if (transmittance < 0.015) {
+                    break;
                 }
             }
 
@@ -438,7 +483,7 @@ export function initStormVolumeViewer() {
             u_volumeTex: { value: null },
             u_paletteTex: { value: paletteTexture2D },
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
-            u_steps: { value: 96.0 },
+            u_steps: { value: 128.0 },
             u_opacity: { value: 1.0 },
             u_renderMode: { value: 0.0 }, // 0.0 = Cloud, 1.0 = Pixels
             u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.25) },
@@ -554,11 +599,11 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 14.0;
+    const heightKm = 18.0; // Scaled to 18 km to capture full supercell anvil & overshooting tops
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 1.9;
+    const aspectY = (heightKm / maxHoriz) * 2.1;
     const aspectZ = depthKm / maxHoriz;
 
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
