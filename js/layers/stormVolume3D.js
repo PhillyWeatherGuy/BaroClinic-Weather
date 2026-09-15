@@ -151,7 +151,7 @@ const vsVolume = `
     }
 `;
 
-// Dual-Mode Fragment Shader: Atmospheric Cloud ↔ Crisp Super-Res Pixels
+// Dual-Mode Fragment Shader: Wispy Atmospheric Cloud ↔ Crisp Super-Res Pixels
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -166,7 +166,7 @@ const fsVolume = `
     uniform vec3 u_boxSize;
     uniform float u_steps;
     uniform float u_opacity;
-    uniform float u_renderMode; // 0.0 = Smooth Cloud, 1.0 = Crisp Raw Pixels
+    uniform float u_renderMode; // 0.0 = Wispy Cloud, 1.0 = Crisp Raw Pixels
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
@@ -193,10 +193,10 @@ const fsVolume = `
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-        float groundFade = smoothstep(0.0, 0.035, texCoord.y);
+        float groundFade = smoothstep(0.0, 0.03, texCoord.y);
 
-        // 🌟 Lift the bottom-to-middle storm core into natural proportion
-        float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.40);
+        // 🌟 Lift lower-to-middle storm core into natural proportion
+        float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.55);
 
         vec3 sampleCoord = vec3(texCoord.x, expandedY, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r * groundFade;
@@ -239,7 +239,7 @@ const fsVolume = `
         // High-angled solar directional light
         vec3 sunDir = normalize(vec3(0.35, 0.85, 0.40));
         float cosTheta = dot(rayDir, sunDir);
-        float forwardScatter = phaseHG(cosTheta, 0.40);
+        float forwardScatter = phaseHG(cosTheta, 0.45);
 
         for (int i = 0; i < MAX_STEPS; i++) {
             float sampleValue = sampleVolume(currentPosition);
@@ -254,23 +254,27 @@ const fsVolume = `
                     accumulatedColor += transmittance * palColor.rgb * (1.0 - stepTransmittance);
                     transmittance *= stepTransmittance;
                 } else {
-                    // --- MODE 0: REALISTIC ATMOSPHERIC CLOUD ---
-                    // 1. Continuous physical density curve
+                    // --- MODE 0: WISPY ATMOSPHERIC CLOUD ---
+                    // 1. Feathered boundary falloff (makes blue/green edges smoky and wispy)
                     float normDbz = (sampleValue - u_cutoffMin.w) / max(1.0 - u_cutoffMin.w, 0.001);
-                    float density = pow(normDbz, 1.45) * 3.6;
+                    float edgeSoft = smoothstep(0.0, 0.10, normDbz);
 
-                    // 2. Dual-hemisphere ambient skylight
+                    // 2. Steep power curve: blues, greens, & light yellows stay delicate & translucent;
+                    // heavy precipitation & hail cores (reds/magentas) stay dense & solid
+                    float density = pow(normDbz, 2.35) * 5.4 * edgeSoft;
+
+                    // 3. Dual-hemisphere ambient skylight
                     float heightFactor = clamp(currentPosition.y, 0.0, 1.0);
-                    vec3 skyLight = mix(vec3(0.35, 0.38, 0.46), vec3(0.58, 0.68, 0.82), heightFactor);
+                    vec3 skyLight = mix(vec3(0.35, 0.38, 0.46), vec3(0.60, 0.70, 0.85), heightFactor);
 
-                    // 3. Sunlight penetration & forward cloud-rim radiance
-                    float sunPenetration = exp(-density * 0.45);
-                    vec3 directSun = vec3(1.15, 1.10, 1.00) * (sunPenetration * 0.75 + forwardScatter * 0.40);
+                    // 4. Sunlight penetration & forward cloud-rim radiance
+                    float sunPenetration = exp(-density * 0.40);
+                    vec3 directSun = vec3(1.15, 1.10, 1.00) * (sunPenetration * 0.75 + forwardScatter * 0.45);
 
                     vec3 litColor = palColor.rgb * (skyLight + directSun);
 
-                    // 4. Physical Beer-Lambert optical depth accumulation
-                    float stepOpticalDepth = density * (48.0 / u_steps) * 1.35;
+                    // 5. Physical Beer-Lambert optical depth accumulation
+                    float stepOpticalDepth = density * (48.0 / u_steps) * 1.15;
                     float stepTransmittance = exp(-stepOpticalDepth);
 
                     accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance);
@@ -398,7 +402,7 @@ export function initStormVolumeViewer() {
 
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100.0);
-    camera.position.set(0.0, 0.85, 2.15);
+    camera.position.set(0.0, 0.95, 2.35);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -537,10 +541,10 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
     const heightKm = 18.0;
 
-    // Balanced panoramic aspect ratio
+    // Balanced panoramic aspect ratio (wide spreading anvil, natural height relief)
     const maxHoriz = Math.max(widthKm, depthKm, 12.0);
     const HORIZONTAL_SPREAD = 1.35;
-    const VERTICAL_RELIEF = 1.35; // Tuned for higher lower-to-middle presence
+    const VERTICAL_RELIEF = 1.58; // Slightly taller total height with ample base/mid presence
 
     const aspectX = (widthKm / maxHoriz) * HORIZONTAL_SPREAD;
     const aspectZ = (depthKm / maxHoriz) * HORIZONTAL_SPREAD;
