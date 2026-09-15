@@ -75,7 +75,7 @@ function decompressLevel2(arrayBuffer) {
 }
 
 /**
- * 🛰️ Parses Message 31 sweeps from Level 2 buffer
+ * 🛰️ Parses Message 31 sweeps from Level 2 buffer & de-duplicates SAILS cuts
  */
 function parseSweepsFromLevel2(rawBytes, stationId) {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
@@ -158,7 +158,16 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
         }
     }
 
-    return Array.from(sweepsByElevation.values()).sort((a, b) => a.elAngle - b.elAngle);
+    // Sort by elevation angle and de-duplicate repeat/SAILS angles (< 0.15° difference)
+    const sorted = Array.from(sweepsByElevation.values()).sort((a, b) => a.elAngle - b.elAngle);
+    const uniqueSweeps = [];
+    for (let i = 0; i < sorted.length; i++) {
+        if (uniqueSweeps.length === 0 || Math.abs(sorted[i].elAngle - uniqueSweeps[uniqueSweeps.length - 1].elAngle) > 0.18) {
+            uniqueSweeps.push(sorted[i]);
+        }
+    }
+
+    return uniqueSweeps;
 }
 
 /**
@@ -192,8 +201,64 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     const bottom = v10 * (1.0 - binT) + v11 * binT;
     const dbz = top * (1.0 - rayT) + bottom * rayT;
 
-    // Preserves delicate mist echoes down to 2 dBZ (instead of hard-cutting at 8 dBZ)
-    return dbz > 2.0 ? dbz : 0.0;
+    return dbz > 1.5 ? dbz : 0.0;
+}
+
+/**
+ * 🌟 High-Speed Separable 3D Gaussian/Box Filter (GR2Analyst "Smoothing" Engine)
+ * Runs in ~20ms in the worker; melts discrete voxel boundaries and sweep terraces into smooth fluid
+ */
+function smoothVolume3D(src, X, Y, Z) {
+    const temp = new Uint8Array(X * Y * Z);
+    const XY = X * Y;
+
+    // Pass 1: Horizontal X-axis Smoothing
+    for (let z = 0; z < Z; z++) {
+        const zOff = z * XY;
+        for (let y = 0; y < Y; y++) {
+            const rowOff = zOff + y * X;
+            temp[rowOff] = (src[rowOff] * 3 + src[rowOff + 1]) >> 2;
+            temp[rowOff + X - 1] = (src[rowOff + X - 1] * 3 + src[rowOff + X - 2]) >> 2;
+            for (let x = 1; x < X - 1; x++) {
+                const idx = rowOff + x;
+                temp[idx] = (src[idx - 1] + (src[idx] << 1) + src[idx + 1] + 1) >> 2;
+            }
+        }
+    }
+
+    // Pass 2: Vertical Y-axis Smoothing
+    for (let z = 0; z < Z; z++) {
+        const zOff = z * XY;
+        for (let x = 0; x < X; x++) {
+            const colOff = zOff + x;
+            src[colOff] = (temp[colOff] * 3 + temp[colOff + X]) >> 2;
+            const topIdx = colOff + (Y - 1) * X;
+            src[topIdx] = (temp[topIdx] * 3 + temp[topIdx - X]) >> 2;
+
+            for (let y = 1; y < Y - 1; y++) {
+                const idx = colOff + y * X;
+                src[idx] = (temp[idx - X] + (temp[idx] << 1) + temp[idx + X] + 1) >> 2;
+            }
+        }
+    }
+
+    // Pass 3: Depth Z-axis Smoothing
+    for (let y = 0; y < Y; y++) {
+        const yOff = y * X;
+        for (let x = 0; x < X; x++) {
+            const idxBase = yOff + x;
+            temp[idxBase] = (src[idxBase] * 3 + src[idxBase + XY]) >> 2;
+            const backIdx = idxBase + (Z - 1) * XY;
+            temp[backIdx] = (src[backIdx] * 3 + src[backIdx - XY]) >> 2;
+
+            for (let z = 1; z < Z - 1; z++) {
+                const idx = idxBase + z * XY;
+                temp[idx] = (src[idx - XY] + (src[idx] << 1) + src[idx + XY] + 1) >> 2;
+            }
+        }
+    }
+
+    return temp;
 }
 
 /**
@@ -255,45 +320,42 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
                 if (sweepBelow && sweepAbove && sweepBelow !== sweepAbove) {
                     const dbz1 = sampleSweepBilinear(sweepBelow, r, azDeg);
                     const dbz2 = sampleSweepBilinear(sweepAbove, r, azDeg);
-                    const span = sweepAbove.elAngle - sweepBelow.elAngle;
+                    const span = Math.max(0.4, sweepAbove.elAngle - sweepBelow.elAngle);
 
                     if (dbz1 > 0.0 && dbz2 > 0.0) {
-                        // 🌟 Smooth Hermite C^1 Continuous S-Curve:
-                        // Slope is exactly 0 at both sweep angles, eliminating tilt seams & ribbing lines
+                        // Smooth Hermite S-curve blending between elevation angles
                         const t = Math.max(0.0, Math.min(1.0, (elAngleDeg - sweepBelow.elAngle) / span));
                         const smoothT = t * t * (3.0 - 2.0 * t);
                         finalDbz = dbz1 + smoothT * (dbz2 - dbz1);
                     } else if (dbz1 > 0.0) {
-                        // 🌟 Smooth Gaussian beam falloff into clear air above (no artificial 0.7 cliff)
+                        // Smooth Gaussian beam dispersion into clear air
                         const diff = elAngleDeg - sweepBelow.elAngle;
-                        const normDiff = diff / Math.max(1.0, span);
-                        finalDbz = dbz1 * Math.exp(-2.2 * normDiff * normDiff);
+                        const normDiff = diff / span;
+                        finalDbz = dbz1 * Math.exp(-1.6 * normDiff * normDiff);
                     } else if (dbz2 > 0.0) {
-                        // 🌟 Smooth Gaussian beam falloff into clear air below
                         const diff = sweepAbove.elAngle - elAngleDeg;
-                        const normDiff = diff / Math.max(1.0, span);
-                        finalDbz = dbz2 * Math.exp(-2.2 * normDiff * normDiff);
+                        const normDiff = diff / span;
+                        finalDbz = dbz2 * Math.exp(-1.6 * normDiff * normDiff);
                     }
                 } else if (sweepBelow) {
                     const dbz = sampleSweepBilinear(sweepBelow, r, azDeg);
                     if (dbz > 0.0) {
                         const diff = elAngleDeg - sweepBelow.elAngle;
-                        if (diff < 3.2) {
-                            finalDbz = dbz * Math.exp(-0.75 * diff * diff);
+                        if (diff < 3.5) {
+                            finalDbz = dbz * Math.exp(-0.6 * diff * diff);
                         }
                     }
                 } else if (sweepAbove) {
                     const dbz = sampleSweepBilinear(sweepAbove, r, azDeg);
                     if (dbz > 0.0) {
                         const diff = sweepAbove.elAngle - elAngleDeg;
-                        if (diff < 2.2) {
-                            finalDbz = dbz * Math.exp(-1.1 * diff * diff);
+                        if (diff < 2.5) {
+                            finalDbz = dbz * Math.exp(-0.9 * diff * diff);
                         }
                     }
                 }
 
-                // 🌟 Preserves continuous data down to 2 dBZ to prevent outer-shell cutoff
-                if (finalDbz >= 2.0) {
+                if (finalDbz >= 1.5) {
                     const mappedByte = Math.min(255, Math.max(1, Math.round((finalDbz + 32.0) * 2.0)));
                     const memoryIndex = gz * (GRID_X * GRID_Y) + gy * GRID_X + gx;
                     voxels[memoryIndex] = mappedByte;
@@ -302,8 +364,11 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
         }
     }
 
+    // 🌟 Run the 3D Separable Spatial Filter across the voxel volume (GR2Analyst-style smoothing)
+    const smoothedVoxels = smoothVolume3D(voxels, GRID_X, GRID_Y, GRID_Z);
+
     const tiltsMeta = sweeps.map((s, idx) => ({ index: idx, elevation: s.elAngle }));
-    return { voxels, tilts: tiltsMeta };
+    return { voxels: smoothedVoxels, tilts: tiltsMeta };
 }
 
 self.onmessage = async (e) => {
@@ -321,7 +386,7 @@ self.onmessage = async (e) => {
         );
 
         const elapsed = (performance.now() - startTime).toFixed(1);
-        console.log(`⚡ [Level 2 Worker] Built Ultra-HD 3D Volume (${GRID_X}x${GRID_Y}x${GRID_Z}) in ${elapsed}ms`);
+        console.log(`⚡ [Level 2 Worker] Built Smoothed 3D Volume (${GRID_X}x${GRID_Y}x${GRID_Z}) in ${elapsed}ms`);
 
         self.postMessage({
             id,
