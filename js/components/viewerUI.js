@@ -76,14 +76,16 @@ export function initRadarBoxTool(map) {
     // 🌟 One-Click Historic Demo: June 19, 2015 KUDX Supercell (Bram's Video Case)
     if (demoBtn) {
         demoBtn.onclick = async () => {
-            showToast("Loading June 19, 2015 KUDX Supercell from S3...");
-            const s3Key = '2015/06/20/KUDX/KUDX20150620_023727_V06';
+            showToast("Querying June 19, 2015 KUDX Supercell from NOAA S3...");
             const bounds = [-103.85, 44.25, -103.15, 44.75]; // Sturgis / Nisland, SD
+            stateManager.activeRadarStation = 'KUDX';
 
+            // Fly camera over the storm
             map.flyTo({ center: [-103.50, 44.50], zoom: 8.5 });
 
             try {
-                const url = `${stateManager.BASE_URL}radar-l2?key=${s3Key}`;
+                // Query S3 dynamically by station, date, and approximate minute (02:37 UTC)
+                const url = `${stateManager.BASE_URL}radar-l2?station=KUDX&date=20150620&time=0237`;
                 const resp = await fetch(url);
                 if (!resp.ok) throw new Error(`Could not fetch S3 scan (${resp.status})`);
                 const rawBuffer = await resp.arrayBuffer();
