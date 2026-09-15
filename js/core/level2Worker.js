@@ -148,7 +148,6 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
 function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     if (!sweep) return 0.0;
 
-    // Fractional ray
     const normRay = ((azDeg % 360.0) + 360.0) % 360.0 * 2.0;
     const r0 = Math.floor(normRay) % TARGET_RADIALS;
     const r1 = (r0 + 1) % TARGET_RADIALS;
@@ -158,7 +157,6 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     const rad1 = sweep.radials[r1] || rad0;
     if (!rad0) return 0.0;
 
-    // Fractional gate bin
     const normBin = (slantRangeMeters - sweep.firstGateMeters) / sweep.gateSpacingMeters;
     if (normBin < 0 || normBin >= sweep.numGates - 1) return 0.0;
 
@@ -171,23 +169,20 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     const v10 = (rad1 && rad1[b0] > 1) ? (rad1[b0] - sweep.offsetVal) / sweep.scale : v00;
     const v11 = (rad1 && rad1[b1] > 1) ? (rad1[b1] - sweep.offsetVal) / sweep.scale : v01;
 
-    // Bilinear interpolation
     const top = v00 * (1.0 - binT) + v01 * binT;
     const bottom = v10 * (1.0 - binT) + v11 * binT;
     const dbz = top * (1.0 - rayT) + bottom * rayT;
 
-    return dbz > 10.0 ? dbz : 0.0;
+    return dbz > 5.0 ? dbz : 0.0;
 }
 
 /**
  * 🌟 3D Separable Gaussian Blur (The "Puffy Cloud" Filter)
- * Smooths raw discretized radar cells into natural, billowy fluid domes
  */
 function applyGaussian3DFilter(voxels) {
     const temp = new Float32Array(GRID_X * GRID_Y * GRID_Z);
     const out = new Uint8Array(GRID_X * GRID_Y * GRID_Z);
 
-    // Pass 1: Horizontal X-Blur
     for (let z = 0; z < GRID_Z; z++) {
         for (let y = 0; y < GRID_Y; y++) {
             const rowOffset = z * (GRID_X * GRID_Y) + y * GRID_X;
@@ -202,7 +197,6 @@ function applyGaussian3DFilter(voxels) {
         }
     }
 
-    // Pass 2: Vertical Y-Blur
     for (let z = 0; z < GRID_Z; z++) {
         for (let x = 0; x < GRID_X; x++) {
             for (let y = 0; y < GRID_Y; y++) {
@@ -218,7 +212,6 @@ function applyGaussian3DFilter(voxels) {
         }
     }
 
-    // Pass 3: Depth Z-Blur
     for (let y = 0; y < GRID_Y; y++) {
         for (let x = 0; x < GRID_X; x++) {
             for (let z = 0; z < GRID_Z; z++) {
@@ -236,9 +229,9 @@ function applyGaussian3DFilter(voxels) {
 }
 
 /**
- * 🛰️ Inverse Voxel Pull with Continuous Polar Interpolation
+ * 🛰️ Inverse Voxel Pull with Continuous 3D Volume Interpolation
  */
-function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0, stationId = 'KDMX') {
+function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0, stationId = 'KUDX') {
     const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
     const voxels = new Uint8Array(GRID_X * GRID_Y * GRID_Z);
 
@@ -283,12 +276,8 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                 let sweepAbove = null;
 
                 for (let k = 0; k < sweeps.length; k++) {
-                    if (sweeps[k].elAngle <= elAngleDeg) {
-                        sweepBelow = sweeps[k];
-                    }
-                    if (sweeps[k].elAngle >= elAngleDeg && !sweepAbove) {
-                        sweepAbove = sweeps[k];
-                    }
+                    if (sweeps[k].elAngle <= elAngleDeg) sweepBelow = sweeps[k];
+                    if (sweeps[k].elAngle >= elAngleDeg && !sweepAbove) sweepAbove = sweeps[k];
                 }
 
                 let finalDbz = 0.0;
@@ -296,33 +285,36 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                 if (sweepBelow && sweepAbove && sweepBelow !== sweepAbove) {
                     const dbz1 = sampleSweepBilinear(sweepBelow, r, azDeg);
                     const dbz2 = sampleSweepBilinear(sweepAbove, r, azDeg);
-
                     const span = sweepAbove.elAngle - sweepBelow.elAngle;
                     const t = Math.max(0.0, Math.min(1.0, (elAngleDeg - sweepBelow.elAngle) / span));
 
                     if (dbz1 > 0 && dbz2 > 0) {
                         finalDbz = dbz1 + t * (dbz2 - dbz1);
                     } else if (dbz1 > 0) {
-                        finalDbz = dbz1 * (1.0 - t * 0.8);
+                        finalDbz = dbz1 * (1.0 - t * 0.6);
                     } else if (dbz2 > 0) {
-                        finalDbz = dbz2 * (t * 0.8);
+                        finalDbz = dbz2 * (t * 0.6);
                     }
                 } else if (sweepBelow) {
+                    // Ground rain shaft extension
                     const dbz = sampleSweepBilinear(sweepBelow, r, azDeg);
                     const diff = elAngleDeg - sweepBelow.elAngle;
-                    if (diff < 2.0) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 2.0);
+                    if (diff < 2.5) {
+                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 2.5);
                     }
                 } else if (sweepAbove) {
+                    // Cloud top rounded dome decay
                     const dbz = sampleSweepBilinear(sweepAbove, r, azDeg);
                     const diff = sweepAbove.elAngle - elAngleDeg;
-                    if (diff < 1.2) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.2);
+                    if (diff < 1.8) {
+                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.8);
                     }
                 }
 
-                if (finalDbz >= 10.0) {
-                    const mappedByte = Math.min(255, Math.max(1, Math.round((finalDbz + 32.0) * 2.0)));
+                // Smooth continuous scalar density (No 10 dBZ cliff!)
+                if (finalDbz > 4.0) {
+                    const normalized = Math.min(1.0, Math.max(0.0, (finalDbz - 4.0) / 72.0));
+                    const mappedByte = Math.round(normalized * 255.0);
                     const idx = gz * (GRID_X * GRID_Y) + gy * GRID_X + gx;
                     voxels[idx] = mappedByte;
                 }
@@ -330,7 +322,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
         }
     }
 
-    // 🌟 Run the 3D Gaussian filter to sculpt the cloud billows
     applyGaussian3DFilter(voxels);
 
     const tiltsMeta = sweeps.map((s, idx) => ({ index: idx, elevation: s.elAngle }));
@@ -349,7 +340,7 @@ self.onmessage = async (e) => {
             radarLon,
             bounds,
             targetTiltIndex || 0,
-            station || 'KDMX'
+            station || 'KUDX'
         );
 
         const elapsed = (performance.now() - startTime).toFixed(1);
