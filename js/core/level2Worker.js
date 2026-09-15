@@ -14,10 +14,18 @@ const RAD_TO_DEG = 180.0 / Math.PI;
 const TARGET_RADIALS = 720;
 
 /**
- * 🛰️ Decompresses BZIP2 chunk blocks inside an Archive II stream
+ * 🛰️ Decompresses Level 2 Archive II Chunks
  */
-function decompressArchiveIIBlocks(bytes) {
-    const chunks = [];
+function decompressLevel2(arrayBuffer) {
+    const bytes = new Uint8Array(arrayBuffer);
+    const decompressedChunks = [];
+
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+        try {
+            return unzlibSync(bytes);
+        } catch (e) {}
+    }
+
     let pos = (bytes.length > 24 && bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56) ? 24 : 0;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
@@ -29,7 +37,7 @@ function decompressArchiveIIBlocks(bytes) {
         if (chunkSize < 0) {
             chunkSize = -chunkSize;
             if (pos + chunkSize > bytes.length) break;
-            chunks.push(bytes.subarray(pos, pos + chunkSize));
+            decompressedChunks.push(bytes.subarray(pos, pos + chunkSize));
             pos += chunkSize;
             continue;
         }
@@ -40,185 +48,60 @@ function decompressArchiveIIBlocks(bytes) {
             try {
                 const sub = bytes.subarray(pos, pos + chunkSize);
                 const out = seekBzip.decode(sub);
-                if (out && out.length > 0) chunks.push(new Uint8Array(out));
+                if (out && out.length > 0) decompressedChunks.push(new Uint8Array(out));
             } catch (e) {}
         }
         pos += chunkSize;
     }
 
-    if (chunks.length > 0) {
-        return concatChunks(chunks);
-    }
-    return null;
-}
-
-/**
- * 🛰️ Universal Multi-Layer Decompressor (GZIP -> TAR -> Chunked BZIP2)
- */
-function decompressLevel2(arrayBuffer) {
-    let bytes = new Uint8Array(arrayBuffer);
-
-    // Layer 1: Outer GZIP Decompression
-    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    if (decompressedChunks.length === 0) {
         try {
-            bytes = unzlibSync(bytes);
-        } catch (e) {}
-    }
-
-    // Layer 2: TAR Archive Container (Standard for historical S3 archives)
-    if (bytes.length > 512) {
-        let tarPos = 0;
-        const tarChunks = [];
-        let isTar = false;
-
-        while (tarPos + 512 <= bytes.length) {
-            if (bytes[tarPos] === 0 && bytes[tarPos + 1] === 0 && bytes[tarPos + 2] === 0) {
-                tarPos += 512;
-                continue;
-            }
-
-            let sizeStr = '';
-            for (let i = 124; i < 136; i++) {
-                if (bytes[tarPos + i] === 0 || bytes[tarPos + i] === 32) break;
-                sizeStr += String.fromCharCode(bytes[tarPos + i]);
-            }
-
-            const fileSize = parseInt(sizeStr.trim(), 8);
-            const dataStart = tarPos + 512;
-
-            if (Number.isFinite(fileSize) && fileSize > 0 && dataStart + fileSize <= bytes.length) {
-                isTar = true;
-                let entryBytes = bytes.subarray(dataStart, dataStart + fileSize);
-
-                // Nested GZIP inside TAR
-                if (entryBytes[0] === 0x1f && entryBytes[1] === 0x8b) {
-                    try {
-                        entryBytes = unzlibSync(entryBytes);
-                    } catch (e) {}
-                }
-
-                // Nested Archive II BZIP2 chunks inside TAR
-                const innerArchive = decompressArchiveIIBlocks(entryBytes);
-                if (innerArchive) {
-                    tarChunks.push(innerArchive);
-                } else if (entryBytes[0] === 0x42 && entryBytes[1] === 0x5a && entryBytes[2] === 0x68) {
-                    try {
-                        const out = seekBzip.decode(entryBytes);
-                        if (out && out.length > 0) tarChunks.push(new Uint8Array(out));
-                    } catch (e) {}
-                } else {
-                    tarChunks.push(entryBytes);
-                }
-
-                tarPos = dataStart + Math.ceil(fileSize / 512) * 512;
-            } else {
-                tarPos += 512;
-            }
-        }
-
-        if (isTar && tarChunks.length > 0) {
-            return concatChunks(tarChunks);
+            const out = seekBzip.decode(bytes);
+            return new Uint8Array(out);
+        } catch (e) {
+            throw new Error("Could not decompress Level 2 payload");
         }
     }
 
-    // Layer 3: Direct Chunked Archive II
-    const directArchive = decompressArchiveIIBlocks(bytes);
-    if (directArchive) {
-        return directArchive;
+    const totalBytes = decompressedChunks.reduce((acc, c) => acc + c.length, 0);
+    const fullBuffer = new Uint8Array(totalBytes);
+    let writeOffset = 0;
+    for (const chunk of decompressedChunks) {
+        fullBuffer.set(chunk, writeOffset);
+        writeOffset += chunk.length;
     }
-
-    // Layer 4: Direct Standalone Multi-Stream BZIP2
-    const bzChunks = [];
-    for (let i = 0; i <= bytes.length - 4; i++) {
-        if (bytes[i] === 0x42 && bytes[i + 1] === 0x5a && bytes[i + 2] === 0x68) {
-            try {
-                const sub = bytes.subarray(i);
-                const out = seekBzip.decode(sub);
-                if (out && out.length > 0) bzChunks.push(new Uint8Array(out));
-            } catch (e) {}
-        }
-    }
-    if (bzChunks.length > 0) {
-        return concatChunks(bzChunks);
-    }
-
-    // Layer 5: Raw uncompressed records fallback
-    if (bytes.length > 2432) {
-        return bytes;
-    }
-
-    throw new Error("Could not decompress Level 2 payload");
-}
-
-function concatChunks(chunks) {
-    const total = chunks.reduce((acc, c) => acc + c.length, 0);
-    const merged = new Uint8Array(total);
-    let offset = 0;
-    for (const c of chunks) {
-        merged.set(c, offset);
-        offset += c.length;
-    }
-    return merged;
+    return fullBuffer;
 }
 
 /**
- * 🛰️ Parses Message 31 & Message 1 sweeps across any NEXRAD RDA build
+ * 🛰️ Parses Message 31 sweeps into structured polar elevation cuts
  */
 function parseSweepsFromLevel2(rawBytes, stationId) {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
-
-    const s4 = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
-    const s3 = (stationId.startsWith('K') && stationId.length === 4 ? stationId.slice(1) : stationId).toUpperCase();
+    const sCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
+    const c0 = sCode.charCodeAt(0), c1 = sCode.charCodeAt(1), c2 = sCode.charCodeAt(2), c3 = sCode.charCodeAt(3);
 
     const sweepsByElevation = new Map();
     const limit = rawBytes.length - 120;
 
     for (let i = 0; i <= limit; i++) {
-        let isMatch = false;
-        let hdrPos = -1;
-
-        // Match by 4-letter ('KUDX') / 3-letter ('UDX') ICAO code or Message Type 31 header
-        const match4 = String.fromCharCode(rawBytes[i], rawBytes[i+1], rawBytes[i+2], rawBytes[i+3]) === s4;
-        const match3 = String.fromCharCode(rawBytes[i], rawBytes[i+1], rawBytes[i+2]) === s3;
-
-        if (match4 || match3) {
-            hdrPos = i;
-            isMatch = true;
-        } else if (view.getUint8(i + 3) === 31 && i + 16 <= limit) {
-            hdrPos = i + 16;
-            isMatch = true;
-        } else if (i + 28 <= limit && view.getUint8(i + 15) === 31) {
-            hdrPos = i + 28;
-            isMatch = true;
-        }
-
-        if (isMatch && hdrPos + 32 <= rawBytes.length) {
+        if (rawBytes[i] === c0 && rawBytes[i + 1] === c1 && rawBytes[i + 2] === c2 && rawBytes[i + 3] === c3) {
+            const hdrPos = i;
             const azAngle = view.getFloat32(hdrPos + 12, false);
             const elIndex = view.getUint8(hdrPos + 22);
             const elAngle = view.getFloat32(hdrPos + 24, false);
             const dataBlockCount = view.getUint16(hdrPos + 30, false);
 
-            if (
-                Number.isFinite(azAngle) && azAngle >= 0.0 && azAngle <= 360.0 &&
-                elIndex >= 1 && elIndex <= 35 &&
-                Number.isFinite(elAngle) && elAngle >= -2.0 && elAngle <= 45.0 &&
-                dataBlockCount >= 2 && dataBlockCount <= 16
-            ) {
+            if (azAngle >= 0.0 && azAngle <= 360.0 && elIndex >= 1 && elIndex <= 35 && elAngle >= -2.0 && elAngle <= 45.0 && dataBlockCount >= 2 && dataBlockCount <= 16) {
                 let refOffset = -1;
                 for (let b = 0; b < dataBlockCount; b++) {
                     const ptrPos = hdrPos + 32 + (b * 4);
                     if (ptrPos + 4 > rawBytes.length) break;
                     const ptr = view.getUint32(ptrPos, false);
-
                     if (ptr > 0 && hdrPos + ptr + 4 <= rawBytes.length) {
                         const blkPos = hdrPos + ptr;
-                        const b0 = rawBytes[blkPos];
-                        const b1 = rawBytes[blkPos + 1];
-                        const b2 = rawBytes[blkPos + 2];
-                        const b3 = rawBytes[blkPos + 3];
-
-                        if ((b0 === 68 && b1 === 82 && b2 === 69 && b3 === 70) || // "DREF"
-                            (b0 === 82 && b1 === 69 && b2 === 70)) {              // "REF "
+                        if ((rawBytes[blkPos] === 68 && rawBytes[blkPos + 1] === 82 && rawBytes[blkPos + 2] === 69 && rawBytes[blkPos + 3] === 70) ||
+                            (rawBytes[blkPos] === 82 && rawBytes[blkPos + 1] === 69 && rawBytes[blkPos + 2] === 70)) {
                             refOffset = blkPos;
                             break;
                         }
@@ -250,7 +133,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
                     const gateBytes = rawBytes.subarray(refOffset + 28, refOffset + 28 + numGates);
                     sweep.radials[rayIdx] = new Uint8Array(gateBytes);
 
-                    i = hdrPos + 100;
+                    i += 100;
                 }
             }
         }
@@ -265,6 +148,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
 function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     if (!sweep) return 0.0;
 
+    // Fractional ray
     const normRay = ((azDeg % 360.0) + 360.0) % 360.0 * 2.0;
     const r0 = Math.floor(normRay) % TARGET_RADIALS;
     const r1 = (r0 + 1) % TARGET_RADIALS;
@@ -274,6 +158,7 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     const rad1 = sweep.radials[r1] || rad0;
     if (!rad0) return 0.0;
 
+    // Fractional gate bin
     const normBin = (slantRangeMeters - sweep.firstGateMeters) / sweep.gateSpacingMeters;
     if (normBin < 0 || normBin >= sweep.numGates - 1) return 0.0;
 
@@ -286,20 +171,23 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     const v10 = (rad1 && rad1[b0] > 1) ? (rad1[b0] - sweep.offsetVal) / sweep.scale : v00;
     const v11 = (rad1 && rad1[b1] > 1) ? (rad1[b1] - sweep.offsetVal) / sweep.scale : v01;
 
+    // Bilinear interpolation
     const top = v00 * (1.0 - binT) + v01 * binT;
     const bottom = v10 * (1.0 - binT) + v11 * binT;
     const dbz = top * (1.0 - rayT) + bottom * rayT;
 
-    return dbz > 5.0 ? dbz : 0.0;
+    return dbz > 10.0 ? dbz : 0.0;
 }
 
 /**
- * 🌟 3D Separable Gaussian Blur (Puffy Cloud Smoothing)
+ * 🌟 3D Separable Gaussian Blur (The "Puffy Cloud" Filter)
+ * Smooths raw discretized radar cells into natural, billowy fluid domes
  */
 function applyGaussian3DFilter(voxels) {
     const temp = new Float32Array(GRID_X * GRID_Y * GRID_Z);
     const out = new Uint8Array(GRID_X * GRID_Y * GRID_Z);
 
+    // Pass 1: Horizontal X-Blur
     for (let z = 0; z < GRID_Z; z++) {
         for (let y = 0; y < GRID_Y; y++) {
             const rowOffset = z * (GRID_X * GRID_Y) + y * GRID_X;
@@ -314,6 +202,7 @@ function applyGaussian3DFilter(voxels) {
         }
     }
 
+    // Pass 2: Vertical Y-Blur
     for (let z = 0; z < GRID_Z; z++) {
         for (let x = 0; x < GRID_X; x++) {
             for (let y = 0; y < GRID_Y; y++) {
@@ -329,6 +218,7 @@ function applyGaussian3DFilter(voxels) {
         }
     }
 
+    // Pass 3: Depth Z-Blur
     for (let y = 0; y < GRID_Y; y++) {
         for (let x = 0; x < GRID_X; x++) {
             for (let z = 0; z < GRID_Z; z++) {
@@ -346,9 +236,9 @@ function applyGaussian3DFilter(voxels) {
 }
 
 /**
- * 🛰️ Continuous 3D Volume Reconstruction
+ * 🛰️ Inverse Voxel Pull with Continuous Polar Interpolation
  */
-function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0, stationId = 'KUDX') {
+function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0, stationId = 'KDMX') {
     const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
     const voxels = new Uint8Array(GRID_X * GRID_Y * GRID_Z);
 
@@ -393,8 +283,12 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                 let sweepAbove = null;
 
                 for (let k = 0; k < sweeps.length; k++) {
-                    if (sweeps[k].elAngle <= elAngleDeg) sweepBelow = sweeps[k];
-                    if (sweeps[k].elAngle >= elAngleDeg && !sweepAbove) sweepAbove = sweeps[k];
+                    if (sweeps[k].elAngle <= elAngleDeg) {
+                        sweepBelow = sweeps[k];
+                    }
+                    if (sweeps[k].elAngle >= elAngleDeg && !sweepAbove) {
+                        sweepAbove = sweeps[k];
+                    }
                 }
 
                 let finalDbz = 0.0;
@@ -402,33 +296,33 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                 if (sweepBelow && sweepAbove && sweepBelow !== sweepAbove) {
                     const dbz1 = sampleSweepBilinear(sweepBelow, r, azDeg);
                     const dbz2 = sampleSweepBilinear(sweepAbove, r, azDeg);
+
                     const span = sweepAbove.elAngle - sweepBelow.elAngle;
                     const t = Math.max(0.0, Math.min(1.0, (elAngleDeg - sweepBelow.elAngle) / span));
 
                     if (dbz1 > 0 && dbz2 > 0) {
                         finalDbz = dbz1 + t * (dbz2 - dbz1);
                     } else if (dbz1 > 0) {
-                        finalDbz = dbz1 * (1.0 - t * 0.6);
+                        finalDbz = dbz1 * (1.0 - t * 0.8);
                     } else if (dbz2 > 0) {
-                        finalDbz = dbz2 * (t * 0.6);
+                        finalDbz = dbz2 * (t * 0.8);
                     }
                 } else if (sweepBelow) {
                     const dbz = sampleSweepBilinear(sweepBelow, r, azDeg);
                     const diff = elAngleDeg - sweepBelow.elAngle;
-                    if (diff < 2.5) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 2.5);
+                    if (diff < 2.0) {
+                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 2.0);
                     }
                 } else if (sweepAbove) {
                     const dbz = sampleSweepBilinear(sweepAbove, r, azDeg);
                     const diff = sweepAbove.elAngle - elAngleDeg;
-                    if (diff < 1.8) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.8);
+                    if (diff < 1.2) {
+                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.2);
                     }
                 }
 
-                if (finalDbz > 4.0) {
-                    const normalized = Math.min(1.0, Math.max(0.0, (finalDbz - 4.0) / 72.0));
-                    const mappedByte = Math.round(normalized * 255.0);
+                if (finalDbz >= 10.0) {
+                    const mappedByte = Math.min(255, Math.max(1, Math.round((finalDbz + 32.0) * 2.0)));
                     const idx = gz * (GRID_X * GRID_Y) + gy * GRID_X + gx;
                     voxels[idx] = mappedByte;
                 }
@@ -436,6 +330,7 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
         }
     }
 
+    // 🌟 Run the 3D Gaussian filter to sculpt the cloud billows
     applyGaussian3DFilter(voxels);
 
     const tiltsMeta = sweeps.map((s, idx) => ({ index: idx, elevation: s.elAngle }));
@@ -454,7 +349,7 @@ self.onmessage = async (e) => {
             radarLon,
             bounds,
             targetTiltIndex || 0,
-            station || 'KUDX'
+            station || 'KDMX'
         );
 
         const elapsed = (performance.now() - startTime).toFixed(1);
