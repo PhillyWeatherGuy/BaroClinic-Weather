@@ -159,10 +159,24 @@ export function initRadarBoxTool(map) {
         const bounds = [sw.lng, sw.lat, ne.lng, ne.lat];
         stateManager.selectedStormBounds = bounds;
 
-        const station = stateManager.activeRadarStation || 'KDIX';
-        const stMeta = RADAR_STATIONS.find(s => s.id === station || s.id === 'K' + station) || { lat: 39.9469, lon: -74.4111 };
+        // 🌟 Automatically find the closest radar station to the center of the drawn box
+        const centerLng = (sw.lng + ne.lng) * 0.5;
+        const centerLat = (sw.lat + ne.lat) * 0.5;
 
-        showToast(`Fetching Level 2 volume for ${station}...`);
+        let stMeta = RADAR_STATIONS[0];
+        let minDist = Infinity;
+        for (const st of RADAR_STATIONS) {
+            const dist = Math.hypot(st.lon - centerLng, st.lat - centerLat);
+            if (dist < minDist) {
+                minDist = dist;
+                stMeta = st;
+            }
+        }
+
+        const station = stMeta.id;
+        stateManager.activeRadarStation = station;
+
+        showToast(`Fetching Level 2 volume for ${station} (${stMeta.name})...`);
 
         try {
             const url = `${stateManager.BASE_URL}radar-l2?station=${station}`;
@@ -170,7 +184,7 @@ export function initRadarBoxTool(map) {
             if (!resp.ok) throw new Error(`Level 2 archive not found (${resp.status})`);
             const rawBuffer = await resp.arrayBuffer();
 
-            showToast("Voxelizing 3D storm cell...");
+            showToast(`Voxelizing 3D storm cell from ${station}...`);
             const worker = getLevel2Worker();
 
             // Hand off to background thread with zero-copy transferable memory
