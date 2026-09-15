@@ -116,7 +116,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader: GR2Analyst-Style Optical Ray-Casting Engine
+// Fragment Shader: Glowing Convective Cloud Raymarcher
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -134,7 +134,7 @@ const fsVolume = `
     uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
-    // Screen-space blue noise hash for seamless anti-aliasing
+    // Fast Screen-Space Blue Noise Dither
     float ditherHash(vec2 p) {
         vec3 p3 = fract(vec3(p.xyx) * 0.1031);
         p3 += dot(p3, p3.yzx + 33.33);
@@ -158,7 +158,7 @@ const fsVolume = `
         if (any(lessThan(texCoord, u_cutoffMin.xyz)) || any(greaterThan(texCoord, u_cutoffMax.xyz))) {
             return 0.0;
         }
-        // Fade out ground boundary layer to keep floor see-through
+        // Fade out ground noise to keep floor see-through
         float groundFade = smoothstep(0.0, 0.025, texCoord.y);
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r * groundFade;
@@ -171,7 +171,7 @@ const fsVolume = `
         return normalize(-vec3(dX, dY, dZ));
     }
 
-    #define MAX_STEPS 112
+    #define MAX_STEPS 96
     void main() {
         vec3 rayOrigin = u_cameraPos;
         vec3 rayDir = normalize(v_worldPos - rayOrigin);
@@ -207,29 +207,27 @@ const fsVolume = `
                 // Pure vibrant radar palette color
                 vec4 palCol = texture(u_paletteTex, vec2(rawVal, 0.5));
 
-                // 🌟 Continuous Non-Linear Optical Density (The GR2Analyst Transfer Function)
+                // Continuous Optical Density Curve (Low dBZ = wispy mist, High dBZ = dense core)
                 float normDbz = clamp((rawVal - u_cutoffMin.w) / (1.0 - u_cutoffMin.w), 0.0, 1.0);
-                
-                // Low dBZ (12-25 dBZ) has tiny density (whispy mist); High dBZ (50+ dBZ) has high density
-                float density = pow(normDbz, 1.7) * 5.2;
+                float density = pow(normDbz, 1.35) * 5.8;
 
                 // Beer-Lambert Exponential Step Absorption
-                float stepAlpha = 1.0 - exp(-density * (64.0 / u_steps) * 0.45);
+                float stepAlpha = 1.0 - exp(-density * (64.0 / u_steps) * 0.55);
 
                 if (stepAlpha > 0.001) {
-                    // Soft atmospheric sunlight + hemispheric sky bounce
+                    // Soft atmospheric sunlight + sky bounce
                     vec3 normal = estimateNormal(currentPosition, 0.015);
                     float sun = clamp(dot(normal, sunDir), 0.0, 1.0);
                     float sky = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
-                    vec3 illumination = vec3(0.50) + vec3(0.50) * sun + vec3(0.12, 0.15, 0.20) * sky;
+                    vec3 illumination = vec3(0.55) + vec3(0.45) * sun + vec3(0.12, 0.15, 0.20) * sky;
 
                     vec3 litColor = palCol.rgb * illumination;
 
-                    // 🌟 Front-to-back volumetric integration (Glow from within)
-                    accumulatedLight += transmittance * litColor * stepAlpha * 1.5;
+                    // Front-to-back volumetric accumulation
+                    accumulatedLight += transmittance * litColor * stepAlpha * 1.35;
                     transmittance *= (1.0 - stepAlpha);
 
-                    if (transmittance < 0.015) {
+                    if (transmittance < 0.02) {
                         break;
                     }
                 }
@@ -243,8 +241,8 @@ const fsVolume = `
             discard;
         }
 
-        // Premultiplied volumetric output: preserves wispy transparency on edges
-        fragColor = vec4(accumulatedLight, finalAlpha);
+        // 🌟 Un-premultiply so Three.js canvas blending renders at 100% full brightness
+        fragColor = vec4(accumulatedLight / max(finalAlpha, 0.001), finalAlpha);
     }
 `;
 
@@ -369,9 +367,9 @@ export function initStormVolumeViewer() {
             u_volumeTex: { value: null },
             u_paletteTex: { value: paletteTexture2D },
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
-            u_steps: { value: 96.0 },
+            u_steps: { value: 72.0 },
             u_opacity: { value: 1.0 },
-            // Initial cutoff starts at 10 dBZ (~0.33)
+            // Initial cutoff: 10 dBZ (~0.329)
             u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.329) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
         },
@@ -477,6 +475,7 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const Texture3DClass = THREE.DataTexture3D || THREE.Data3DTexture;
     if (volumeTexture3D) volumeTexture3D.dispose();
 
+    // Ingest 256 x 96 x 256 High-Definition 3D Volume
     volumeTexture3D = new Texture3DClass(voxelBuffer, 256, 96, 256);
     volumeTexture3D.format = THREE.RedFormat;
     volumeTexture3D.type = THREE.UnsignedByteType;
