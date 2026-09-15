@@ -14,10 +14,10 @@ const RAD_TO_DEG = 180.0 / Math.PI;
 const TARGET_RADIALS = 720;
 
 /**
- * 🛰️ Decompresses standard chunked Archive II records (24-byte volume header + BZIP2 blocks)
+ * 🛰️ Decompresses BZIP2 chunk blocks inside an Archive II stream
  */
-function decompressArchiveIIChunks(bytes) {
-    const decompressedChunks = [];
+function decompressArchiveIIBlocks(bytes) {
+    const chunks = [];
     let pos = (bytes.length > 24 && bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56) ? 24 : 0;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
@@ -29,7 +29,7 @@ function decompressArchiveIIChunks(bytes) {
         if (chunkSize < 0) {
             chunkSize = -chunkSize;
             if (pos + chunkSize > bytes.length) break;
-            decompressedChunks.push(bytes.subarray(pos, pos + chunkSize));
+            chunks.push(bytes.subarray(pos, pos + chunkSize));
             pos += chunkSize;
             continue;
         }
@@ -40,35 +40,36 @@ function decompressArchiveIIChunks(bytes) {
             try {
                 const sub = bytes.subarray(pos, pos + chunkSize);
                 const out = seekBzip.decode(sub);
-                if (out && out.length > 0) decompressedChunks.push(new Uint8Array(out));
+                if (out && out.length > 0) chunks.push(new Uint8Array(out));
             } catch (e) {}
         }
         pos += chunkSize;
     }
 
-    if (decompressedChunks.length > 0) {
-        return concatChunks(decompressedChunks);
+    if (chunks.length > 0) {
+        return concatChunks(chunks);
     }
     return null;
 }
 
 /**
- * 🛰️ Universal Decompressor (Handles nested TAR, GZIP, and Chunked Archive II)
+ * 🛰️ Universal Multi-Layer Decompressor (GZIP -> TAR -> Chunked BZIP2)
  */
 function decompressLevel2(arrayBuffer) {
     let bytes = new Uint8Array(arrayBuffer);
 
-    // 1. GZIP check
+    // Layer 1: Outer GZIP Decompression
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             bytes = unzlibSync(bytes);
         } catch (e) {}
     }
 
-    // 2. Historical TAR Container
+    // Layer 2: TAR Archive Container (Standard for historical S3 archives)
     if (bytes.length > 512) {
         let tarPos = 0;
-        const tarExtracted = [];
+        const tarChunks = [];
+        let isTar = false;
 
         while (tarPos + 512 <= bytes.length) {
             if (bytes[tarPos] === 0 && bytes[tarPos + 1] === 0 && bytes[tarPos + 2] === 0) {
@@ -86,24 +87,27 @@ function decompressLevel2(arrayBuffer) {
             const dataStart = tarPos + 512;
 
             if (Number.isFinite(fileSize) && fileSize > 0 && dataStart + fileSize <= bytes.length) {
-                const fileBytes = bytes.subarray(dataStart, dataStart + fileSize);
+                isTar = true;
+                let entryBytes = bytes.subarray(dataStart, dataStart + fileSize);
 
-                // Try decompressing inner Archive II chunks
-                const innerDecompressed = decompressArchiveIIChunks(fileBytes);
-                if (innerDecompressed) {
-                    tarExtracted.push(innerDecompressed);
-                } else if (fileBytes[0] === 0x42 && fileBytes[1] === 0x5a && fileBytes[2] === 0x68) {
+                // Nested GZIP inside TAR
+                if (entryBytes[0] === 0x1f && entryBytes[1] === 0x8b) {
                     try {
-                        const out = seekBzip.decode(fileBytes);
-                        if (out && out.length > 0) tarExtracted.push(new Uint8Array(out));
+                        entryBytes = unzlibSync(entryBytes);
                     } catch (e) {}
-                } else if (fileBytes[0] === 0x1f && fileBytes[1] === 0x8b) {
+                }
+
+                // Nested Archive II BZIP2 chunks inside TAR
+                const innerArchive = decompressArchiveIIBlocks(entryBytes);
+                if (innerArchive) {
+                    tarChunks.push(innerArchive);
+                } else if (entryBytes[0] === 0x42 && entryBytes[1] === 0x5a && entryBytes[2] === 0x68) {
                     try {
-                        const out = unzlibSync(fileBytes);
-                        if (out && out.length > 0) tarExtracted.push(new Uint8Array(out));
+                        const out = seekBzip.decode(entryBytes);
+                        if (out && out.length > 0) tarChunks.push(new Uint8Array(out));
                     } catch (e) {}
                 } else {
-                    tarExtracted.push(fileBytes);
+                    tarChunks.push(entryBytes);
                 }
 
                 tarPos = dataStart + Math.ceil(fileSize / 512) * 512;
@@ -112,18 +116,18 @@ function decompressLevel2(arrayBuffer) {
             }
         }
 
-        if (tarExtracted.length > 0) {
-            return concatChunks(tarExtracted);
+        if (isTar && tarChunks.length > 0) {
+            return concatChunks(tarChunks);
         }
     }
 
-    // 3. Direct Archive II Chunked File
-    const chunked = decompressArchiveIIChunks(bytes);
-    if (chunked) {
-        return chunked;
+    // Layer 3: Direct Chunked Archive II
+    const directArchive = decompressArchiveIIBlocks(bytes);
+    if (directArchive) {
+        return directArchive;
     }
 
-    // 4. Standalone multi-stream BZIP2 fallback
+    // Layer 4: Direct Standalone Multi-Stream BZIP2
     const bzChunks = [];
     for (let i = 0; i <= bytes.length - 4; i++) {
         if (bytes[i] === 0x42 && bytes[i + 1] === 0x5a && bytes[i + 2] === 0x68) {
@@ -138,7 +142,7 @@ function decompressLevel2(arrayBuffer) {
         return concatChunks(bzChunks);
     }
 
-    // 5. Already uncompressed
+    // Layer 5: Raw uncompressed records fallback
     if (bytes.length > 2432) {
         return bytes;
     }
@@ -173,7 +177,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
         let isMatch = false;
         let hdrPos = -1;
 
-        // Pattern A: Match 4-letter ICAO ('KUDX') or 3-letter ('UDX ') at Data Header
+        // Match by 4-letter ('KUDX') / 3-letter ('UDX') ICAO code or Message Type 31 header
         const match4 = String.fromCharCode(rawBytes[i], rawBytes[i+1], rawBytes[i+2], rawBytes[i+3]) === s4;
         const match3 = String.fromCharCode(rawBytes[i], rawBytes[i+1], rawBytes[i+2]) === s3;
 
@@ -181,11 +185,9 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
             hdrPos = i;
             isMatch = true;
         } else if (view.getUint8(i + 3) === 31 && i + 16 <= limit) {
-            // Pattern B: Message Header type 31 without CTM
             hdrPos = i + 16;
             isMatch = true;
         } else if (i + 28 <= limit && view.getUint8(i + 15) === 31) {
-            // Pattern C: Message Header type 31 with 12-byte CTM
             hdrPos = i + 28;
             isMatch = true;
         }
@@ -292,7 +294,7 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
 }
 
 /**
- * 🌟 3D Separable Gaussian Blur
+ * 🌟 3D Separable Gaussian Blur (Puffy Cloud Smoothing)
  */
 function applyGaussian3DFilter(voxels) {
     const temp = new Float32Array(GRID_X * GRID_Y * GRID_Z);
