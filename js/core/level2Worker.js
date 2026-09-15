@@ -2,10 +2,10 @@
 import { unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
-// Ultra-HD Grid: 256 (East-West) x 96 (Altitude) x 256 (North-South)
-const GRID_X = 256;
+// Ultra-HD 9x Grid: 384 (East-West) x 96 (Altitude) x 384 (North-South) ~ 14 MB
+const GRID_X = 384;
 const GRID_Y = 96;
-const GRID_Z = 256;
+const GRID_Z = 384;
 const MAX_ALTITUDE_METERS = 20000.0;
 
 const EARTH_RADIUS_METERS = 6371000.0;
@@ -75,31 +75,19 @@ function decompressLevel2(arrayBuffer) {
 }
 
 /**
- * 🛰️ Parses Message 31 sweeps by stepping through exact message lengths
+ * 🛰️ Parses Message 31 sweeps from Level 2 buffer
  */
-function parseSweepsFromLevel2(rawBytes) {
+function parseSweepsFromLevel2(rawBytes, stationId) {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
+    const sCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
+    const c0 = sCode.charCodeAt(0), c1 = sCode.charCodeAt(1), c2 = sCode.charCodeAt(2), c3 = sCode.charCodeAt(3);
+
     const sweepsByElevation = new Map();
-    let offset = 0;
+    const limit = rawBytes.length - 120;
 
-    while (offset + 32 <= rawBytes.length) {
-        let msgOffset = offset;
-        let msgSize = 0;
-        let msgType = 0;
-
-        // Check for 12-byte CTM Header + 16-byte Message Header
-        if (offset + 28 <= rawBytes.length && view.getUint8(offset + 15) === 31) {
-            msgOffset = offset + 12;
-            msgSize = view.getUint16(msgOffset, false) * 2;
-            msgType = 31;
-        } else if (view.getUint8(offset + 3) === 31) {
-            msgOffset = offset;
-            msgSize = view.getUint16(msgOffset, false) * 2;
-            msgType = 31;
-        }
-
-        if (msgType === 31 && msgSize >= 80 && msgOffset + msgSize <= rawBytes.length) {
-            const hdrPos = msgOffset + 16;
+    for (let i = 0; i <= limit; i++) {
+        if (rawBytes[i] === c0 && rawBytes[i + 1] === c1 && rawBytes[i + 2] === c2 && rawBytes[i + 3] === c3) {
+            const hdrPos = i;
             const azAngle = view.getFloat32(hdrPos + 12, false);
             const elIndex = view.getUint8(hdrPos + 22);
             const elAngle = view.getFloat32(hdrPos + 24, false);
@@ -147,31 +135,24 @@ function parseSweepsFromLevel2(rawBytes) {
                     const gateBytes = rawBytes.subarray(refOffset + 28, refOffset + 28 + numGates);
                     sweep.radials[rayIdx] = new Uint8Array(gateBytes);
                     sweep.filledRays[rayIdx] = 1;
+
+                    i += 100;
                 }
             }
-
-            // Step exactly to the next radial in memory
-            offset = msgOffset + msgSize;
-        } else {
-            // Legacy 2432-byte record padding step
-            offset += (offset + 2432 <= rawBytes.length && view.getUint8(offset + 2432 + 15) === 31) ? 2432 : 4;
         }
     }
 
-    // Two-pass fill for missing radial azimuths
     for (const sweep of sweepsByElevation.values()) {
-        for (let pass = 0; pass < 2; pass++) {
-            for (let r = 0; r < TARGET_RADIALS; r++) {
-                if (!sweep.filledRays[r]) {
-                    const prev = (r - 1 + TARGET_RADIALS) % TARGET_RADIALS;
-                    const next = (r + 1) % TARGET_RADIALS;
-                    if (sweep.filledRays[prev]) {
-                        sweep.radials[r] = sweep.radials[prev];
-                        sweep.filledRays[r] = 1;
-                    } else if (sweep.filledRays[next]) {
-                        sweep.radials[r] = sweep.radials[next];
-                        sweep.filledRays[r] = 1;
-                    }
+        for (let r = 0; r < TARGET_RADIALS; r++) {
+            if (!sweep.filledRays[r]) {
+                const prev = (r - 1 + TARGET_RADIALS) % TARGET_RADIALS;
+                const next = (r + 1) % TARGET_RADIALS;
+                if (sweep.filledRays[prev]) {
+                    sweep.radials[r] = sweep.radials[prev];
+                    sweep.filledRays[r] = 1;
+                } else if (sweep.filledRays[next]) {
+                    sweep.radials[r] = sweep.radials[next];
+                    sweep.filledRays[r] = 1;
                 }
             }
         }
@@ -181,7 +162,7 @@ function parseSweepsFromLevel2(rawBytes) {
 }
 
 /**
- * 🌟 Smooth Bilinear Polar Sampling
+ * 🌟 Bilinear Polar Sampling
  */
 function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     if (!sweep) return 0.0;
@@ -215,12 +196,12 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
 }
 
 /**
- * 🌟 Constructs High-Definition 3D Volume (256 x 96 x 256)
+ * 🌟 Constructs Ultra-HD 3D Volume (384 x 96 x 384)
  */
-function processVolume(rawBytes, radarLat, radarLon, bounds) {
-    const sweeps = parseSweepsFromLevel2(rawBytes);
+function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX') {
+    const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
     if (sweeps.length === 0) {
-        throw new Error("No valid Level 2 radar sweeps found");
+        throw new Error(`No valid Level 2 sweeps found for ${stationId}`);
     }
 
     const voxels = new Uint8Array(GRID_X * GRID_Y * GRID_Z);
@@ -311,7 +292,7 @@ function processVolume(rawBytes, radarLat, radarLon, bounds) {
 }
 
 self.onmessage = async (e) => {
-    const { id, rawBuffer, radarLat, radarLon, bounds, cacheKey } = e.data;
+    const { id, rawBuffer, radarLat, radarLon, bounds, station, cacheKey } = e.data;
     const startTime = performance.now();
 
     try {
@@ -320,11 +301,12 @@ self.onmessage = async (e) => {
             decompressedBytes,
             radarLat,
             radarLon,
-            bounds
+            bounds,
+            station || 'KDMX'
         );
 
         const elapsed = (performance.now() - startTime).toFixed(1);
-        console.log(`⚡ [Level 2 Worker] Integrated ${tilts.length} sweeps into HD volume in ${elapsed}ms`);
+        console.log(`⚡ [Level 2 Worker] Built Ultra-HD 3D Volume (${GRID_X}x${GRID_Y}x${GRID_Z}) in ${elapsed}ms`);
 
         self.postMessage({
             id,
