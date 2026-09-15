@@ -10,6 +10,65 @@ let paletteTexture2D = null;
 let isViewerActive = false;
 let animationFrameId = null;
 
+// Ensure styling for the interactive dBZ cut-off slider
+function ensureControlStyles() {
+    if (document.getElementById('storm-cutoff-slider-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'storm-cutoff-slider-styles';
+    style.textContent = `
+        .storm-cutoff-pill {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(11, 15, 25, 0.88);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 20px;
+            padding: 6px 14px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+            z-index: 20;
+            font-family: 'Rajdhani', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .storm-cutoff-label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #38bdf8;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            min-width: 95px;
+        }
+        .storm-cutoff-range {
+            width: 110px;
+            accent-color: #38bdf8;
+            cursor: pointer;
+            height: 4px;
+            appearance: none;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 2px;
+            outline: none;
+        }
+        .storm-cutoff-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #38bdf8;
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
+        }
+    `;
+    document.head.appendChild(style);
+}
+
 // Vertex Shader
 const vsVolume = `
     out vec3 v_worldPos;
@@ -23,7 +82,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader: 360° Omnidirectional Cloud Raymarcher with Soft Billow Puffiness
+// Fragment Shader with Soft dBZ Fadeout
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -38,7 +97,7 @@ const fsVolume = `
     uniform vec3 u_boxSize;
     uniform float u_steps;
     uniform float u_opacity;
-    uniform vec4 u_cutoffMin;
+    uniform vec4 u_cutoffMin; // u_cutoffMin.w is the dynamic minimum dBZ cut-off
     uniform vec4 u_cutoffMax;
 
     // Fast 3D Noise for Cloud Billow Turbulence
@@ -55,18 +114,18 @@ const fsVolume = `
 
         return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
                        mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
-                   mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                   mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,1,1)), f.x),
                        mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
     }
 
-    // Multi-Scale Billow Noise (Large Cumulus Domes + Micro Puffs)
+    // Multi-Scale Billow Noise
     float puffyCloudNoise(vec3 p) {
         float macroDomes = noise3D(p * 4.5) * 0.65;
         float microPuffs = noise3D(p * 12.0) * 0.35;
         return (macroDomes + microPuffs - 0.5) * 0.038;
     }
 
-    // 🌟 Safe 360° Ray-AABB Intersection (Prevents zero-division at cardinal angles)
+    // Safe 360° Ray-AABB Intersection
     vec2 intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
         vec3 safeDir = rayDir + sign(rayDir) * 1e-6;
         vec3 invR = 1.0 / safeDir;
@@ -84,7 +143,6 @@ const fsVolume = `
             return 0.0;
         }
 
-        // 🌟 Multi-Octave Puffy Cloud Perturbation
         vec3 sampleCoord = vec3(texCoord.x, texCoord.y, 1.0 - texCoord.z);
         float puff = puffyCloudNoise(sampleCoord);
         sampleCoord += vec3(puff, puff * 0.7, puff);
@@ -93,39 +151,45 @@ const fsVolume = `
         return texture(u_volumeTex, sampleCoord).r;
     }
 
-    // 🌟 Atmospheric Cloud Transfer Function: Super-Light Green Fog -> Glowing Dense Core
+    // 🌟 Soft Gradual dBZ Fadeout (Dissolves lower values smoothly)
+    const float FADE_RANGE = 0.055; // ~7 dBZ smooth fade span
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
         }
 
+        // Gradual fadeout factor
+        float softFade = smoothstep(u_cutoffMin.w, u_cutoffMin.w + FADE_RANGE, value);
+
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
 
-        // 🌟 Drastically reduced green/blue opacity curve
+        // Outer cloud vapor: blend into natural cloud-white
+        if (value < 0.44) {
+            float whiteMix = 1.0 - smoothstep(u_cutoffMin.w, 0.44, value);
+            vec3 softWhite = vec3(0.94, 0.96, 0.98);
+            cloudColor = mix(cloudColor, softWhite, whiteMix * 0.85);
+        }
+
         float alpha = 0.0;
         if (value < 0.38) {
-            // 12-22 dBZ (Blue/Cyan): 2% to 6% opacity (faint glowing atmospheric vapor)
             float t = (value - u_cutoffMin.w) / max(0.38 - u_cutoffMin.w, 0.001);
             alpha = mix(0.02, 0.07, t);
         } else if (value < 0.55) {
-            // 22-38 dBZ (Green/Lime): 10% to 28% opacity (translucent rain shield)
             float t = (value - 0.38) / 0.17;
             alpha = mix(0.08, 0.28, t);
         } else if (value < 0.72) {
-            // 38-50 dBZ (Yellow/Orange): 45% to 75% opacity (dense convective core)
             float t = (value - 0.55) / 0.17;
             alpha = mix(0.35, 0.75, t);
         } else {
-            // 50+ dBZ (Red/Pink/White Hail Core): 95% to 100% solid opacity
             float t = (value - 0.72) / 0.28;
             alpha = mix(0.85, 1.00, t);
         }
 
-        return vec4(cloudColor, alpha);
+        return vec4(cloudColor, alpha * softFade);
     }
 
-    // Surface Normal Estimation for Shaded Cloud Domes
+    // Surface Normal Estimation
     vec3 estimateNormal(vec3 p, float eps) {
         float dX = sampleVolume(p + vec3(eps, 0.0, 0.0)) - sampleVolume(p - vec3(eps, 0.0, 0.0));
         float dY = sampleVolume(p + vec3(0.0, eps, 0.0)) - sampleVolume(p - vec3(0.0, eps, 0.0));
@@ -148,11 +212,9 @@ const fsVolume = `
         float tStart = max(hit.x, 0.0);
         float tEnd = hit.y;
 
-        // 🌟 Physical Entry and Exit points
         vec3 frontPos = rayOrigin + rayDir * tStart;
         vec3 backPos = rayOrigin + rayDir * tEnd;
 
-        // 🌟 Texture-space traversal vector (Fixes top-down disappearance)
         vec3 uvwStart = (frontPos + halfSize) / u_boxSize;
         vec3 uvwEnd = (backPos + halfSize) / u_boxSize;
         vec3 uvwStep = (uvwEnd - uvwStart) / u_steps;
@@ -160,7 +222,7 @@ const fsVolume = `
         vec3 currentPosition = uvwStart;
         vec3 accumulatedColor = vec3(0.0);
         float transmittance = 1.0;
-        vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30)); // Overhead warm sun angle
+        vec3 sunDir = normalize(vec3(0.35, 0.88, 0.30));
 
         for (int i = 0; i < MAX_STEPS; i++) {
             float sampleValue = sampleVolume(currentPosition);
@@ -169,7 +231,6 @@ const fsVolume = `
                 vec4 sampleColor = colorizeCloud(sampleValue);
 
                 if (sampleColor.a > 0.001) {
-                    // Sunlit Cloud Shading + Ambient Sky Bounce
                     vec3 normal = estimateNormal(currentPosition, 0.022);
                     float sunLight = clamp(dot(normal, sunDir), 0.0, 1.0);
                     float skyLight = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
@@ -177,7 +238,6 @@ const fsVolume = `
 
                     vec3 litColor = sampleColor.rgb * illumination;
 
-                    // 🌟 Physically Based Beer-Lambert Optical Transmittance (Glowing Core)
                     float stepDensity = sampleColor.a * (48.0 / u_steps) * 1.4;
                     float stepTransmittance = exp(-stepDensity);
 
@@ -219,7 +279,6 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx] = c.r;
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
-        // Full base color; colorizeCloud() controls dynamic transparency
         imgData.data[idx + 3] = (i < 65) ? 0 : 255;
     }
 
@@ -239,29 +298,54 @@ export function initStormVolumeViewer() {
     const closeBtn = document.getElementById('btn-close-storm-3d');
 
     if (!containerEl || !canvasContainerEl) return;
+    ensureControlStyles();
 
     if (closeBtn) {
         closeBtn.onclick = () => hideStormVolume();
     }
 
+    // 🌟 Embed the Interactive dBZ Cut-Off Slider Pill
+    let cutoffControl = containerEl.querySelector('.storm-cutoff-pill');
+    if (!cutoffControl) {
+        cutoffControl = document.createElement('div');
+        cutoffControl.className = 'storm-cutoff-pill';
+        cutoffControl.innerHTML = `
+            <span class="storm-cutoff-label" id="storm-cutoff-label">Cut-off: 15 dBZ</span>
+            <input class="storm-cutoff-range" id="storm-cutoff-slider" type="range" min="5" max="55" value="15" step="1">
+        `;
+        containerEl.appendChild(cutoffControl);
+
+        const slider = cutoffControl.querySelector('#storm-cutoff-slider');
+        const label = cutoffControl.querySelector('#storm-cutoff-label');
+
+        slider.oninput = (e) => {
+            const dbz = parseFloat(e.target.value);
+            label.textContent = `Cut-off: ${Math.round(dbz)} dBZ`;
+            // Map dBZ value to normalized 0.0..1.0 shader scalar space
+            const normVal = Math.max(0.01, ((dbz + 32.0) * 2.0) / 255.0);
+            if (stormBoxMesh && stormBoxMesh.material) {
+                stormBoxMesh.material.uniforms.u_cutoffMin.value.w = normVal;
+            }
+        };
+    }
+
     if (renderer) return;
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100.0); // 0.01 near plane prevents camera clipping
+    camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100.0);
     camera.position.set(0.0, 1.1, 1.9);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     canvasContainerEl.appendChild(renderer.domElement);
 
-    // 🌟 360° Omnidirectional Controls (Full pitch and yaw range)
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.minDistance = 0.3;
     controls.maxDistance = 6.0;
-    controls.minPolarAngle = 0.0;        // Full overhead view
-    controls.maxPolarAngle = Math.PI;    // Full underneath view
+    controls.minPolarAngle = 0.0;
+    controls.maxPolarAngle = Math.PI;
     controls.target.set(0.0, 0.0, 0.0);
 
     paletteTexture2D = createRadarPaletteTexture();
@@ -278,7 +362,8 @@ export function initStormVolumeViewer() {
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
             u_steps: { value: 72.0 },
             u_opacity: { value: 1.0 },
-            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.25) },
+            // Initial cutoff: 15 dBZ (~0.37 normalized scalar)
+            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.368) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
         },
         transparent: true,
@@ -332,11 +417,10 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 14.0; // Convective storm top
+    const heightKm = 14.0;
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    // 🌟 1.9x Vertical Exaggeration Boost (Stretches the storm upwards into a towering cloud)
     const aspectY = (heightKm / maxHoriz) * 1.9;
     const aspectZ = depthKm / maxHoriz;
 
