@@ -69,8 +69,41 @@ function getLevel2Worker() {
  */
 export function initRadarBoxTool(map) {
     const boxBtn = document.getElementById('btn-box-select');
+    const demoBtn = document.getElementById('btn-load-supercell-demo');
     const dragBoxEl = document.getElementById('radar-drag-box');
     if (!boxBtn || !map) return;
+
+    // 🌟 One-Click Historic Demo: June 19, 2015 KUDX Supercell (Bram's Video Case)
+    if (demoBtn) {
+        demoBtn.onclick = async () => {
+            showToast("Loading June 19, 2015 KUDX Supercell from S3...");
+            const s3Key = '2015/06/20/KUDX/KUDX20150620_023727_V06';
+            const bounds = [-103.85, 44.25, -103.15, 44.75]; // Sturgis / Nisland, SD
+
+            map.flyTo({ center: [-103.50, 44.50], zoom: 8.5 });
+
+            try {
+                const url = `${stateManager.BASE_URL}radar-l2?key=${s3Key}`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`Could not fetch S3 scan (${resp.status})`);
+                const rawBuffer = await resp.arrayBuffer();
+
+                showToast("Generating volumetric cloud...");
+                const worker = getLevel2Worker();
+                worker.postMessage({
+                    id: Date.now(),
+                    rawBuffer,
+                    radarLat: 44.125,
+                    radarLon: -102.8297,
+                    bounds,
+                    station: 'KUDX'
+                }, [rawBuffer]);
+            } catch (err) {
+                console.error("Demo load failed:", err);
+                showToast(`❌ ${err.message}`);
+            }
+        };
+    }
 
     let isDrawing = false;
     let startX = 0, startY = 0;
@@ -159,7 +192,7 @@ export function initRadarBoxTool(map) {
         const bounds = [sw.lng, sw.lat, ne.lng, ne.lat];
         stateManager.selectedStormBounds = bounds;
 
-        // 🌟 Automatically find the closest radar station to the center of the drawn box
+        // Automatically find the closest radar station to the center of the drawn box
         const centerLng = (sw.lng + ne.lng) * 0.5;
         const centerLat = (sw.lat + ne.lat) * 0.5;
 
@@ -187,7 +220,6 @@ export function initRadarBoxTool(map) {
             showToast(`Voxelizing 3D storm cell from ${station}...`);
             const worker = getLevel2Worker();
 
-            // Hand off to background thread with zero-copy transferable memory
             worker.postMessage({
                 id: Date.now(),
                 rawBuffer,
@@ -195,7 +227,7 @@ export function initRadarBoxTool(map) {
                 radarLon: stMeta.lon,
                 bounds,
                 targetTiltIndex: stateManager.activeTiltIndex || 0,
-                station: station // 🌟 Explicit station ID anchor
+                station: station
             }, [rawBuffer]);
 
         } catch (err) {
