@@ -22,6 +22,7 @@ const vsVolume = `
     }
 `;
 
+// Raymarching Fragment Shader with Hemispheric Cloud Lighting
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -47,6 +48,7 @@ const fsVolume = `
         return vec2(t0, t1);
     }
 
+    // Normal estimation with broader step size to capture smooth cloud domes
     vec3 estimateNormal(vec3 uvw, float stepSize) {
         float dX = texture(u_volumeTex, uvw + vec3(stepSize, 0.0, 0.0)).r - 
                    texture(u_volumeTex, uvw - vec3(stepSize, 0.0, 0.0)).r;
@@ -69,7 +71,7 @@ const fsVolume = `
         float tStart = max(hit.x, 0.0);
         float tEnd = hit.y;
 
-        const int MAX_STEPS = 112;
+        const int MAX_STEPS = 128;
         float tStep = (tEnd - tStart) / float(MAX_STEPS);
         vec3 stepVec = rayDir * tStep;
         vec3 currentPos = rayOrigin + rayDir * tStart;
@@ -82,15 +84,21 @@ const fsVolume = `
             if (all(greaterThanEqual(uvw, vec3(0.0))) && all(lessThanEqual(uvw, vec3(1.0)))) {
                 float rawVal = texture(u_volumeTex, uvw).r;
 
-                if (rawVal > 0.04) {
+                if (rawVal > 0.03) {
                     vec4 sampleCol = texture(u_paletteTex, vec2(rawVal, 0.5));
 
                     if (sampleCol.a > 0.01) {
-                        vec3 normal = estimateNormal(uvw, 0.012);
-                        float diffuse = clamp(dot(normal, u_lightDir), 0.0, 1.0);
-                        vec3 litRgb = sampleCol.rgb * (0.35 + 0.65 * diffuse);
+                        // Broader sampling step captures the smooth cloud curvature
+                        vec3 normal = estimateNormal(uvw, 0.022);
+                        
+                        // Hemispheric atmospheric lighting: warm sunlight above + sky bounce
+                        float sunDiffuse = clamp(dot(normal, u_lightDir), 0.0, 1.0);
+                        float skyBounce = clamp(normal.y * 0.5 + 0.5, 0.0, 1.0);
+                        vec3 lighting = vec3(0.35) + vec3(0.65) * sunDiffuse + vec3(0.15, 0.20, 0.25) * skyBounce;
 
-                        float stepAlpha = sampleCol.a * 0.55;
+                        vec3 litRgb = sampleCol.rgb * lighting;
+
+                        float stepAlpha = sampleCol.a * 0.42;
                         accumulatedColor.rgb += (1.0 - accumulatedColor.a) * litRgb * stepAlpha;
                         accumulatedColor.a += (1.0 - accumulatedColor.a) * stepAlpha;
 
@@ -123,15 +131,15 @@ function createTransferFunctionTexture(palette256 = WXTOOLS_PALETTE_256) {
         imgData.data[idx + 1] = c.g;
         imgData.data[idx + 2] = c.b;
 
-        // Solid, sculpted cloud envelope
+        // Smooth continuous cloud density ramp
         if (i < 65) {
-            imgData.data[idx + 3] = 0; // < 12 dBZ: transparent
+            imgData.data[idx + 3] = 0; // < 12 dBZ
         } else if (i < 95) {
             const t = (i - 65) / 30.0;
-            imgData.data[idx + 3] = Math.round(50 + t * 90); // 12-22 dBZ: visible cloud boundary
+            imgData.data[idx + 3] = Math.round(30 + t * 70); // 12-22 dBZ: misty anvil edges
         } else if (i < 150) {
             const t = (i - 95) / 55.0;
-            imgData.data[idx + 3] = Math.round(140 + t * 100); // 22-45 dBZ: dense rain core
+            imgData.data[idx + 3] = Math.round(100 + t * 110); // 22-45 dBZ: dense core
         } else {
             imgData.data[idx + 3] = 255; // 50+ dBZ: solid hail core
         }
@@ -159,7 +167,7 @@ export function initStormVolumeViewer() {
 
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100.0);
-    camera.position.set(0.0, 1.1, 1.9);
+    camera.position.set(0.0, 1.2, 2.0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -185,7 +193,7 @@ export function initStormVolumeViewer() {
             u_volumeTex: { value: null },
             u_paletteTex: { value: paletteTexture2D },
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
-            u_lightDir: { value: new THREE.Vector3(0.4, 0.85, 0.35).normalize() } // High-angle sun
+            u_lightDir: { value: new THREE.Vector3(0.4, 0.88, 0.25).normalize() } // Overhead sun
         },
         transparent: true,
         side: THREE.BackSide
@@ -243,7 +251,7 @@ export function updateStormVolume(voxelBuffer, bounds) {
 
     const maxHoriz = Math.max(widthKm, depthKm, 10.0);
     const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 0.9;
+    const aspectY = (heightKm / maxHoriz) * 0.95;
     const aspectZ = depthKm / maxHoriz;
 
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
