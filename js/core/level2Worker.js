@@ -2,10 +2,10 @@
 import { unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
-// Exact 3D Volume Dimensions (128 x 64 x 128 = 1 MB)
-const GRID_X = 128; // Longitude (West -> East)
-const GRID_Y = 64;  // Altitude (0 -> 20 km)
-const GRID_Z = 128; // Latitude (South -> North)
+// High-Definition Grid Dimensions: 256 (East-West) x 96 (Altitude) x 256 (North-South)
+const GRID_X = 256;
+const GRID_Y = 96;
+const GRID_Z = 256;
 const MAX_ALTITUDE_METERS = 20000.0;
 
 const EARTH_RADIUS_METERS = 6371000.0;
@@ -142,7 +142,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
         }
     }
 
-    // Fill missing radial gaps with adjacent beam data
+    // Fill missing radial gaps
     for (const sweep of sweepsByElevation.values()) {
         for (let r = 0; r < TARGET_RADIALS; r++) {
             if (!sweep.filledRays[r]) {
@@ -163,7 +163,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
 }
 
 /**
- * 🌟 Smooth Bilinear Sampling within a single polar sweep
+ * 🌟 Smooth Bilinear Polar Sampling
  */
 function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     if (!sweep) return 0.0;
@@ -197,7 +197,7 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
 }
 
 /**
- * 🌟 Constructs the Continuous 3D Volume Density Field with Correct Memory Striding
+ * 🌟 Constructs High-Definition 3D Volume (256 x 96 x 256)
  */
 function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX') {
     const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
@@ -216,14 +216,11 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
     const latSpan = maxLat - minLat;
     const radarCosLat = Math.cos(radarLat * DEG_TO_RAD);
 
-    // Continuous 3D spatial interpolation across all voxels
     for (let gz = 0; gz < GRID_Z; gz++) {
-        // gz = 0 is South, gz = 127 is North
         const voxelLat = minLat + (gz / (GRID_Z - 1)) * latSpan;
         const dy = (voxelLat - radarLat) * DEG_TO_RAD * EARTH_RADIUS_METERS;
 
         for (let gx = 0; gx < GRID_X; gx++) {
-            // gx = 0 is West, gx = 127 is East
             const voxelLng = minLng + (gx / (GRID_X - 1)) * lngSpan;
             const dx = (voxelLng - radarLon) * DEG_TO_RAD * EARTH_RADIUS_METERS * radarCosLat;
 
@@ -233,7 +230,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
             const azDeg = azRad * RAD_TO_DEG;
 
             for (let gy = 0; gy < GRID_Y; gy++) {
-                // gy = 0 is Ground, gy = 63 is 20 km altitude
                 const altMeters = (gy / (GRID_Y - 1)) * MAX_ALTITUDE_METERS;
 
                 const s = groundDist;
@@ -242,7 +238,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
                 const elAngleRad = Math.atan2(h - (s * s) / (2.0 * KE_EARTH_RADIUS), s);
                 const elAngleDeg = elAngleRad * RAD_TO_DEG;
 
-                // Find elevation sweeps immediately below and above this point
                 let sweepBelow = null;
                 let sweepAbove = null;
 
@@ -286,7 +281,6 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
 
                 if (finalDbz >= 10.0) {
                     const mappedByte = Math.min(255, Math.max(1, Math.round((finalDbz + 32.0) * 2.0)));
-                    // 🌟 Exact WebGL 3D Texture Memory Stride: z * (width * height) + y * width + x
                     const memoryIndex = gz * (GRID_X * GRID_Y) + gy * GRID_X + gx;
                     voxels[memoryIndex] = mappedByte;
                 }
@@ -302,11 +296,8 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
     };
 }
 
-/**
- * 🌟 Web Worker Message Dispatcher
- */
 self.onmessage = async (e) => {
-    const { id, rawBuffer, radarLat, radarLon, bounds, station } = e.data;
+    const { id, rawBuffer, radarLat, radarLon, bounds, station, cacheKey } = e.data;
     const startTime = performance.now();
 
     try {
@@ -320,14 +311,15 @@ self.onmessage = async (e) => {
         );
 
         const elapsed = (performance.now() - startTime).toFixed(1);
-        console.log(`⚡ [Level 2 Worker] Built 3D volume in ${elapsed}ms`);
+        console.log(`⚡ [Level 2 Worker] Built HD 3D Volume (${GRID_X}x${GRID_Y}x${GRID_Z}) in ${elapsed}ms`);
 
         self.postMessage({
             id,
             success: true,
             voxelBuffer: voxels,
             tilts,
-            bounds
+            bounds,
+            cacheKey
         }, [voxels.buffer]);
 
     } catch (err) {
