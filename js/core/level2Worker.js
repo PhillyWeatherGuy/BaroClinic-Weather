@@ -2,9 +2,9 @@
 import { unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
-const GRID_X = 128; // East - West (Longitude)
-const GRID_Y = 64;  // Altitude / Height (0 to 20 km)
-const GRID_Z = 128; // North - South (Latitude)
+const GRID_X = 128; // East - West
+const GRID_Y = 64;  // Altitude (0 to 20 km)
+const GRID_Z = 128; // North - South
 const MAX_ALTITUDE_METERS = 20000.0;
 
 const EARTH_RADIUS_METERS = 6371000.0;
@@ -81,7 +81,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
     const sCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
     const c0 = sCode.charCodeAt(0), c1 = sCode.charCodeAt(1), c2 = sCode.charCodeAt(2), c3 = sCode.charCodeAt(3);
 
-    const sweepsByElevation = new Map(); // elIndex -> sweepData
+    const sweepsByElevation = new Map();
     const limit = rawBytes.length - 120;
 
     for (let i = 0; i <= limit; i++) {
@@ -139,32 +139,104 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
         }
     }
 
-    // Sort sweeps strictly by elevation angle
-    const sortedSweeps = Array.from(sweepsByElevation.values()).sort((a, b) => a.elAngle - b.elAngle);
-    return sortedSweeps;
+    return Array.from(sweepsByElevation.values()).sort((a, b) => a.elAngle - b.elAngle);
 }
 
 /**
- * 🌟 Samples reflectivity at (r, az) from a single elevation cut
+ * 🌟 Smooth Bilinear Sampling within a single polar sweep
  */
-function sampleSweep(sweep, slantRangeMeters, azDeg) {
+function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     if (!sweep) return 0.0;
-    const rayIdx = Math.min(TARGET_RADIALS - 1, Math.max(0, Math.round(azDeg * 2) % TARGET_RADIALS));
-    const radial = sweep.radials[rayIdx] || sweep.radials[(rayIdx + 1) % TARGET_RADIALS] || sweep.radials[(rayIdx - 1 + TARGET_RADIALS) % TARGET_RADIALS];
-    if (!radial) return 0.0;
 
-    const bin = Math.floor((slantRangeMeters - sweep.firstGateMeters) / sweep.gateSpacingMeters);
-    if (bin < 0 || bin >= radial.length) return 0.0;
+    // Fractional ray
+    const normRay = ((azDeg % 360.0) + 360.0) % 360.0 * 2.0;
+    const r0 = Math.floor(normRay) % TARGET_RADIALS;
+    const r1 = (r0 + 1) % TARGET_RADIALS;
+    const rayT = normRay - Math.floor(normRay);
 
-    const raw = radial[bin];
-    if (raw <= 1) return 0.0; // 0 = below SNR, 1 = range folded
+    const rad0 = sweep.radials[r0];
+    const rad1 = sweep.radials[r1] || rad0;
+    if (!rad0) return 0.0;
 
-    const dbz = (raw - sweep.offsetVal) / sweep.scale;
+    // Fractional gate bin
+    const normBin = (slantRangeMeters - sweep.firstGateMeters) / sweep.gateSpacingMeters;
+    if (normBin < 0 || normBin >= sweep.numGates - 1) return 0.0;
+
+    const b0 = Math.floor(normBin);
+    const b1 = b0 + 1;
+    const binT = normBin - b0;
+
+    const v00 = rad0[b0] > 1 ? (rad0[b0] - sweep.offsetVal) / sweep.scale : 0.0;
+    const v01 = rad0[b1] > 1 ? (rad0[b1] - sweep.offsetVal) / sweep.scale : 0.0;
+    const v10 = (rad1 && rad1[b0] > 1) ? (rad1[b0] - sweep.offsetVal) / sweep.scale : v00;
+    const v11 = (rad1 && rad1[b1] > 1) ? (rad1[b1] - sweep.offsetVal) / sweep.scale : v01;
+
+    // Bilinear interpolation
+    const top = v00 * (1.0 - binT) + v01 * binT;
+    const bottom = v10 * (1.0 - binT) + v11 * binT;
+    const dbz = top * (1.0 - rayT) + bottom * rayT;
+
     return dbz > 10.0 ? dbz : 0.0;
 }
 
 /**
- * 🌟 INVERSE VOXEL PULL WITH VERTICAL TILT INTERPOLATION (The GR2Analyst Method)
+ * 🌟 3D Separable Gaussian Blur (The "Puffy Cloud" Filter)
+ * Smooths raw discretized radar cells into natural, billowy fluid domes
+ */
+function applyGaussian3DFilter(voxels) {
+    const temp = new Float32Array(GRID_X * GRID_Y * GRID_Z);
+    const out = new Uint8Array(GRID_X * GRID_Y * GRID_Z);
+
+    // Pass 1: Horizontal X-Blur
+    for (let z = 0; z < GRID_Z; z++) {
+        for (let y = 0; y < GRID_Y; y++) {
+            const rowOffset = z * (GRID_X * GRID_Y) + y * GRID_X;
+            for (let x = 0; x < GRID_X; x++) {
+                const x0 = Math.max(0, x - 1);
+                const x1 = Math.min(GRID_X - 1, x + 1);
+                temp[rowOffset + x] = 
+                    voxels[rowOffset + x0] * 0.25 + 
+                    voxels[rowOffset + x] * 0.50 + 
+                    voxels[rowOffset + x1] * 0.25;
+            }
+        }
+    }
+
+    // Pass 2: Vertical Y-Blur
+    for (let z = 0; z < GRID_Z; z++) {
+        for (let x = 0; x < GRID_X; x++) {
+            for (let y = 0; y < GRID_Y; y++) {
+                const y0 = Math.max(0, y - 1);
+                const y1 = Math.min(GRID_Y - 1, y + 1);
+                const idx0 = z * (GRID_X * GRID_Y) + y0 * GRID_X + x;
+                const idx  = z * (GRID_X * GRID_Y) + y * GRID_X + x;
+                const idx1 = z * (GRID_X * GRID_Y) + y1 * GRID_X + x;
+
+                const val = temp[idx0] * 0.25 + temp[idx] * 0.50 + temp[idx1] * 0.25;
+                out[idx] = Math.min(255, Math.round(val));
+            }
+        }
+    }
+
+    // Pass 3: Depth Z-Blur
+    for (let y = 0; y < GRID_Y; y++) {
+        for (let x = 0; x < GRID_X; x++) {
+            for (let z = 0; z < GRID_Z; z++) {
+                const z0 = Math.max(0, z - 1);
+                const z1 = Math.min(GRID_Z - 1, z + 1);
+                const idx0 = z0 * (GRID_X * GRID_Y) + y * GRID_X + x;
+                const idx  = z  * (GRID_X * GRID_Y) + y * GRID_X + x;
+                const idx1 = z1 * (GRID_X * GRID_Y) + y * GRID_X + x;
+
+                const val = out[idx0] * 0.25 + out[idx] * 0.50 + out[idx1] * 0.25;
+                voxels[idx] = Math.min(255, Math.round(val));
+            }
+        }
+    }
+}
+
+/**
+ * 🛰️ Inverse Voxel Pull with Continuous Polar Interpolation
  */
 function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0, stationId = 'KDMX') {
     const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
@@ -183,17 +255,12 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
     const latSpan = maxLat - minLat;
     const radarCosLat = Math.cos(radarLat * DEG_TO_RAD);
 
-    let nonZeroVoxels = 0;
-
-    // For every voxel (gx, gy, gz) in the 3D box, interpolate the atmosphere continuously
     for (let gz = 0; gz < GRID_Z; gz++) {
-        // In Three.js: -Z is North, +Z is South
         const latT = (GRID_Z - 1 - gz) / (GRID_Z - 1);
         const voxelLat = minLat + latT * latSpan;
         const dy = (voxelLat - radarLat) * DEG_TO_RAD * EARTH_RADIUS_METERS;
 
         for (let gx = 0; gx < GRID_X; gx++) {
-            // -X is West, +X is East
             const lngT = gx / (GRID_X - 1);
             const voxelLng = minLng + lngT * lngSpan;
             const dx = (voxelLng - radarLon) * DEG_TO_RAD * EARTH_RADIUS_METERS * radarCosLat;
@@ -206,14 +273,12 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
             for (let gy = 0; gy < GRID_Y; gy++) {
                 const altMeters = (gy / (GRID_Y - 1)) * MAX_ALTITUDE_METERS;
 
-                // 4/3 Earth Radius Beam Inversion: solve for slant range r and elevation angle phi
                 const s = groundDist;
                 const h = altMeters;
                 const r = Math.sqrt(s * s + h * h);
                 const elAngleRad = Math.atan2(h - (s * s) / (2.0 * KE_EARTH_RADIUS), s);
                 const elAngleDeg = elAngleRad * RAD_TO_DEG;
 
-                // Find the sweeps immediately below and above this voxel's elevation angle
                 let sweepBelow = null;
                 let sweepAbove = null;
 
@@ -229,8 +294,8 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                 let finalDbz = 0.0;
 
                 if (sweepBelow && sweepAbove && sweepBelow !== sweepAbove) {
-                    const dbz1 = sampleSweep(sweepBelow, r, azDeg);
-                    const dbz2 = sampleSweep(sweepAbove, r, azDeg);
+                    const dbz1 = sampleSweepBilinear(sweepBelow, r, azDeg);
+                    const dbz2 = sampleSweepBilinear(sweepAbove, r, azDeg);
 
                     const span = sweepAbove.elAngle - sweepBelow.elAngle;
                     const t = Math.max(0.0, Math.min(1.0, (elAngleDeg - sweepBelow.elAngle) / span));
@@ -238,49 +303,40 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, targetTiltIndex = 0
                     if (dbz1 > 0 && dbz2 > 0) {
                         finalDbz = dbz1 + t * (dbz2 - dbz1);
                     } else if (dbz1 > 0) {
-                        finalDbz = dbz1 * (1.0 - t); // Smooth fade-out into cloud boundary
+                        finalDbz = dbz1 * (1.0 - t * 0.8);
                     } else if (dbz2 > 0) {
-                        finalDbz = dbz2 * t;
+                        finalDbz = dbz2 * (t * 0.8);
                     }
                 } else if (sweepBelow) {
-                    const dbz = sampleSweep(sweepBelow, r, azDeg);
+                    const dbz = sampleSweepBilinear(sweepBelow, r, azDeg);
                     const diff = elAngleDeg - sweepBelow.elAngle;
-                    if (diff < 1.5) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.5);
+                    if (diff < 2.0) {
+                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 2.0);
                     }
                 } else if (sweepAbove) {
-                    const dbz = sampleSweep(sweepAbove, r, azDeg);
+                    const dbz = sampleSweepBilinear(sweepAbove, r, azDeg);
                     const diff = sweepAbove.elAngle - elAngleDeg;
-                    if (diff < 1.0) {
-                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.0);
+                    if (diff < 1.2) {
+                        finalDbz = dbz * Math.max(0.0, 1.0 - diff / 1.2);
                     }
                 }
 
-                if (finalDbz >= 12.0) {
-                    // Map to 0..255 byte
+                if (finalDbz >= 10.0) {
                     const mappedByte = Math.min(255, Math.max(1, Math.round((finalDbz + 32.0) * 2.0)));
                     const idx = gz * (GRID_X * GRID_Y) + gy * GRID_X + gx;
                     voxels[idx] = mappedByte;
-                    nonZeroVoxels++;
                 }
             }
         }
     }
 
-    console.log(`📡 [Level 2 Worker] Seamlessly interpolated ${nonZeroVoxels} continuous cloud voxels across ${sweeps.length} elevation tilts.`);
+    // 🌟 Run the 3D Gaussian filter to sculpt the cloud billows
+    applyGaussian3DFilter(voxels);
 
     const tiltsMeta = sweeps.map((s, idx) => ({ index: idx, elevation: s.elAngle }));
-
-    return {
-        voxels,
-        tilts: tiltsMeta,
-        tiltSweep: null
-    };
+    return { voxels, tilts: tiltsMeta, tiltSweep: null };
 }
 
-/**
- * 🌟 Web Worker Message Dispatcher
- */
 self.onmessage = async (e) => {
     const { id, rawBuffer, radarLat, radarLon, bounds, targetTiltIndex, station } = e.data;
     const startTime = performance.now();
