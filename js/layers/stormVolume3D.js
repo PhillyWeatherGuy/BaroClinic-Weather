@@ -8,17 +8,53 @@ let stormBoxMesh, wireframeHelper, groundGridHelper;
 let volumeTexture3D = null;
 let paletteTexture2D = null;
 let isViewerActive = false;
+let isFullscreen = false;
 let animationFrameId = null;
 
-// Ensure styling for the interactive dBZ cut-off slider
+// Ensure styling for the interactive dBZ cut-off slider & Fullscreen mode
 function ensureControlStyles() {
     if (document.getElementById('storm-cutoff-slider-styles')) return;
     const style = document.createElement('style');
     style.id = 'storm-cutoff-slider-styles';
     style.textContent = `
+        /* Fullscreen Viewport Mode */
+        #storm-volume-container.fullscreen {
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            border-radius: 0 !important;
+            border: none !important;
+            z-index: 99999 !important;
+        }
+        .storm-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .expand-btn {
+            padding: 4px 8px;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+            line-height: 1;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #94a3b8;
+            transition: all 0.15s ease;
+        }
+        .expand-btn:hover {
+            color: #38bdf8;
+            background: rgba(56, 189, 248, 0.2);
+            border-color: rgba(56, 189, 248, 0.5);
+        }
         .storm-cutoff-pill {
             position: absolute;
-            bottom: 12px;
+            bottom: 14px;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
@@ -82,7 +118,7 @@ const vsVolume = `
     }
 `;
 
-// Fragment Shader with Soft dBZ Fadeout
+// Fragment Shader: 360° Omnidirectional Cloud Raymarcher
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -97,7 +133,7 @@ const fsVolume = `
     uniform vec3 u_boxSize;
     uniform float u_steps;
     uniform float u_opacity;
-    uniform vec4 u_cutoffMin; // u_cutoffMin.w is the dynamic minimum dBZ cut-off
+    uniform vec4 u_cutoffMin;
     uniform vec4 u_cutoffMax;
 
     // Fast 3D Noise for Cloud Billow Turbulence
@@ -114,7 +150,7 @@ const fsVolume = `
 
         return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
                        mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
-                   mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,1,1)), f.x),
+                   mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
                        mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
     }
 
@@ -151,20 +187,18 @@ const fsVolume = `
         return texture(u_volumeTex, sampleCoord).r;
     }
 
-    // 🌟 Soft Gradual dBZ Fadeout (Dissolves lower values smoothly)
-    const float FADE_RANGE = 0.055; // ~7 dBZ smooth fade span
+    // Soft Gradual dBZ Fadeout
+    const float FADE_RANGE = 0.055;
     vec4 colorizeCloud(float value) {
         if (value <= u_cutoffMin.w || value >= u_cutoffMax.w) {
             return vec4(0.0);
         }
 
-        // Gradual fadeout factor
         float softFade = smoothstep(u_cutoffMin.w, u_cutoffMin.w + FADE_RANGE, value);
 
         vec4 paletteColor = texture(u_paletteTex, vec2(value, 0.5));
         vec3 cloudColor = paletteColor.rgb;
 
-        // Outer cloud vapor: blend into natural cloud-white
         if (value < 0.44) {
             float whiteMix = 1.0 - smoothstep(u_cutoffMin.w, 0.44, value);
             vec3 softWhite = vec3(0.94, 0.96, 0.98);
@@ -295,16 +329,40 @@ function createRadarPaletteTexture(palette256 = WXTOOLS_PALETTE_256) {
 export function initStormVolumeViewer() {
     containerEl = document.getElementById('storm-volume-container');
     canvasContainerEl = document.getElementById('storm-volume-canvas-container');
+    const headerEl = containerEl ? containerEl.querySelector('.storm-volume-header') : null;
     const closeBtn = document.getElementById('btn-close-storm-3d');
 
     if (!containerEl || !canvasContainerEl) return;
     ensureControlStyles();
 
+    // 🌟 Fullscreen Button Injection & Handling
+    if (headerEl && !document.getElementById('btn-fullscreen-storm-3d')) {
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'storm-header-actions';
+
+        const fullscreenBtn = document.createElement('button');
+        fullscreenBtn.id = 'btn-fullscreen-storm-3d';
+        fullscreenBtn.className = 'expand-btn';
+        fullscreenBtn.title = 'Toggle Fullscreen';
+        fullscreenBtn.textContent = '⛶';
+
+        fullscreenBtn.onclick = () => {
+            toggleStormFullscreen();
+        };
+
+        if (closeBtn) {
+            headerEl.removeChild(closeBtn);
+            actionsContainer.appendChild(fullscreenBtn);
+            actionsContainer.appendChild(closeBtn);
+            headerEl.appendChild(actionsContainer);
+        }
+    }
+
     if (closeBtn) {
         closeBtn.onclick = () => hideStormVolume();
     }
 
-    // 🌟 Embed the Interactive dBZ Cut-Off Slider Pill
+    // 🌟 Interactive dBZ Cut-Off Slider Pill
     let cutoffControl = containerEl.querySelector('.storm-cutoff-pill');
     if (!cutoffControl) {
         cutoffControl = document.createElement('div');
@@ -321,7 +379,6 @@ export function initStormVolumeViewer() {
         slider.oninput = (e) => {
             const dbz = parseFloat(e.target.value);
             label.textContent = `Cut-off: ${Math.round(dbz)} dBZ`;
-            // Map dBZ value to normalized 0.0..1.0 shader scalar space
             const normVal = Math.max(0.01, ((dbz + 32.0) * 2.0) / 255.0);
             if (stormBoxMesh && stormBoxMesh.material) {
                 stormBoxMesh.material.uniforms.u_cutoffMin.value.w = normVal;
@@ -362,8 +419,7 @@ export function initStormVolumeViewer() {
             u_boxSize: { value: new THREE.Vector3(1.0, 0.8, 1.0) },
             u_steps: { value: 72.0 },
             u_opacity: { value: 1.0 },
-            // Initial cutoff: 15 dBZ (~0.37 normalized scalar)
-            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.368) },
+            u_cutoffMin: { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.25) },
             u_cutoffMax: { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.00) }
         },
         transparent: true,
@@ -384,6 +440,39 @@ export function initStormVolumeViewer() {
 
     const resizeObserver = new ResizeObserver(() => handleResize());
     resizeObserver.observe(canvasContainerEl);
+
+    // Escape key listener to exit fullscreen
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isFullscreen) {
+            toggleStormFullscreen(false);
+        }
+    });
+}
+
+export function toggleStormFullscreen(forceState = null) {
+    if (!containerEl) containerEl = document.getElementById('storm-volume-container');
+    const fullscreenBtn = document.getElementById('btn-fullscreen-storm-3d');
+    if (!containerEl) return;
+
+    isFullscreen = (forceState !== null) ? forceState : !isFullscreen;
+
+    if (isFullscreen) {
+        containerEl.classList.add('fullscreen');
+        if (fullscreenBtn) {
+            fullscreenBtn.textContent = '🗗';
+            fullscreenBtn.title = 'Exit Fullscreen (Esc)';
+        }
+    } else {
+        containerEl.classList.remove('fullscreen');
+        if (fullscreenBtn) {
+            fullscreenBtn.textContent = '⛶';
+            fullscreenBtn.title = 'Toggle Fullscreen';
+        }
+    }
+
+    setTimeout(() => {
+        handleResize();
+    }, 50);
 }
 
 function handleResize() {
@@ -462,7 +551,10 @@ export function showStormVolume() {
 
 export function hideStormVolume() {
     if (!containerEl) containerEl = document.getElementById('storm-volume-container');
-    if (containerEl) containerEl.style.display = 'none';
+    if (containerEl) {
+        containerEl.style.display = 'none';
+        toggleStormFullscreen(false); // Reset fullscreen on close
+    }
     isViewerActive = false;
     stateManager.is3DVolumeActive = false;
     if (animationFrameId) {
