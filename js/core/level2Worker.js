@@ -2,10 +2,10 @@
 import { unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
-// High-Definition Grid Dimensions: 256 (East-West) x 96 (Altitude) x 256 (North-South)
-const GRID_X = 256;
+// Ultra-HD 9x Grid: 384 (East-West) x 96 (Altitude) x 384 (North-South) ~ 14 MB
+const GRID_X = 384;
 const GRID_Y = 96;
-const GRID_Z = 256;
+const GRID_Z = 384;
 const MAX_ALTITUDE_METERS = 20000.0;
 
 const EARTH_RADIUS_METERS = 6371000.0;
@@ -142,7 +142,6 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
         }
     }
 
-    // Fill missing radial gaps
     for (const sweep of sweepsByElevation.values()) {
         for (let r = 0; r < TARGET_RADIALS; r++) {
             if (!sweep.filledRays[r]) {
@@ -163,7 +162,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
 }
 
 /**
- * 🌟 Smooth Bilinear Polar Sampling
+ * 🌟 Bilinear Polar Sampling
  */
 function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
     if (!sweep) return 0.0;
@@ -197,7 +196,7 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
 }
 
 /**
- * 🌟 Constructs High-Definition 3D Volume (256 x 96 x 256)
+ * 🌟 Constructs Ultra-HD 3D Volume (384 x 96 x 384)
  */
 function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX') {
     const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
@@ -289,11 +288,7 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
     }
 
     const tiltsMeta = sweeps.map((s, idx) => ({ index: idx, elevation: s.elAngle }));
-
-    return {
-        voxels,
-        tilts: tiltsMeta
-    };
+    return { voxels, tilts: tiltsMeta };
 }
 
 self.onmessage = async (e) => {
@@ -311,7 +306,7 @@ self.onmessage = async (e) => {
         );
 
         const elapsed = (performance.now() - startTime).toFixed(1);
-        console.log(`⚡ [Level 2 Worker] Built HD 3D Volume (${GRID_X}x${GRID_Y}x${GRID_Z}) in ${elapsed}ms`);
+        console.log(`⚡ [Level 2 Worker] Built Ultra-HD 3D Volume (${GRID_X}x${GRID_Y}x${GRID_Z}) in ${elapsed}ms`);
 
         self.postMessage({
             id,
