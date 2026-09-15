@@ -455,8 +455,9 @@ export function initStormVolumeViewer() {
     if (renderer) return;
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100.0);
-    camera.position.set(0.0, 1.1, 1.9);
+    // Wider horizontal FOV and camera positioned back and slightly lower for a grand plains perspective
+    camera = new THREE.PerspectiveCamera(42, 1, 0.01, 100.0);
+    camera.position.set(0.0, 0.75, 2.25);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -466,7 +467,7 @@ export function initStormVolumeViewer() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.minDistance = 0.3;
-    controls.maxDistance = 6.0;
+    controls.maxDistance = 8.0;
     controls.minPolarAngle = 0.0;
     controls.maxPolarAngle = Math.PI;
     controls.target.set(0.0, 0.0, 0.0);
@@ -599,12 +600,16 @@ export function updateStormVolume(voxelBuffer, bounds) {
     const midLat = (minLat + maxLat) * 0.5;
     const widthKm = Math.abs(maxLng - minLng) * 111.32 * Math.cos(midLat * (Math.PI / 180.0));
     const depthKm = Math.abs(maxLat - minLat) * 111.32;
-    const heightKm = 18.0; // Scaled to 18 km to capture full supercell anvil & overshooting tops
+    const heightKm = 20.0; // Matches Level 2 worker MAX_ALTITUDE_METERS (20 km ceiling)
 
-    const maxHoriz = Math.max(widthKm, depthKm, 10.0);
-    const aspectX = widthKm / maxHoriz;
-    const aspectY = (heightKm / maxHoriz) * 2.1;
-    const aspectZ = depthKm / maxHoriz;
+    // Wide atmospheric aspect ratio (broad sprawling anvil + balanced vertical relief)
+    const maxHoriz = Math.max(widthKm, depthKm, 15.0);
+    const HORIZONTAL_SPREAD = 1.45; // Broadens the storm footprint horizontally
+    const VERTICAL_RELIEF = 1.15;   // Prevents the narrow chimney effect
+
+    const aspectX = (widthKm / maxHoriz) * HORIZONTAL_SPREAD;
+    const aspectZ = (depthKm / maxHoriz) * HORIZONTAL_SPREAD;
+    const aspectY = (heightKm / maxHoriz) * VERTICAL_RELIEF;
 
     stormBoxMesh.scale.set(aspectX, aspectY, aspectZ);
     stormBoxMesh.material.uniforms.u_boxSize.value.set(aspectX, aspectY, aspectZ);
