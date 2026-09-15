@@ -151,7 +151,7 @@ const vsVolume = `
     }
 `;
 
-// Dual-Mode Fragment Shader: Wispy Atmospheric Cloud ↔ Crisp Super-Res Pixels
+// Dual-Mode Fragment Shader: Translucent Glowing Cloud ↔ Crisp Super-Res Pixels
 const fsVolume = `
     precision highp float;
     precision highp sampler3D;
@@ -195,14 +195,14 @@ const fsVolume = `
         }
         float groundFade = smoothstep(0.0, 0.03, texCoord.y);
 
-        // 🌟 Lift lower-to-middle storm core into natural proportion
-        float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.55);
+        // Gentle lower-level vertical expansion (anchored at ground and ceiling)
+        float expandedY = pow(clamp(texCoord.y, 0.0, 1.0), 1.45);
 
         vec3 sampleCoord = vec3(texCoord.x, expandedY, 1.0 - texCoord.z);
         return texture(u_volumeTex, sampleCoord).r * groundFade;
     }
 
-    // Henyey-Greenstein forward phase function for atmospheric cloud edge radiance
+    // Henyey-Greenstein forward phase function for atmospheric cloud radiance
     float phaseHG(float cosTheta, float g) {
         float g2 = g * g;
         return (1.0 - g2) / (4.0 * 3.14159265 * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
@@ -254,34 +254,41 @@ const fsVolume = `
                     accumulatedColor += transmittance * palColor.rgb * (1.0 - stepTransmittance);
                     transmittance *= stepTransmittance;
                 } else {
-                    // --- MODE 0: WISPY ATMOSPHERIC CLOUD ---
-                    // 1. Feathered boundary falloff (makes blue/green edges smoky and wispy)
+                    // --- MODE 0: TRANSLUCENT GLOWING ATMOSPHERIC CLOUD ---
                     float normDbz = (sampleValue - u_cutoffMin.w) / max(1.0 - u_cutoffMin.w, 0.001);
-                    float edgeSoft = smoothstep(0.0, 0.10, normDbz);
+                    float edgeSoft = smoothstep(0.0, 0.08, normDbz);
 
-                    // 2. Steep power curve: blues, greens, & light yellows stay delicate & translucent;
-                    // heavy precipitation & hail cores (reds/magentas) stay dense & solid
-                    float density = pow(normDbz, 2.35) * 5.4 * edgeSoft;
+                    // 🌟 Dual-Tier Density:
+                    // Low/Mid reflectivities (< 45 dBZ) are translucent like smoke, letting the ray
+                    // penetrate deep inside the hook. Severe cores (> 55 dBZ) ramp up to solid mass.
+                    float mistDensity = pow(normDbz, 2.8) * 1.8;
+                    float coreDensity = smoothstep(0.55, 0.85, sampleValue) * 3.4;
+                    float density = (mistDensity + coreDensity) * edgeSoft;
 
-                    // 3. Dual-hemisphere ambient skylight
+                    // Dual-hemisphere ambient skylight
                     float heightFactor = clamp(currentPosition.y, 0.0, 1.0);
                     vec3 skyLight = mix(vec3(0.35, 0.38, 0.46), vec3(0.60, 0.70, 0.85), heightFactor);
 
-                    // 4. Sunlight penetration & forward cloud-rim radiance
-                    float sunPenetration = exp(-density * 0.40);
+                    // Sunlight penetration & forward cloud-rim radiance
+                    float sunPenetration = exp(-density * 0.35);
                     vec3 directSun = vec3(1.15, 1.10, 1.00) * (sunPenetration * 0.75 + forwardScatter * 0.45);
 
-                    vec3 litColor = palColor.rgb * (skyLight + directSun);
+                    // 🌟 Core Luminescence: Hail core & tornado vortex (60+ dBZ) radiates outward,
+                    // glowing through the amber cloud just like Bram's render!
+                    float coreIntensity = smoothstep(0.66, 0.88, sampleValue);
+                    vec3 coreGlow = palColor.rgb * coreIntensity * 1.6;
 
-                    // 5. Physical Beer-Lambert optical depth accumulation
-                    float stepOpticalDepth = density * (48.0 / u_steps) * 1.15;
+                    vec3 litColor = palColor.rgb * (skyLight + directSun) + coreGlow;
+
+                    // Physical Beer-Lambert optical depth accumulation
+                    float stepOpticalDepth = density * (48.0 / u_steps) * 0.82;
                     float stepTransmittance = exp(-stepOpticalDepth);
 
                     accumulatedColor += transmittance * litColor * (1.0 - stepTransmittance);
                     transmittance *= stepTransmittance;
                 }
 
-                if (transmittance < 0.015) {
+                if (transmittance < 0.01) {
                     break;
                 }
             }
@@ -544,7 +551,7 @@ export function updateStormVolume(voxelBuffer, bounds) {
     // Balanced panoramic aspect ratio (wide spreading anvil, natural height relief)
     const maxHoriz = Math.max(widthKm, depthKm, 12.0);
     const HORIZONTAL_SPREAD = 1.35;
-    const VERTICAL_RELIEF = 1.58; // Slightly taller total height with ample base/mid presence
+    const VERTICAL_RELIEF = 1.58;
 
     const aspectX = (widthKm / maxHoriz) * HORIZONTAL_SPREAD;
     const aspectZ = (depthKm / maxHoriz) * HORIZONTAL_SPREAD;
