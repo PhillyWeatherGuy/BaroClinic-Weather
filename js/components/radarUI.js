@@ -6,7 +6,7 @@ import { decodeLevel3, sampleRadarSweep, formatRadarValue } from '../core/level3
 import { createSingleSiteRadarLayer } from '../shaders/singleSiteRadarShader.js';
 import { stateManager } from '../core/stateManager.js';
 import { getRadarPalette } from '../config/radarPalettes.js';
-import { sync3DVolumeWithCurrentFrame } from './viewerUI.js';
+import { sync3DVolumeWithCurrentFrame } from './viewerUI.js'; 
 
 let radarMapInstance = null;
 let radarPlayInterval = null;
