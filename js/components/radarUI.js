@@ -568,9 +568,16 @@ export function setRadarFrame(frameIndex) {
 
     if (activeRadarViewType === 'local') {
         const frameObj = singleSiteFrames[frameIndex];
-        if (frameObj) {
-            frameDate = frameObj.sweepData?.scanDate;
-            frameLabel = frameObj.label;
+        if (frameObj && frameObj.sweepData) {
+            frameDate = frameObj.sweepData.scanDate;
+            if (frameDate) {
+                // Real scan timestamp label: e.g. "18:04Z"
+                const hh = String(frameDate.getUTCHours()).padStart(2, '0');
+                const mi = String(frameDate.getUTCMinutes()).padStart(2, '0');
+                frameLabel = (frameIndex === totalFrames - 1 && radarState.mode === 'live') ? 'LIVE' : `${hh}:${mi}Z`;
+            } else {
+                frameLabel = frameObj.label;
+            }
         }
     } else {
         const frameInfo = radarState.frames?.[frameIndex];
@@ -582,13 +589,22 @@ export function setRadarFrame(frameIndex) {
 
     const timeLabel = document.getElementById('time-label');
     if (timeLabel) {
-        timeLabel.textContent = frameLabel || (frameIndex === totalFrames - 1 ? 'LIVE' : `F${frameIndex}`);
+        timeLabel.textContent = frameLabel || (frameIndex === totalFrames - 1 && radarState.mode === 'live' ? 'LIVE' : `F${frameIndex}`);
     }
 
     const appClock = document.getElementById('app-clock');
     if (appClock) {
         if (frameDate) {
             appClock.textContent = frameDate.toLocaleTimeString([], {
+                weekday: 'short',
+                month: 'numeric',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                timeZoneName: 'short'
+            });
+        } else if (radarState.archiveDate) {
+            appClock.textContent = radarState.archiveDate.toLocaleTimeString([], {
                 weekday: 'short',
                 month: 'numeric',
                 day: 'numeric',
@@ -669,7 +685,15 @@ function syncRadarTimelineUI() {
     if (runLabel) {
         const dur = radarState.durationHours || 1;
         if (activeRadarViewType === 'local' && activeStationId) {
-            runLabel.textContent = `${activeStationId} (${dur}h Loop)`;
+            if (radarState.mode === 'live' || !radarState.archiveDate) {
+                runLabel.textContent = `${activeStationId} (Live ${dur}h)`;
+            } else {
+                const d = radarState.archiveDate;
+                const monthStr = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+                const day = d.getUTCDate();
+                const hh = String(d.getUTCHours()).padStart(2, '0');
+                runLabel.textContent = `${activeStationId}: ${monthStr} ${day}, ${hh}Z`;
+            }
         } else if (radarState.mode === 'live' || !radarState.archiveDate) {
             runLabel.textContent = `Live Loop (${dur}h)`;
         } else {
