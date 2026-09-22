@@ -15,21 +15,23 @@ const RAD_TO_DEG = 180.0 / Math.PI;
 const TARGET_RADIALS = 720;
 
 /**
- * 🛰️ Decompresses Level 2 Archive II Chunks
+ * 🛰️ Decompresses Level 2 Archive II Chunks (Supports 1991-present: GZIP, BZIP2, and raw legacy)
  */
 function decompressLevel2(arrayBuffer) {
-    const bytes = new Uint8Array(arrayBuffer);
-    const decompressedChunks = [];
+    let bytes = new Uint8Array(arrayBuffer);
 
+    // 1. GZIP decompression (standard for pre-2008 archives)
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
-            return unzlibSync(bytes);
+            bytes = unzlibSync(bytes);
         } catch (e) {}
     }
 
     let pos = (bytes.length > 24 && bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56) ? 24 : 0;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
+    // 2. Scan for BZIP2 chunked blocks (standard 2008+)
+    const decompressedChunks = [];
     while (pos + 4 < bytes.length) {
         let chunkSize = view.getInt32(pos, false);
         pos += 4;
@@ -55,27 +57,29 @@ function decompressLevel2(arrayBuffer) {
         pos += chunkSize;
     }
 
-    if (decompressedChunks.length === 0) {
-        try {
-            const out = seekBzip.decode(bytes);
-            return new Uint8Array(out);
-        } catch (e) {
-            throw new Error("Could not decompress Level 2 payload");
+    if (decompressedChunks.length > 0) {
+        const totalBytes = decompressedChunks.reduce((acc, c) => acc + c.length, 0);
+        const fullBuffer = new Uint8Array(totalBytes);
+        let writeOffset = 0;
+        for (const chunk of decompressedChunks) {
+            fullBuffer.set(chunk, writeOffset);
+            writeOffset += chunk.length;
         }
+        return fullBuffer;
     }
 
-    const totalBytes = decompressedChunks.reduce((acc, c) => acc + c.length, 0);
-    const fullBuffer = new Uint8Array(totalBytes);
-    let writeOffset = 0;
-    for (const chunk of decompressedChunks) {
-        fullBuffer.set(chunk, writeOffset);
-        writeOffset += chunk.length;
+    // 3. Fallback: single stream BZIP2 or uncompressed raw legacy records
+    try {
+        const out = seekBzip.decode(bytes);
+        return new Uint8Array(out);
+    } catch (e) {
+        // Raw uncompressed legacy records
+        return (pos > 0) ? bytes.subarray(pos) : bytes;
     }
-    return fullBuffer;
 }
 
 /**
- * 🛰️ Parses Message 31 sweeps from Level 2 buffer & de-duplicates SAILS cuts
+ * 🛰️ Universal Sweep Parser (Message 31 Super-Res 2008+ & Message 1 Legacy 1991–2007)
  */
 function parseSweepsFromLevel2(rawBytes, stationId) {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
@@ -85,6 +89,9 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
     const sweepsByElevation = new Map();
     const limit = rawBytes.length - 120;
 
+    // =========================================================
+    // PASS 1: Modern Message 31 (2008 – Present, Super-Res)
+    // =========================================================
     for (let i = 0; i <= limit; i++) {
         if (rawBytes[i] === c0 && rawBytes[i + 1] === c1 && rawBytes[i + 2] === c2 && rawBytes[i + 3] === c3) {
             const hdrPos = i;
@@ -142,6 +149,65 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
         }
     }
 
+    // =========================================================
+    // PASS 2: Legacy Message 1 Fallback (1991 – 2007 Archives)
+    // =========================================================
+    if (sweepsByElevation.size === 0) {
+        for (let pos = 0; pos <= rawBytes.length - 2432; ) {
+            // Check for 12-byte CTM header + Message 1 or direct message start
+            let msgOffset = -1;
+            if (view.getUint16(pos + 12, false) === 1208 && view.getUint8(pos + 15) === 1) {
+                msgOffset = pos + 12;
+            } else if (view.getUint16(pos, false) === 1208 && view.getUint8(pos + 3) === 1) {
+                msgOffset = pos;
+            }
+
+            if (msgOffset !== -1 && msgOffset + 128 + 460 <= rawBytes.length) {
+                const azRaw = view.getUint16(msgOffset + 24, false);
+                const elRaw = view.getInt16(msgOffset + 30, false);
+                const elIndex = view.getUint16(msgOffset + 32, false);
+                const firstGateMeters = view.getUint16(msgOffset + 34, false);
+                const gateSpacingMeters = view.getUint16(msgOffset + 38, false);
+                const numGates = view.getUint16(msgOffset + 42, false);
+                const refPtr = view.getUint16(msgOffset + 64, false);
+
+                // Binary Angular Measurement System (BAMS): 65536 = 360 degrees
+                const azAngle = (azRaw * 180.0) / 32768.0;
+                const elAngle = (elRaw * 180.0) / 32768.0;
+
+                if (azAngle >= 0.0 && azAngle <= 360.0 && elAngle >= -2.0 && elAngle <= 45.0 && 
+                    numGates > 0 && numGates <= 1000 && refPtr >= 64 && refPtr < 2000) {
+
+                    if (!sweepsByElevation.has(elIndex)) {
+                        sweepsByElevation.set(elIndex, {
+                            elIndex,
+                            elAngle: parseFloat(elAngle.toFixed(2)),
+                            firstGateMeters: firstGateMeters || 1000,
+                            gateSpacingMeters: gateSpacingMeters || 1000,
+                            scale: 2.0,
+                            offsetVal: 66.0,
+                            numGates: numGates,
+                            radials: new Array(TARGET_RADIALS),
+                            filledRays: new Uint8Array(TARGET_RADIALS)
+                        });
+                    }
+
+                    const sweep = sweepsByElevation.get(elIndex);
+                    const rayIdx = Math.min(TARGET_RADIALS - 1, Math.max(0, Math.round(azAngle * 2) % TARGET_RADIALS));
+                    const gateStart = msgOffset + refPtr;
+                    const gateBytes = rawBytes.subarray(gateStart, gateStart + numGates);
+                    sweep.radials[rayIdx] = new Uint8Array(gateBytes);
+                    sweep.filledRays[rayIdx] = 1;
+
+                    pos += (msgOffset === pos + 12 ? 2432 : 2416);
+                    continue;
+                }
+            }
+            pos += 4;
+        }
+    }
+
+    // Radial gap fill: duplicate 1.0-degree radials into adjacent 0.5-degree slots
     for (const sweep of sweepsByElevation.values()) {
         for (let r = 0; r < TARGET_RADIALS; r++) {
             if (!sweep.filledRays[r]) {
@@ -158,7 +224,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
         }
     }
 
-    // Sort by elevation angle and de-duplicate repeat/SAILS angles (< 0.15° difference)
+    // Sort sweeps by elevation angle and de-duplicate repeat/SAILS angles (< 0.18° apart)
     const sorted = Array.from(sweepsByElevation.values()).sort((a, b) => a.elAngle - b.elAngle);
     const uniqueSweeps = [];
     for (let i = 0; i < sorted.length; i++) {
