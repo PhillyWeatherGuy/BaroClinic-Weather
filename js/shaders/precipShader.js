@@ -9,6 +9,22 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
     const dx = (maxX - minX) / cols;
     const dy = 1.0 / rows;
 
+    // 1. North Polar Cap Fan (Closes the 85.05°N to 90°N hole)
+    // In MapLibre globe math, y = -0.45 converges to the exact North Pole (lat = +90°)
+    const northPoleY = -0.45;
+    for (let c = 0; c < cols; c++) {
+        const x0 = minX + c * dx;
+        const x1 = minX + (c + 1) * dx;
+        const xMid = (x0 + x1) * 0.5;
+
+        vertices.push(
+            x0, 0.0,
+            x1, 0.0,
+            xMid, northPoleY
+        );
+    }
+
+    // 2. Main Body Grid (85.05°N to 85.05°S)
     for (let r = 0; r < rows; r++) {
         const y0 = r * dy;
         const y1 = (r + 1) * dy;
@@ -26,6 +42,22 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
             );
         }
     }
+
+    // 3. South Polar Cap Fan (Closes the 85.05°S to -90°S hole)
+    // y = 1.45 converges to the exact South Pole (lat = -90°)
+    const southPoleY = 1.45;
+    for (let c = 0; c < cols; c++) {
+        const x0 = minX + c * dx;
+        const x1 = minX + (c + 1) * dx;
+        const xMid = (x0 + x1) * 0.5;
+
+        vertices.push(
+            x0, 1.0,
+            xMid, southPoleY,
+            x1, 1.0
+        );
+    }
+
     return new Float32Array(vertices);
 }
 
