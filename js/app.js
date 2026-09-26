@@ -23,7 +23,6 @@ import {
     destroyCityOverlay,
     setBasemapLabelsVisibility 
 } from './layers/cityOverlay.js'; 
-import { initThreeGlobe, updateThreeGlobeFrame, updateThreeGlobePalette, showThreeGlobe, hideThreeGlobe, clearThreeGlobeTextures } from './layers/threeGlobe.js';
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
 
@@ -36,7 +35,6 @@ import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.
 
 let customShaderLayer = null;
 let renderDebounceId = null;
-let threeGlobeLoaded = false;
 let polarMapLoaded = false;
 
 const popup = new maplibregl.Popup({ closeButton: false });
@@ -165,20 +163,28 @@ function applyRadarTheme(theme) {
 }
 
 /**
- * 🌟 LAZY-LOADED 3-WAY PROJECTION / VIEW SWITCHER
+ * 🌟 NATIVE PROJECTION / VIEW SWITCHER (MapLibre v5 2D Mercator & 3D Globe)
  */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
 
-    if (targetView === '2d') {
-        hideThreeGlobe();
+    if (targetView === '2d' || targetView === '3d') {
         hidePolarMap();
-        clearThreeGlobeTextures();
         clearPolarTextures();
+
+        const globeDiv = document.getElementById('globe-container');
+        if (globeDiv) globeDiv.style.display = 'none';
 
         const mapDiv = document.getElementById('map');
         if (mapDiv) mapDiv.style.display = 'block';
-        if (map) map.resize();
+
+        if (map) {
+            // 🌟 Switch natively between 2D Mercator and 3D Globe in MapLibre v5
+            if (typeof map.setProjection === 'function') {
+                map.setProjection({ type: targetView === '3d' ? 'globe' : 'mercator' });
+            }
+            map.resize();
+        }
 
         if (stateManager.activeFrameState && customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
@@ -188,27 +194,12 @@ export function applyView(targetView) {
                 updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
             }
         }
-    } else if (targetView === '3d') {
-        hidePolarMap();
-        clearPolarTextures();
-
-        if (!threeGlobeLoaded) {
-            try {
-                initThreeGlobe();
-                threeGlobeLoaded = true;
-            } catch (err) {
-                console.error("Three.js globe init error:", err);
-            }
-        }
-
-        showThreeGlobe('3d');
-
-        if (stateManager.activeFrameState) {
-            updateThreeGlobeFrame(stateManager.activeFrameState);
-        }
     } else if (targetView === 'polar') {
-        hideThreeGlobe();
-        clearThreeGlobeTextures();
+        const mapDiv = document.getElementById('map');
+        if (mapDiv) mapDiv.style.display = 'none';
+
+        const globeDiv = document.getElementById('globe-container');
+        if (globeDiv) globeDiv.style.display = 'none';
 
         if (!polarMapLoaded) {
             try {
@@ -231,7 +222,7 @@ export function applyView(targetView) {
 export function handleKeyboardZoom(direction, x, y) {
     const activeView = stateManager.activeView || '2d';
 
-    if (activeView === '2d' && map) {
+    if ((activeView === '2d' || activeView === '3d') && map) {
         const targetLngLat = map.unproject([x, y]);
         const deltaZoom = direction > 0 ? 0.65 : -0.65;
         map.easeTo({
@@ -250,7 +241,6 @@ export function handleKeyboardZoom(direction, x, y) {
  * 🌟 DYNAMIC THEME APPLIER
  */
 export async function applyTheme(theme) {
-    // 🌟 1. In Radar Mode: Instant color shift without reloading the style or restarting the radar loop!
     if (stateManager.activeMode === 'radar') {
         applyRadarTheme(theme);
         return;
@@ -289,9 +279,6 @@ export async function applyTheme(theme) {
 
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
         customShaderLayer.updatePalette(newPalette);
-    }
-    if (threeGlobeLoaded) {
-        try { updateThreeGlobePalette(newPalette); } catch (e) {}
     }
     if (polarMapLoaded) {
         try { updatePolarPalette(newPalette); } catch (e) {}
@@ -382,7 +369,7 @@ async function renderFrame(globalIdx) {
     
     const activeView = stateManager.activeView || '2d';
 
-    if (activeView === '2d') {
+    if (activeView === '2d' || activeView === '3d') {
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
         }
@@ -392,8 +379,6 @@ async function renderFrame(globalIdx) {
 
         try { initVectorContours(map); } catch (e) {}
         updateVectorContours(frameInfo.step);
-    } else if (activeView === '3d' && threeGlobeLoaded) {
-        updateThreeGlobeFrame(stateManager.activeFrameState);
     } else if (activeView === 'polar' && polarMapLoaded) {
         updatePolarFrame(stateManager.activeFrameState);
     }
@@ -469,7 +454,6 @@ export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
-    // 1. Destroy any active radar or forecast model state
     destroyRadarMode(map);
     hideStormVolume();
     purgeAllAppMemory(customShaderLayer);
@@ -480,25 +464,21 @@ export async function switchAppMode(targetMode) {
         map.removeLayer('radar-gpu-shader');
     }
 
-    // Toggle visibility of the floating 3D/Tilt toolbar
     const radarTools = document.getElementById('radar-tools-container');
     if (radarTools) {
         radarTools.style.display = (targetMode === 'radar') ? 'flex' : 'none';
     }
 
-    // Grab top dropdown navigation elements
     const modelBtn = document.getElementById('btn-model-menu');
     const paramBtn = document.getElementById('btn-param-menu');
     const modelBar = document.getElementById('model-category-bar');
     const paramBar = document.getElementById('param-category-bar');
 
-    // 🛑 Automatically close any open category bars and reset button active states
     if (modelBar) modelBar.style.display = 'none';
     if (paramBar) paramBar.style.display = 'none';
     if (modelBtn) modelBtn.classList.remove('active', 'open');
     if (paramBtn) paramBtn.classList.remove('active', 'open');
 
-    // 2. Launch selected mode
     if (targetMode === 'radar') {
         showToast("Loading Real-Time Radar...");
         if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
@@ -506,7 +486,6 @@ export async function switchAppMode(targetMode) {
         
         destroyCityOverlay();
 
-        // 🌟 Switch to radar basemap
         if (stateManager.currentMapStyle !== './config/style_radar.json') {
             stateManager.currentMapStyle = './config/style_radar.json';
             
@@ -514,7 +493,6 @@ export async function switchAppMode(targetMode) {
             const onReady = async () => {
                 if (loaded) return;
                 loaded = true;
-                // 🌟 Apply active theme IMMEDIATELY upon style load (never flashes dark)
                 applyRadarTheme(stateManager.currentTheme);
                 setBasemapLabelsVisibility(map, true);
                 await initRadarMode(map);
@@ -557,7 +535,7 @@ export async function switchAppMode(targetMode) {
             };
 
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000); // Fail-safe
+            setTimeout(onReady, 2000);
             map.setStyle(targetStyle);
         } else {
             try { initCityOverlay(map); } catch (e) {}
@@ -568,7 +546,6 @@ export async function switchAppMode(targetMode) {
     }
 }
 
-// 🌟 Initialize Splash Transition with Mode Handler
 initHubTransition((selectedMode) => {
     switchAppMode(selectedMode);
 });
@@ -594,7 +571,6 @@ map.on('load', async () => {
     try { initVectorContours(map); } catch (err) {}
 });
 
-// 🌟 Unified Bilinear Inspection on Click
 map.on('click', (e) => {
     if (stateManager.activeMode === 'radar') return;
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
