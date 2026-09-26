@@ -3,7 +3,7 @@ import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
-// 🌐 High-Definition 50m & 10m Vector Datasets (Upgraded from 110m for crisp detail)
+// 🌐 High-Definition 50m & 10m Vector Datasets
 const LAND_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_land.geojson';
 const LAKES_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_lakes.geojson';
 const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_0_boundary_lines_land.geojson';
@@ -25,7 +25,7 @@ let baseMapTexture = null;
 let rawLandFeatures = [];
 let rawLakesFeatures = [];
 
-// 🌟 Exact Color Matrix matching 2D Mercator (style_dark.json & map_style_light.json) and Polar Map
+// 🌟 Exact Color Matrix matching 2D Mercator (style_dark.json & map_style_light.json)
 const THEME_COLORS = {
     dark: {
         ocean: 0x021425,  // style_dark.json: rgba(2, 20, 37, 1)
@@ -55,6 +55,7 @@ style.textContent = `
         touch-action: none !important;
         user-select: none !important;
         -webkit-user-select: none !important;
+        background: #050a15;
     }
     #globe-container canvas {
         display: block;
@@ -88,7 +89,6 @@ const fsThreeGlobe = `
     varying vec2 v_uv;
     varying vec3 v_normal;
 
-    // 🌟 C^2 Continuous Cubic B-Spline Filter
     vec4 cubicBSpline(float f) {
         float f2 = f * f;
         float f3 = f2 * f;
@@ -100,7 +100,6 @@ const fsThreeGlobe = `
         );
     }
 
-    // 🌟 2D Cubic Spline Evaluation on 2880x1442 Grid
     float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
         vec2 pos = uv * texRes - 0.5;
         vec2 f = fract(pos);
@@ -132,7 +131,6 @@ const fsThreeGlobe = `
     }
 
     void main() {
-        // 🌟 100% Pure 1:1 Equirectangular UV Mapping
         vec2 wrapped_uv = vec2(v_uv.x, 1.0 - v_uv.y);
         vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
 
@@ -150,7 +148,6 @@ const fsThreeGlobe = `
             discard;
         }
 
-        // Subtle 3D atmospheric limb depth glow
         float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
         vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
 
@@ -190,9 +187,6 @@ function lngLatToVector3(lng, lat, radius = 2.003) {
     return new THREE.Vector3(x, y, z);
 }
 
-/**
- * 🌟 Render High-Def 4K (4096x2048) 2D Equirectangular Basemap Texture for the Underlay Sphere
- */
 function renderBaseMapTexture() {
     if (!baseMapCanvas || !baseMapCtx) {
         baseMapCanvas = document.createElement('canvas');
@@ -210,7 +204,6 @@ function renderBaseMapTexture() {
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
     const cfg = THEME_COLORS[themeKey];
 
-    // 1. Fill Ocean
     baseMapCtx.fillStyle = '#' + cfg.ocean.toString(16).padStart(6, '0');
     baseMapCtx.fillRect(0, 0, w, h);
 
@@ -249,10 +242,7 @@ function renderBaseMapTexture() {
         });
     }
 
-    // 2. Fill Continents / Land
     drawGeoJsonPolygons(rawLandFeatures, cfg.land);
-
-    // 3. Fill Lakes
     drawGeoJsonPolygons(rawLakesFeatures, cfg.lakes);
 
     if (baseMapTexture) {
@@ -269,11 +259,11 @@ async function load3DBasemapFills() {
 
         if (landResp && landResp.ok) {
             const data = await landResp.json();
-            if (data && data.features) rawLandFeatures = data.features;
+            if (data?.features) rawLandFeatures = data.features;
         }
         if (lakesResp && lakesResp.ok) {
             const data = await lakesResp.json();
-            if (data && data.features) rawLakesFeatures = data.features;
+            if (data?.features) rawLakesFeatures = data.features;
         }
 
         renderBaseMapTexture();
@@ -394,6 +384,44 @@ async function load3DCountyBorders(parentMesh) {
     }
 }
 
+/**
+ * 🌟 Dynamic Screen-Fitting Camera Framer
+ * Uses a telephoto lens (26°) so the Earth fills the entire screen without the fishbowl bulge
+ */
+function fitGlobeToScreen() {
+    if (!camera || !renderer) return;
+
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = aspect;
+    camera.fov = 26; // 🌟 Low-distortion telephoto lens
+
+    const halfFovRad = (camera.fov * 0.5) * (Math.PI / 180);
+
+    // Calculate distance so the sphere fills ~98% of the screen width (no black space on the sides!)
+    const targetSpan = 3.65;
+    let dist;
+
+    if (aspect >= 1.0) {
+        // Desktop / Landscape: Match screen width
+        dist = targetSpan / (2.0 * Math.tan(halfFovRad) * Math.min(aspect, 1.65));
+        // Angle down towards 35°N (North America center)
+        camera.position.set(0, dist * 0.32, dist);
+    } else {
+        // Mobile / Portrait: Match screen height
+        dist = targetSpan / (2.0 * Math.tan(halfFovRad) * aspect);
+        camera.position.set(0, dist * 0.25, dist);
+    }
+
+    if (controls) {
+        controls.target.set(0, 0.35, 0); // Focus on mid-latitudes
+        controls.minDistance = 2.15;      // Allow deep zoom into storm cells
+        controls.maxDistance = 14.0;
+        controls.update();
+    }
+
+    camera.updateProjectionMatrix();
+}
+
 function animate() {
     if (!isGlobeActive) {
         globeAnimationId = null;
@@ -402,7 +430,7 @@ function animate() {
     globeAnimationId = requestAnimationFrame(animate);
 
     if (controls && renderer && scene && globeGroup) {
-        const dist = camera.position.distanceTo(globeGroup.position);
+        const dist = camera.position.distanceTo(controls.target);
 
         const zoomRatio = Math.max(0, Math.min(1, (dist - controls.minDistance) / (controls.maxDistance - controls.minDistance)));
         controls.rotateSpeed = 0.12 + zoomRatio * 0.53;
@@ -410,7 +438,7 @@ function animate() {
         controls.update();
 
         if (countyMesh) {
-            countyMesh.visible = (dist < 4.5);
+            countyMesh.visible = (dist < 4.2);
         }
 
         renderer.render(scene, camera);
@@ -422,8 +450,9 @@ export function initThreeGlobe() {
     if (!container || scene) return;
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 6);
+    
+    // 🌟 Telephoto 26° lens eliminates spherical warping
+    camera = new THREE.PerspectiveCamera(26, window.innerWidth / window.innerHeight, 0.1, 1000);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -434,12 +463,9 @@ export function initThreeGlobe() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.04;
     controls.zoomSpeed = 0.7;
-    controls.minDistance = 2.8;
-    controls.maxDistance = 12;
-
     controls.enablePan = false;
-    controls.minPolarAngle = Math.PI * 0.08;
-    controls.maxPolarAngle = Math.PI * 0.92;
+    controls.minPolarAngle = Math.PI * 0.05;
+    controls.maxPolarAngle = Math.PI * 0.95;
 
     if (THREE.TOUCH) {
         controls.touches = {
@@ -449,6 +475,7 @@ export function initThreeGlobe() {
     }
 
     globeGroup = new THREE.Group();
+    // Rotate 90°W towards the camera (centers US & North America)
     globeGroup.rotation.y = -Math.PI / 2;
     scene.add(globeGroup);
 
@@ -485,11 +512,12 @@ export function initThreeGlobe() {
 
     load3DVectorBorders(globeGroup);
 
+    fitGlobeToScreen();
+
     window.addEventListener('resize', () => {
         if (!renderer || !camera) return;
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        fitGlobeToScreen();
     });
 
     if (isGlobeActive && !globeAnimationId) {
@@ -587,6 +615,8 @@ export function showThreeGlobe() {
     if (mapDiv) mapDiv.style.display = 'none';
 
     isGlobeActive = true;
+    fitGlobeToScreen();
+
     if (!globeAnimationId) {
         animate();
     }
