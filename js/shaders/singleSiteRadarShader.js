@@ -2,62 +2,31 @@
 import { createRadarPaletteTexture, WXTOOLS_PALETTE_256, getRadarPalette } from '../config/radarPalettes.js';
 
 // 🌟 Generates a subdivided quad grid so the ~460km radar sweep curves with the Earth's sphere
-function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
-    const vertices = [];
-    const dx = (maxX - minX) / cols;
-    const dy = 1.0 / rows;
+function createSubdividedRadarQuad(x0, x1, y0, y1, steps = 16) {
+    const verts = [];
+    const dx = (x1 - x0) / steps;
+    const dy = (y1 - y0) / steps;
 
-    // 1. North Polar Cap Fan (Closes the 85.05°N to 90°N hole)
-    // In MapLibre globe math, y = -0.45 converges to the exact North Pole (lat = +90°)
-    const northPoleY = -0.45;
-    for (let c = 0; c < cols; c++) {
-        const x0 = minX + c * dx;
-        const x1 = minX + (c + 1) * dx;
-        const xMid = (x0 + x1) * 0.5;
+    for (let r = 0; r < steps; r++) {
+        const py0 = y0 + r * dy;
+        const py1 = y0 + (r + 1) * dy;
+        for (let c = 0; c < steps; c++) {
+            const px0 = x0 + c * dx;
+            const px1 = x0 + (c + 1) * dx;
 
-        vertices.push(
-            x0, 0.0,
-            x1, 0.0,
-            xMid, northPoleY
-        );
-    }
-
-    // 2. Main Body Grid (85.05°N to 85.05°S)
-    for (let r = 0; r < rows; r++) {
-        const y0 = r * dy;
-        const y1 = (r + 1) * dy;
-        for (let c = 0; c < cols; c++) {
-            const x0 = minX + c * dx;
-            const x1 = minX + (c + 1) * dx;
-
-            vertices.push(
-                x0, y0,
-                x1, y0,
-                x0, y1,
-                x0, y1,
-                x1, y0,
-                x1, y1
+            verts.push(
+                px0, py0,
+                px1, py0,
+                px0, py1,
+                px0, py1,
+                px1, py0,
+                px1, py1
             );
         }
     }
-
-    // 3. South Polar Cap Fan (Closes the 85.05°S to -90°S hole)
-    // y = 1.45 converges to the exact South Pole (lat = -90°)
-    const southPoleY = 1.45;
-    for (let c = 0; c < cols; c++) {
-        const x0 = minX + c * dx;
-        const x1 = minX + (c + 1) * dx;
-        const xMid = (x0 + x1) * 0.5;
-
-        vertices.push(
-            x0, 1.0,
-            xMid, southPoleY,
-            x1, 1.0
-        );
-    }
-
-    return new Float32Array(vertices);
+    return new Float32Array(verts);
 }
+
 const fsSourceLogic = `
     const float PI = 3.14159265358979323846;
     const float TWO_PI = 6.28318530717958647692;
