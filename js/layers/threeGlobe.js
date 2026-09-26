@@ -3,12 +3,12 @@ import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
-// 🌐 High-Definition Vector Datasets
-const LAND_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_land.geojson';
-const LAKES_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_lakes.geojson';
-const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_boundary_lines_land.geojson';
+// 🌐 High-Definition 50m & 10m Vector Datasets (Upgraded from 110m for crisp detail)
+const LAND_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_land.geojson';
+const LAKES_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_lakes.geojson';
+const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_0_boundary_lines_land.geojson';
 const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
-const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson';
+const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_coastline.geojson';
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, controls, globeGroup, globeMesh, baseGlobeMesh, material, paletteTex;
@@ -25,21 +25,21 @@ let baseMapTexture = null;
 let rawLandFeatures = [];
 let rawLakesFeatures = [];
 
-// 🌟 Custom Color Matrix Matching 2D MapLibre & Polar Map 1:1
+// 🌟 Exact Color Matrix matching 2D Mercator (style_dark.json & map_style_light.json) and Polar Map
 const THEME_COLORS = {
     dark: {
-        ocean: 0x21242C,  // #21242C
-        land: 0x443E47,   // #443E47
-        lakes: 0x21242C,  // #21242C
+        ocean: 0x021425,  // style_dark.json: rgba(2, 20, 37, 1)
+        land: 0x3B333B,   // style_dark.json: rgba(59, 51, 59, 1)
+        lakes: 0x021425,
         borders: 0xffffff,
         counties: 0x64748b
     },
     light: {
-        ocean: 0xE7F1F4,  // #E7F1F4
-        land: 0xE2DBCF,   // #E2DBCF
-        lakes: 0xE7F1F4,  // #E7F1F4
-        borders: 0x2b2d31,
-        counties: 0x94a3b8
+        ocean: 0xE7F1F4,  // map_style_light.json: #E7F1F4
+        land: 0xFDE5CF,   // map_style_light.json: rgba(253, 229, 207, 1)
+        lakes: 0xE7F1F4,
+        borders: 0x000000,
+        counties: 0x475569
     }
 };
 
@@ -191,13 +191,13 @@ function lngLatToVector3(lng, lat, radius = 2.003) {
 }
 
 /**
- * 🌟 Render High-Def 2D Equirectangular Basemap Texture for the Underlay Sphere
+ * 🌟 Render High-Def 4K (4096x2048) 2D Equirectangular Basemap Texture for the Underlay Sphere
  */
 function renderBaseMapTexture() {
     if (!baseMapCanvas || !baseMapCtx) {
         baseMapCanvas = document.createElement('canvas');
-        baseMapCanvas.width = 2048;
-        baseMapCanvas.height = 1024;
+        baseMapCanvas.width = 4096;
+        baseMapCanvas.height = 2048;
         baseMapCtx = baseMapCanvas.getContext('2d');
         baseMapTexture = new THREE.CanvasTexture(baseMapCanvas);
         baseMapTexture.minFilter = THREE.LinearFilter;
@@ -410,7 +410,7 @@ function animate() {
         controls.update();
 
         if (countyMesh) {
-            countyMesh.visible = (dist < 4.2);
+            countyMesh.visible = (dist < 4.5);
         }
 
         renderer.render(scene, camera);
