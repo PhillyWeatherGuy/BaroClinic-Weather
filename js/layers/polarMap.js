@@ -1,5 +1,5 @@
 // js/layers/polarMap.js
-import { getPaletteForParameter as getLightPalette, TEMP_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE } from '../config/palettes.js';
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
@@ -12,24 +12,21 @@ const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vec
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, polarGroup, polarMesh, material, paletteTex;
+let oceanMesh = null, landMesh = null, lakesMesh = null;
+let polarChunkTextures = {};
 let isPolarActive = false;
 let polarAnimationId = null;
 
-// Dual High-DPI Vector Canvases (Underlay = Land/Water, Overlay = Coastlines/Borders/Collar)
-let underlayCanvas = null;
-let underlayCtx = null;
+// 2D High-DPI Overlay Canvas
 let overlayCanvas = null;
 let overlayCtx = null;
 
 // Cached Path2D Vector Objects
-let pathLand = null;
-let pathLakes = null;
 let pathCoastlines = null;
 let pathCountries = null;
 let pathStates = null;
 let pathCounties = null;
 let pathGraticule = null;
-let pathCollar = null;
 
 let rawLandFeatures = [];
 let rawLakesFeatures = [];
@@ -45,42 +42,33 @@ let mapTargetY = -0.45;
 let mapTargetX = 0.0;
 let mapZoom = 1.0;
 
-// Central meridians
+// Central meridians (North: -95°W aligns North America upright; South: 0° Prime Meridian upright)
 const NORTH_CENTRAL_LON = -95.0 * (Math.PI / 180.0);
 const SOUTH_CENTRAL_LON = 0.0 * (Math.PI / 180.0);
 
-// Outer polar radius boundary (~31.8° latitude into opposite hemisphere)
-const POLAR_OUTER_RADIUS = 1.76;
-
-// 🌟 Exact Toner Color Matrices matching 2D Mercator (style_dark.json & map_style_light.json)
+// 🌟 Exact Color Matrix matching 2D Mercator (style_dark.json & map_style_light.json)
 const THEME_COLORS = {
     dark: {
         bg: '#050a15',
-        ocean: '#021425',          // Exact 2D Toner Dark ocean: rgba(2, 20, 37, 1)
-        land: '#3B333B',           // Exact 2D Toner Dark land: rgba(59, 51, 59, 1)
-        lakes: '#021425',          // Same as ocean
+        ocean: 0x021425,          // style_dark.json: rgba(2, 20, 37, 1)
+        land: 0x3B333B,           // style_dark.json: rgba(59, 51, 59, 1)
+        lakes: 0x021425,
         coastline: '#ffffff',      // Crisp white coastline
-        countryBorders: '#f8fafc',
+        countryBorders: '#ffffff',
         stateBorders: 'rgba(255, 255, 255, 0.85)',
-        countyBorders: 'rgba(255, 255, 255, 0.35)',
-        graticule: 'rgba(56, 189, 248, 0.22)',
-        collarRim: 'rgba(56, 189, 248, 0.7)',
-        collarTicks: '#38bdf8',
-        labelColor: '#38bdf8'
+        countyBorders: 'rgba(255, 255, 255, 0.4)',
+        graticule: 'rgba(56, 189, 248, 0.25)'
     },
     light: {
-        bg: '#e2e8f0',
-        ocean: '#E7F1F4',          // Exact 2D Toner Light water: #E7F1F4
-        land: '#FDE5CF',           // Exact 2D Toner Light parchment: rgba(253, 229, 207, 1)
-        lakes: '#E7F1F4',          // Same as ocean
+        bg: '#f8fafc',
+        ocean: 0xE7F1F4,          // map_style_light.json: #E7F1F4
+        land: 0xFDE5CF,           // map_style_light.json: rgba(253, 229, 207, 1)
+        lakes: 0xE7F1F4,
         coastline: '#000000',      // Crisp black coastline
         countryBorders: '#000000',
         stateBorders: 'rgba(0, 0, 0, 0.85)',
-        countyBorders: 'rgba(0, 0, 0, 0.35)',
-        graticule: 'rgba(71, 85, 105, 0.22)',
-        collarRim: 'rgba(15, 23, 42, 0.7)',
-        collarTicks: '#0f172a',
-        labelColor: '#0f172a'
+        countyBorders: 'rgba(0, 0, 0, 0.4)',
+        graticule: 'rgba(0, 0, 0, 0.15)'
     }
 };
 
@@ -96,31 +84,18 @@ style.textContent = `
         touch-action: none !important;
         user-select: none !important;
         -webkit-user-select: none !important;
-        overflow: hidden;
+        background: #050a15;
     }
-    #polar-underlay-canvas,
-    #polar-overlay-canvas {
+    #polar-container canvas {
+        display: block;
         position: absolute;
         top: 0;
         left: 0;
         width: 100% !important;
         height: 100% !important;
-        display: block;
+    }
+    #polar-overlay-canvas {
         pointer-events: none;
-    }
-    #polar-underlay-canvas {
-        z-index: 1;
-    }
-    #polar-container canvas:not(#polar-underlay-canvas):not(#polar-overlay-canvas) {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100% !important;
-        height: 100% !important;
-        display: block;
-        z-index: 2;
-    }
-    #polar-overlay-canvas {
         z-index: 3;
     }
     .polar-top-controls {
@@ -308,8 +283,7 @@ const fsPolar = `
     void main() {
         float r = length(v_pos);
 
-        // Clip exactly at polar collar boundary
-        if (r > 1.76) {
+        if (r > 1.8) {
             discard;
         }
 
@@ -370,14 +344,20 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
 }
 
 /**
- * 🌟 Exact Forward Polar Stereographic Coordinate Projection
+ * 🌟 Forward Polar Stereographic Coordinate Projection with Latitude Clamping
  */
-function lngLatToPolarPlanar(lng, lat, isNorth = true) {
-    if (isNorth && lat < -35.0) return null;
-    if (!isNorth && lat > 35.0) return null;
+function lngLatToPolarPlanar(lng, lat, isNorth = true, clampLat = false) {
+    if (!clampLat) {
+        if (isNorth && lat < -35.0) return null;
+        if (!isNorth && lat > 35.0) return null;
+    }
+
+    const effectiveLat = clampLat
+        ? (isNorth ? Math.max(-35.0, lat) : Math.min(35.0, lat))
+        : lat;
 
     const lambda = lng * (Math.PI / 180.0);
-    const phi = lat * (Math.PI / 180.0);
+    const phi = effectiveLat * (Math.PI / 180.0);
 
     let c, r, deltaLambda, x, y;
 
@@ -395,57 +375,80 @@ function lngLatToPolarPlanar(lng, lat, isNorth = true) {
         y = r * Math.cos(deltaLambda);
     }
 
-    return { x, y };
+    return new THREE.Vector2(x, y);
 }
 
 /**
- * 🌟 High-Performance Polygon Path2D Builder for Flawless Land/Lake Fills
+ * 🌟 Robust Polygon Triangulator using THREE.Earcut (Prevents Missing / Broken Landmasses)
  */
-function buildPolygonPath2D(features, isNorth) {
-    const path = new Path2D();
+function triangulateGeoJsonFeatures(features, isNorth, zHeight) {
+    const vertices = [];
 
     features.forEach(feat => {
         const geom = feat.geometry;
         if (!geom) return;
 
-        let polygons = [];
-        if (geom.type === 'Polygon') polygons = [geom.coordinates];
-        else if (geom.type === 'MultiPolygon') polygons = geom.coordinates;
+        let polygonList = [];
+        if (geom.type === 'Polygon') {
+            polygonList = [geom.coordinates];
+        } else if (geom.type === 'MultiPolygon') {
+            polygonList = geom.coordinates;
+        }
 
-        polygons.forEach(polyCoords => {
-            polyCoords.forEach(ring => {
-                let isDrawing = false;
-                for (let i = 0; i < ring.length; i++) {
-                    const pt = lngLatToPolarPlanar(ring[i][0], ring[i][1], isNorth);
-                    if (!pt) {
-                        isDrawing = false;
-                        continue;
-                    }
+        polygonList.forEach(polyCoords => {
+            if (!polyCoords || polyCoords.length === 0) return;
 
-                    if (!isDrawing) {
-                        path.moveTo(pt.x, pt.y);
-                        isDrawing = true;
-                    } else {
-                        const prev = ring[i - 1];
-                        if (prev && Math.abs(ring[i][0] - prev[0]) > 180) {
-                            path.moveTo(pt.x, pt.y);
-                        } else {
-                            path.lineTo(pt.x, pt.y);
-                        }
-                    }
+            const flatCoords = [];
+            const holeIndices = [];
+            let coordCount = 0;
+
+            for (let ringIdx = 0; ringIdx < polyCoords.length; ringIdx++) {
+                const ring = polyCoords[ringIdx];
+                if (!ring || ring.length < 3) continue;
+
+                if (ringIdx > 0) {
+                    holeIndices.push(coordCount);
                 }
-                if (isDrawing) path.closePath();
-            });
+
+                for (let i = 0; i < ring.length; i++) {
+                    const pt = lngLatToPolarPlanar(ring[i][0], ring[i][1], isNorth, true);
+                    flatCoords.push(pt.x, pt.y);
+                    coordCount++;
+                }
+            }
+
+            if (coordCount < 3) return;
+
+            try {
+                let indices = [];
+                if (typeof THREE.Earcut !== 'undefined' && THREE.Earcut.triangulate) {
+                    indices = THREE.Earcut.triangulate(flatCoords, holeIndices, 2);
+                } else {
+                    // Fallback to ShapeUtils if Earcut is not available
+                    const outerRing = [];
+                    for (let i = 0; i < (holeIndices[0] || coordCount); i++) {
+                        outerRing.push(new THREE.Vector2(flatCoords[i * 2], flatCoords[i * 2 + 1]));
+                    }
+                    const faces = THREE.ShapeUtils.triangulateShape(outerRing, []);
+                    faces.forEach(f => indices.push(f[0], f[1], f[2]));
+                }
+
+                for (let i = 0; i < indices.length; i++) {
+                    const idx = indices[i];
+                    vertices.push(flatCoords[idx * 2], flatCoords[idx * 2 + 1], zHeight);
+                }
+            } catch (e) {}
         });
     });
 
-    return path;
+    const geometry = new THREE.BufferGeometry();
+    if (vertices.length > 0) {
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    }
+    return geometry;
 }
 
-/**
- * 🌟 Line Path2D Builder for Coastlines, Countries, States, and Counties
- */
-function buildLinePath2D(features, isNorth) {
+function buildPath2D(features, isNorth) {
     const path = new Path2D();
 
     features.forEach(feature => {
@@ -461,7 +464,7 @@ function buildLinePath2D(features, isNorth) {
         lineStrings.forEach(coords => {
             let isDrawing = false;
             for (let i = 0; i < coords.length; i++) {
-                const pt = lngLatToPolarPlanar(coords[i][0], coords[i][1], isNorth);
+                const pt = lngLatToPolarPlanar(coords[i][0], coords[i][1], isNorth, false);
                 if (!pt) {
                     isDrawing = false;
                     continue;
@@ -485,131 +488,77 @@ function buildLinePath2D(features, isNorth) {
     return path;
 }
 
-/**
- * 🌟 Meteorological Graticule Grid & Polar Collar
- */
-function buildGraticuleAndCollar(isNorth) {
-    const graticule = new Path2D();
-    const collar = new Path2D();
+function buildGraticulePath(isNorth) {
+    const path = new Path2D();
 
-    // Standard Synoptic Parallels: 80°, 60°, 40°, 20°, 0° (Equator)
-    const parallels = [80, 60, 40, 20, 0];
-    parallels.forEach(lat => {
-        const phi = (isNorth ? lat : -lat) * (Math.PI / 180.0);
+    const minLat = isNorth ? -20 : -80;
+    const maxLat = isNorth ? 80 : 20;
+
+    for (let lat = minLat; lat <= maxLat; lat += 10) {
+        const phi = lat * (Math.PI / 180.0);
         const c = isNorth ? (Math.PI * 0.5 - phi) : (Math.PI * 0.5 + phi);
         const r = Math.tan(c * 0.5);
-        if (r > 0 && r <= POLAR_OUTER_RADIUS) {
-            graticule.moveTo(r, 0);
-            graticule.arc(0, 0, r, 0, Math.PI * 2);
-        }
-    });
-
-    // Meridian spokes every 30°
-    for (let deg = 0; deg < 360; deg += 30) {
-        const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth);
-        const pEnd = lngLatToPolarPlanar(deg, isNorth ? -30 : 30, isNorth);
-        if (pStart && pEnd) {
-            graticule.moveTo(pStart.x, pStart.y);
-            graticule.lineTo(pEnd.x, pEnd.y);
+        if (r > 0 && r < 1.8) {
+            path.moveTo(r, 0);
+            path.arc(0, 0, r, 0, Math.PI * 2);
         }
     }
 
-    // Outer Boundary Circle
-    collar.moveTo(POLAR_OUTER_RADIUS, 0);
-    collar.arc(0, 0, POLAR_OUTER_RADIUS, 0, Math.PI * 2);
+    for (let deg = 0; deg < 360; deg += 30) {
+        const pStart = lngLatToPolarPlanar(deg, isNorth ? 85 : -85, isNorth, false);
+        const pEnd = lngLatToPolarPlanar(deg, isNorth ? -20 : 20, isNorth, false);
+        if (pStart && pEnd) {
+            path.moveTo(pStart.x, pStart.y);
+            path.lineTo(pEnd.x, pEnd.y);
+        }
+    }
 
-    return { graticule, collar };
+    return path;
+}
+
+function rebuildPolygonFills() {
+    const isNorth = (currentPole === 'north');
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    if (landMesh) {
+        polarGroup.remove(landMesh);
+        if (landMesh.geometry) landMesh.geometry.dispose();
+    }
+    const landGeom = triangulateGeoJsonFeatures(rawLandFeatures, isNorth, 0.0003);
+    const landMat = new THREE.MeshBasicMaterial({ color: cfg.land, side: THREE.DoubleSide });
+    landMesh = new THREE.Mesh(landGeom, landMat);
+    polarGroup.add(landMesh);
+
+    if (lakesMesh) {
+        polarGroup.remove(lakesMesh);
+        if (lakesMesh.geometry) lakesMesh.geometry.dispose();
+    }
+    const lakesGeom = triangulateGeoJsonFeatures(rawLakesFeatures, isNorth, 0.0006);
+    const lakesMat = new THREE.MeshBasicMaterial({ color: cfg.lakes, side: THREE.DoubleSide });
+    lakesMesh = new THREE.Mesh(lakesGeom, lakesMat);
+    polarGroup.add(lakesMesh);
 }
 
 function rebuildAllPaths() {
     const isNorth = (currentPole === 'north');
-
-    // 1. Vector Fills
-    pathLand = buildPolygonPath2D(rawLandFeatures, isNorth);
-    pathLakes = buildPolygonPath2D(rawLakesFeatures, isNorth);
-
-    // 2. Vector Strokes
-    pathCoastlines = buildLinePath2D(rawCoastlineFeatures, isNorth);
-    pathCountries = buildLinePath2D(rawCountryFeatures, isNorth);
-    pathStates = buildLinePath2D(rawStateFeatures, isNorth);
-    pathCounties = buildLinePath2D(rawCountyFeatures, isNorth);
-
-    // 3. Grid & Rim
-    const { graticule, collar } = buildGraticuleAndCollar(isNorth);
-    pathGraticule = graticule;
-    pathCollar = collar;
-
-    renderCanvases();
+    pathCoastlines = buildPath2D(rawCoastlineFeatures, isNorth);
+    pathCountries = buildPath2D(rawCountryFeatures, isNorth);
+    pathStates = buildPath2D(rawStateFeatures, isNorth);
+    pathCounties = buildPath2D(rawCountyFeatures, isNorth);
+    pathGraticule = buildGraticulePath(isNorth);
+    render2DOverlay();
 }
 
 /**
- * 🌟 RENDER RETINA UNDERLAY (Land, Ocean & Water)
+ * 🌟 RENDER HIGH-DPI 2D OVERLAY CANVAS (Razor-Sharp Vector Outlines)
  */
-function renderUnderlay() {
-    if (!underlayCanvas || !underlayCtx || !camera) return;
-
-    const w = underlayCanvas.width;
-    const h = underlayCanvas.height;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    underlayCtx.clearRect(0, 0, w, h);
-
-    const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
-    const scale = (h / visibleHeight);
-
-    const screenCenterX = (w / 2) - (camera.position.x * scale);
-    const screenCenterY = (h / 2) + (camera.position.y * scale);
-
-    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
-    const cfg = THEME_COLORS[themeKey];
-
-    underlayCtx.save();
-    underlayCtx.translate(screenCenterX, screenCenterY);
-    underlayCtx.rotate(-mapRotation);
-    underlayCtx.scale(scale, -scale);
-
-    // 1. Circular Ocean Disk
-    underlayCtx.beginPath();
-    underlayCtx.arc(0, 0, POLAR_OUTER_RADIUS, 0, Math.PI * 2);
-    underlayCtx.fillStyle = cfg.ocean;
-    underlayCtx.fill();
-
-    // Clip all land fills neatly to the polar disc
-    underlayCtx.clip();
-
-    // 2. High-DPI Anti-Aliased Landmasses
-    if (pathLand) {
-        underlayCtx.fillStyle = cfg.land;
-        underlayCtx.fill(pathLand, 'evenodd');
-    }
-
-    // 3. Inland Lakes & Seas
-    if (pathLakes) {
-        underlayCtx.fillStyle = cfg.lakes;
-        underlayCtx.fill(pathLakes, 'evenodd');
-    }
-
-    // 4. Subtle Under-Weather Graticule
-    if (pathGraticule) {
-        underlayCtx.lineWidth = (0.75 * dpr) / scale;
-        underlayCtx.strokeStyle = cfg.graticule;
-        underlayCtx.setLineDash([3 * dpr / scale, 5 * dpr / scale]);
-        underlayCtx.stroke(pathGraticule);
-        underlayCtx.setLineDash([]);
-    }
-
-    underlayCtx.restore();
-}
-
-/**
- * 🌟 RENDER RETINA OVERLAY (Borders, Coastlines, Collar & Ticks)
- */
-function renderOverlay() {
+function render2DOverlay() {
     if (!overlayCanvas || !overlayCtx || !camera) return;
 
     const w = overlayCanvas.width;
     const h = overlayCanvas.height;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = window.devicePixelRatio || 1;
 
     overlayCtx.clearRect(0, 0, w, h);
 
@@ -619,99 +568,55 @@ function renderOverlay() {
     const screenCenterX = (w / 2) - (camera.position.x * scale);
     const screenCenterY = (h / 2) + (camera.position.y * scale);
 
-    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
-    const cfg = THEME_COLORS[themeKey];
-
     overlayCtx.save();
     overlayCtx.translate(screenCenterX, screenCenterY);
     overlayCtx.rotate(-mapRotation);
     overlayCtx.scale(scale, -scale);
+    
+    // Smooth anti-aliased line rendering matching MapLibre
+    overlayCtx.lineCap = 'round';
+    overlayCtx.lineJoin = 'round';
 
-    // 1. County Borders (Fade in at higher zoom)
-    if (pathCounties && camera.zoom > 2.2) {
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    if (pathGraticule) {
         overlayCtx.lineWidth = (0.75 * dpr) / scale;
-        overlayCtx.strokeStyle = cfg.countyBorders;
-        overlayCtx.stroke(pathCounties);
+        overlayCtx.strokeStyle = cfg.graticule;
+        overlayCtx.setLineDash([3 * dpr / scale, 5 * dpr / scale]);
+        overlayCtx.stroke(pathGraticule);
+        overlayCtx.setLineDash([]);
     }
 
-    // 2. State & Province Borders
+    if (pathCounties && camera.zoom > 1.8) {
+        const countyAlpha = Math.min(1.0, (camera.zoom - 1.8) * 0.7);
+        overlayCtx.save();
+        overlayCtx.globalAlpha = countyAlpha;
+        overlayCtx.lineWidth = (0.8 * dpr) / scale;
+        overlayCtx.strokeStyle = cfg.countyBorders;
+        overlayCtx.stroke(pathCounties);
+        overlayCtx.restore();
+    }
+
     if (pathStates) {
-        overlayCtx.lineWidth = (1.2 * dpr) / scale;
+        overlayCtx.lineWidth = (1.4 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.stateBorders;
         overlayCtx.stroke(pathStates);
     }
 
-    // 3. International Country Boundaries
     if (pathCountries) {
         overlayCtx.lineWidth = (1.8 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.countryBorders;
         overlayCtx.stroke(pathCountries);
     }
 
-    // 4. Razor-Sharp Coastlines
     if (pathCoastlines) {
-        overlayCtx.lineWidth = (1.8 * dpr) / scale;
+        overlayCtx.lineWidth = (2.2 * dpr) / scale;
         overlayCtx.strokeStyle = cfg.coastline;
         overlayCtx.stroke(pathCoastlines);
     }
 
-    // 5. Styled Meteorological Collar Rim
-    if (pathCollar) {
-        overlayCtx.lineWidth = (2.4 * dpr) / scale;
-        overlayCtx.strokeStyle = cfg.collarRim;
-        overlayCtx.stroke(pathCollar);
-
-        // Degree Tick Marks along collar
-        const tickLength = 0.028;
-        overlayCtx.lineWidth = (1.5 * dpr) / scale;
-        overlayCtx.strokeStyle = cfg.collarTicks;
-        overlayCtx.beginPath();
-        for (let a = 0; a < 360; a += 10) {
-            const rad = a * (Math.PI / 180);
-            const isMajor = (a % 30 === 0);
-            const len = isMajor ? tickLength * 1.5 : tickLength;
-            const rIn = POLAR_OUTER_RADIUS - len;
-            overlayCtx.moveTo(rIn * Math.cos(rad), rIn * Math.sin(rad));
-            overlayCtx.lineTo(POLAR_OUTER_RADIUS * Math.cos(rad), POLAR_OUTER_RADIUS * Math.sin(rad));
-        }
-        overlayCtx.stroke();
-    }
-
-    // 6. Latitude Reference Badges (80°N, 60°N, 40°N, 20°N)
-    const isNorth = (currentPole === 'north');
-    const badgeLats = [80, 60, 40, 20];
-    overlayCtx.font = `bold ${Math.max(10, Math.round(11 * dpr))}px Rajdhani, sans-serif`;
-    overlayCtx.textAlign = 'center';
-    overlayCtx.textBaseline = 'middle';
-
-    badgeLats.forEach(lat => {
-        const phi = (isNorth ? lat : -lat) * (Math.PI / 180.0);
-        const c = isNorth ? (Math.PI * 0.5 - phi) : (Math.PI * 0.5 + phi);
-        const r = Math.tan(c * 0.5);
-
-        if (r > 0 && r < POLAR_OUTER_RADIUS) {
-            overlayCtx.save();
-            overlayCtx.translate(0, r);
-            overlayCtx.scale(1 / scale, -1 / scale); // Keep text upright
-
-            const text = `${lat}°${isNorth ? 'N' : 'S'}`;
-            overlayCtx.fillStyle = (themeKey === 'dark') ? '#0b0f19' : '#ffffff';
-            overlayCtx.strokeStyle = cfg.collarRim;
-            overlayCtx.lineWidth = 2 * dpr;
-
-            overlayCtx.strokeText(text, 0, 0);
-            overlayCtx.fillStyle = cfg.labelColor;
-            overlayCtx.fillText(text, 0, 0);
-            overlayCtx.restore();
-        }
-    });
-
     overlayCtx.restore();
-}
-
-function renderCanvases() {
-    renderUnderlay();
-    renderOverlay();
 }
 
 async function loadAllBasemapGeoJson() {
@@ -727,32 +632,33 @@ async function loadAllBasemapGeoJson() {
 
         if (landResp && landResp.ok) {
             const data = await landResp.json();
-            if (data?.features) rawLandFeatures = data.features;
+            if (data && data.features) rawLandFeatures = data.features;
         }
         if (lakesResp && lakesResp.ok) {
             const data = await lakesResp.json();
-            if (data?.features) rawLakesFeatures = data.features;
+            if (data && data.features) rawLakesFeatures = data.features;
         }
         if (coastResp && coastResp.ok) {
             const data = await coastResp.json();
-            if (data?.features) rawCoastlineFeatures = data.features;
+            if (data && data.features) rawCoastlineFeatures = data.features;
         }
         if (countryResp && countryResp.ok) {
             const data = await countryResp.json();
-            if (data?.features) rawCountryFeatures = data.features;
+            if (data && data.features) rawCountryFeatures = data.features;
         }
         if (stateResp && stateResp.ok) {
             const data = await stateResp.json();
-            if (data?.features) rawStateFeatures = data.features;
+            if (data && data.features) rawStateFeatures = data.features;
         }
         if (countyResp && countyResp.ok) {
             const data = await countyResp.json();
-            if (data?.features) rawCountyFeatures = data.features;
+            if (data && data.features) rawCountyFeatures = data.features;
         }
 
+        rebuildPolygonFills();
         rebuildAllPaths();
     } catch (err) {
-        console.warn("Polar GeoJSON load error:", err);
+        console.warn("Basemap GeoJSON load error:", err);
     }
 }
 
@@ -850,7 +756,7 @@ export function setRotationDegrees(deg) {
         polarGroup.rotation.z = mapRotation;
     }
     updateCompassUI();
-    renderCanvases();
+    render2DOverlay();
 }
 
 export function resetRotation() {
@@ -867,6 +773,7 @@ export function setHemisphere(pole) {
         material.needsUpdate = true;
     }
 
+    rebuildPolygonFills();
     rebuildAllPaths();
     fitSynopticSector();
 }
@@ -897,7 +804,7 @@ export function fitSynopticSector() {
     camera.rotation.z = 0;
     camera.updateProjectionMatrix();
     updateCompassUI();
-    renderCanvases();
+    render2DOverlay();
 }
 
 export function zoomPolarAtPoint(direction, clientX, clientY) {
@@ -925,7 +832,7 @@ export function zoomPolarAtPoint(direction, clientX, clientY) {
     mapTargetY = Math.max(-1.5, Math.min(1.5, mapTargetY));
     camera.position.y = mapTargetY;
 
-    renderCanvases();
+    render2DOverlay();
 }
 
 function init2DMapControls(canvas) {
@@ -968,7 +875,7 @@ function init2DMapControls(canvas) {
                 polarGroup.rotation.z = mapRotation;
             }
             updateCompassUI();
-            renderCanvases();
+            render2DOverlay();
         } else if (dragMode === 'pan') {
             const h = window.innerHeight;
             const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
@@ -977,7 +884,7 @@ function init2DMapControls(canvas) {
             mapTargetY += dy * unitsPerPixel * 0.9;
             mapTargetY = Math.max(-1.5, Math.min(1.5, mapTargetY));
             camera.position.y = mapTargetY;
-            renderCanvases();
+            render2DOverlay();
         }
     });
 
@@ -999,7 +906,7 @@ function init2DMapControls(canvas) {
         const newZoom = Math.max(0.4, Math.min(6.0, camera.zoom * clampedFactor));
         camera.zoom = newZoom;
         camera.updateProjectionMatrix();
-        renderCanvases();
+        render2DOverlay();
     }, { passive: false });
 
     canvas.addEventListener('touchstart', (e) => {
@@ -1046,7 +953,7 @@ function init2DMapControls(canvas) {
                     polarGroup.rotation.z = mapRotation;
                 }
                 updateCompassUI();
-                renderCanvases();
+                render2DOverlay();
             } else if (dragMode === 'pan') {
                 const h = window.innerHeight;
                 const visibleHeight = (camera.top - camera.bottom) / camera.zoom;
@@ -1055,7 +962,7 @@ function init2DMapControls(canvas) {
                 mapTargetY += dy * unitsPerPixel * 0.9;
                 mapTargetY = Math.max(-1.5, Math.min(1.5, mapTargetY));
                 camera.position.y = mapTargetY;
-                renderCanvases();
+                render2DOverlay();
             }
         } else if (e.touches.length === 2 && initialTouchDist > 0) {
             const t1 = e.touches[0];
@@ -1064,7 +971,7 @@ function init2DMapControls(canvas) {
             const pinchRatio = currentDist / initialTouchDist;
             camera.zoom = Math.max(0.4, Math.min(6.0, mapZoom * pinchRatio));
             camera.updateProjectionMatrix();
-            renderCanvases();
+            render2DOverlay();
         }
     }, { passive: false });
 
@@ -1109,28 +1016,17 @@ export function initPolarMap() {
 
     if (scene) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    // 1. Retina Underlay Canvas (Ocean, Land, Lakes, Graticule)
-    underlayCanvas = document.createElement('canvas');
-    underlayCanvas.id = 'polar-underlay-canvas';
-    underlayCanvas.width = window.innerWidth * dpr;
-    underlayCanvas.height = window.innerHeight * dpr;
-    container.appendChild(underlayCanvas);
-    underlayCtx = underlayCanvas.getContext('2d');
-
-    // 2. Three.js WebGL Weather Canvas
     scene = new THREE.Scene();
     camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(dpr);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    // 3. Retina Overlay Canvas (Coastlines, Country/State/County Borders, Polar Collar, Badges)
     overlayCanvas = document.createElement('canvas');
     overlayCanvas.id = 'polar-overlay-canvas';
+    const dpr = window.devicePixelRatio || 1;
     overlayCanvas.width = window.innerWidth * dpr;
     overlayCanvas.height = window.innerHeight * dpr;
     container.appendChild(overlayCanvas);
@@ -1145,7 +1041,13 @@ export function initPolarMap() {
     polarGroup = new THREE.Group();
     scene.add(polarGroup);
 
-    // Weather Shader Layer
+    // Layer 0: Styled Ocean Base Quad (z = 0.0)
+    const oceanGeom = new THREE.PlaneGeometry(6.0, 6.0);
+    const oceanMat = new THREE.MeshBasicMaterial({ color: cfg.ocean });
+    oceanMesh = new THREE.Mesh(oceanGeom, oceanMat);
+    polarGroup.add(oceanMesh);
+
+    // Layer 3: Weather Shader Layer (z = 0.0010)
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
@@ -1169,16 +1071,16 @@ export function initPolarMap() {
 
     const weatherGeom = new THREE.PlaneGeometry(6.0, 6.0);
     polarMesh = new THREE.Mesh(weatherGeom, material);
+    polarMesh.position.z = 0.001;
     polarGroup.add(polarMesh);
 
     loadAllBasemapGeoJson();
+
     fitSynopticSector();
 
     window.addEventListener('resize', () => {
-        if (!renderer || !camera || !overlayCanvas || !underlayCanvas) return;
-        const newDpr = Math.min(window.devicePixelRatio || 1, 2);
-        underlayCanvas.width = window.innerWidth * newDpr;
-        underlayCanvas.height = window.innerHeight * newDpr;
+        if (!renderer || !camera || !overlayCanvas) return;
+        const newDpr = window.devicePixelRatio || 1;
         overlayCanvas.width = window.innerWidth * newDpr;
         overlayCanvas.height = window.innerHeight * newDpr;
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1213,7 +1115,11 @@ export function updatePolarPalette(paramIdOrHexArray) {
     const container = document.getElementById('polar-container');
     if (container) container.style.background = cfg.bg;
 
-    renderCanvases();
+    if (oceanMesh && oceanMesh.material) oceanMesh.material.color.setHex(cfg.ocean);
+    if (landMesh && landMesh.material) landMesh.material.color.setHex(cfg.land);
+    if (lakesMesh && lakesMesh.material) lakesMesh.material.color.setHex(cfg.lakes);
+
+    render2DOverlay();
 }
 
 export function updatePolarFrame(frameState) {
