@@ -4,17 +4,14 @@ import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes
 import { stateManager } from '../core/stateManager.js';
 
 /**
- * 🌟 Generates an interleaved vertex buffer [x, y, u, v] with an undistorted North & South polar cap.
- * Coordinates:
- * - x, y: MapLibre tile/Mercator coordinates
- * - u, v: True linear Equirectangular forecast texture coordinates (eliminates polar warping)
+ * 🌟 Generates an interleaved vertex buffer [x, y, u, v]
+ * Continuous x values prevent any antimeridian wrapping streak in 2D and 3D!
  */
 function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
     const vertices = [];
     const dx = (maxX - minX) / cols;
     const dy = 1.0 / rows;
 
-    // Helper to calculate exact linear Equirectangular V (0.0 at 90°N to 1.0 at 90°S)
     function mercatorYToV(y) {
         const mercY = (0.5 - y) * 6.28318530718;
         const latRad = 2.0 * Math.atan(Math.exp(mercY)) - 1.57079632679;
@@ -25,21 +22,16 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
     const vBottomEdge = mercatorYToV(1.0); // ~0.9725 (85.05°S)
 
     // 1. North Polar Cap (85.05°N to exact 90°N pole)
-    // Apex y = -10.0 acts as a flag for the vertex shader to place it at vec3(0, 1, 0)
+    // Continuous x coordinates (NO modulo) prevent any streak
     for (let c = 0; c < cols; c++) {
         const x0 = minX + c * dx;
         const x1 = minX + (c + 1) * dx;
         const xMid = (x0 + x1) * 0.5;
 
-        const u0 = ((x0 % 1.0) + 1.0) % 1.0;
-        const u1 = ((x1 % 1.0) + 1.0) % 1.0;
-        const uMid = ((xMid % 1.0) + 1.0) % 1.0;
-
-        // Triangle: (x0, 0) -> (x1, 0) -> (xMid, pole apex)
         vertices.push(
-            x0, 0.0, u0, vTopEdge,
-            x1, 0.0, u1, vTopEdge,
-            xMid, -10.0, uMid, 0.0 // v = 0.0 is exact North Pole!
+            x0, 0.0, x0, vTopEdge,
+            x1, 0.0, x1, vTopEdge,
+            xMid, -10.0, xMid, 0.0 // v = 0.0 is exact North Pole
         );
     }
 
@@ -53,42 +45,34 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
         for (let c = 0; c < cols; c++) {
             const x0 = minX + c * dx;
             const x1 = minX + (c + 1) * dx;
-            const u0 = ((x0 % 1.0) + 1.0) % 1.0;
-            const u1 = ((x1 % 1.0) + 1.0) % 1.0;
 
             vertices.push(
-                x0, y0, u0, v0,
-                x1, y0, u1, v0,
-                x0, y1, u0, v1,
-                x0, y1, u0, v1,
-                x1, y0, u1, v0,
-                x1, y1, u1, v1
+                x0, y0, x0, v0,
+                x1, y0, x1, v0,
+                x0, y1, x0, v1,
+                x0, y1, x0, v1,
+                x1, y0, x1, v0,
+                x1, y1, x1, v1
             );
         }
     }
 
     // 3. South Polar Cap (-85.05°S to exact -90°S pole)
-    // Apex y = 10.0 places vertex at vec3(0, -1, 0)
     for (let c = 0; c < cols; c++) {
         const x0 = minX + c * dx;
         const x1 = minX + (c + 1) * dx;
         const xMid = (x0 + x1) * 0.5;
 
-        const u0 = ((x0 % 1.0) + 1.0) % 1.0;
-        const u1 = ((x1 % 1.0) + 1.0) % 1.0;
-        const uMid = ((xMid % 1.0) + 1.0) % 1.0;
-
         vertices.push(
-            x0, 1.0, u0, vBottomEdge,
-            xMid, 10.0, uMid, 1.0, // v = 1.0 is exact South Pole!
-            x1, 1.0, u1, vBottomEdge
+            x0, 1.0, x0, vBottomEdge,
+            xMid, 10.0, xMid, 1.0, // v = 1.0 is exact South Pole
+            x1, 1.0, x1, vBottomEdge
         );
     }
 
     return new Float32Array(vertices);
 }
 
-// 🌟 Shared Spline Filter Logic
 const fragmentShaderBody = `
     vec4 cubicBSpline(float f) {
         float f2 = f * f;
@@ -203,7 +187,7 @@ export function createScalarShaderLayer(mapInstance) {
             this.gl = gl;
 
             const gridData = createSubdividedGrid(-1.0, 2.0, 96, 48);
-            this.vertexCount = gridData.length / 4; // 4 floats per vertex: [x, y, u, v]
+            this.vertexCount = gridData.length / 4;
 
             this.vertexBuffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -235,10 +219,8 @@ export function createScalarShaderLayer(mapInstance) {
                 void main() {
                     v_uv = a_uv;
 
-                    // 🌟 MapLibre Globe Seamless Polar Placement
                     ${isGlobe ? `
                     if (a_pos.y < -5.0) {
-                        // Exact North Pole in 3D unit sphere space
                         vec3 pos = vec3(0.0, 1.0, 0.0);
                         if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
                             gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
@@ -246,7 +228,6 @@ export function createScalarShaderLayer(mapInstance) {
                             gl_Position = u_projection_matrix * vec4(pos, 1.0);
                         }
                     } else if (a_pos.y > 5.0) {
-                        // Exact South Pole in 3D unit sphere space
                         vec3 pos = vec3(0.0, -1.0, 0.0);
                         if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
                             gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
@@ -258,7 +239,6 @@ export function createScalarShaderLayer(mapInstance) {
                     }
                     ` : `
                     if (a_pos.y < -5.0 || a_pos.y > 5.0) {
-                        // Clip polar apex in 2D Mercator
                         gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
                     } else {
                         gl_Position = projectTile(a_pos);
@@ -267,7 +247,7 @@ export function createScalarShaderLayer(mapInstance) {
                 }
                 `;
 
-                // 🌟 Completely linear UV sampling — zero non-linear warping!
+                // 🌟 fract(v_uv.x) wraps cleanly per-pixel: ZERO STREAK!
                 fsSource = `#version 300 es
                 precision highp float;
 
@@ -446,7 +426,6 @@ export function createScalarShaderLayer(mapInstance) {
             gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
 
-            // 🌟 Bind interleaved vertex array: [x, y, u, v] (16 bytes per vertex)
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             
             const aPos = gl.getAttribLocation(program, 'a_pos');
