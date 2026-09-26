@@ -3,67 +3,76 @@ import { getPaletteForParameter as getLightPalette } from '../config/palettes.js
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
-// 🌟 Generates a smooth, subdivided vertex grid that bends around the 3D globe and lies flat in 2D
+/**
+ * 🌟 Generates an interleaved vertex buffer [x, y, u, v]
+ * Continuous x values prevent any antimeridian wrapping streak in 2D and 3D!
+ */
 function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
     const vertices = [];
     const dx = (maxX - minX) / cols;
     const dy = 1.0 / rows;
 
-    // 1. North Polar Cap Fan (Closes the 85.05°N to 90°N hole)
-    // In MapLibre globe math, y = -0.45 converges to the exact North Pole (lat = +90°)
-    const northPoleY = -0.45;
+    function mercatorYToV(y) {
+        const mercY = (0.5 - y) * 6.28318530718;
+        const latRad = 2.0 * Math.atan(Math.exp(mercY)) - 1.57079632679;
+        return 0.5 - (latRad / 3.14159265359);
+    }
+
+    const vTopEdge = mercatorYToV(0.0);    // ~0.0275 (85.05°N)
+    const vBottomEdge = mercatorYToV(1.0); // ~0.9725 (85.05°S)
+
+    // 1. North Polar Cap (85.05°N to exact 90°N pole)
     for (let c = 0; c < cols; c++) {
         const x0 = minX + c * dx;
         const x1 = minX + (c + 1) * dx;
         const xMid = (x0 + x1) * 0.5;
 
         vertices.push(
-            x0, 0.0,
-            x1, 0.0,
-            xMid, northPoleY
+            x0, 0.0, x0, vTopEdge,
+            x1, 0.0, x1, vTopEdge,
+            xMid, -10.0, xMid, 0.0 // v = 0.0 is exact North Pole
         );
     }
 
-    // 2. Main Body Grid (85.05°N to 85.05°S)
+    // 2. Main Grid Body (85.05°N to 85.05°S)
     for (let r = 0; r < rows; r++) {
         const y0 = r * dy;
         const y1 = (r + 1) * dy;
+        const v0 = mercatorYToV(y0);
+        const v1 = mercatorYToV(y1);
+
         for (let c = 0; c < cols; c++) {
             const x0 = minX + c * dx;
             const x1 = minX + (c + 1) * dx;
 
             vertices.push(
-                x0, y0,
-                x1, y0,
-                x0, y1,
-                x0, y1,
-                x1, y0,
-                x1, y1
+                x0, y0, x0, v0,
+                x1, y0, x1, v0,
+                x0, y1, x0, v1,
+                x0, y1, x0, v1,
+                x1, y0, x1, v0,
+                x1, y1, x1, v1
             );
         }
     }
 
-    // 3. South Polar Cap Fan (Closes the 85.05°S to -90°S hole)
-    // y = 1.45 converges to the exact South Pole (lat = -90°)
-    const southPoleY = 1.45;
+    // 3. South Polar Cap (-85.05°S to exact -90°S pole)
     for (let c = 0; c < cols; c++) {
         const x0 = minX + c * dx;
         const x1 = minX + (c + 1) * dx;
         const xMid = (x0 + x1) * 0.5;
 
         vertices.push(
-            x0, 1.0,
-            xMid, southPoleY,
-            x1, 1.0
+            x0, 1.0, x0, vBottomEdge,
+            xMid, 10.0, xMid, 1.0, // v = 1.0 is exact South Pole
+            x1, 1.0, x1, vBottomEdge
         );
     }
 
     return new Float32Array(vertices);
 }
 
-// 🌟 GLSL shared fragment logic for C^2 continuous spline interpolation
 const fragmentShaderBody = `
-    // 🌟 C^2 Continuous Cubic B-Spline Filter
     vec4 cubicBSpline(float f) {
         float f2 = f * f;
         float f3 = f2 * f;
@@ -176,9 +185,8 @@ export function createPrecipShaderLayer(mapInstance) {
         onAdd: function (map, gl) {
             this.gl = gl;
 
-            // 🌟 Subdivided grid across [-1, 2] (3 world copies)
             const gridData = createSubdividedGrid(-1.0, 2.0, 96, 48);
-            this.vertexCount = gridData.length / 2;
+            this.vertexCount = gridData.length / 4;
 
             this.vertexBuffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -189,33 +197,59 @@ export function createPrecipShaderLayer(mapInstance) {
             this.paletteTex = createPrecipPaletteTexture(gl, initialPalette);
         },
 
-        // 🌟 Compiles and caches shaders per projection variant ('mercator', 'globe', or legacy fallback)
         getProgram: function(gl, shaderData) {
             const variant = shaderData?.variantName || 'default';
             if (this.programs[variant]) {
                 return this.programs[variant];
             }
 
+            const isGlobe = (variant === 'globe');
             let vsSource, fsSource;
 
             if (shaderData && shaderData.vertexShaderPrelude) {
-                // MapLibre v5 dynamic projection shader (handles 2D Mercator, 3D Globe, and transition)
                 vsSource = `#version 300 es
                 ${shaderData.vertexShaderPrelude}
                 ${shaderData.define || ''}
+
                 in vec2 a_pos;
-                out vec2 v_texcoord;
+                in vec2 a_uv;
+                out vec2 v_uv;
 
                 void main() {
-                    v_texcoord = a_pos;
-                    gl_Position = projectTile(a_pos);
+                    v_uv = a_uv;
+
+                    ${isGlobe ? `
+                    if (a_pos.y < -5.0) {
+                        vec3 pos = vec3(0.0, 1.0, 0.0);
+                        if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
+                            gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
+                        } else {
+                            gl_Position = u_projection_matrix * vec4(pos, 1.0);
+                        }
+                    } else if (a_pos.y > 5.0) {
+                        vec3 pos = vec3(0.0, -1.0, 0.0);
+                        if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
+                            gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
+                        } else {
+                            gl_Position = u_projection_matrix * vec4(pos, 1.0);
+                        }
+                    } else {
+                        gl_Position = projectTile(a_pos);
+                    }
+                    ` : `
+                    if (a_pos.y < -5.0 || a_pos.y > 5.0) {
+                        gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
+                    } else {
+                        gl_Position = projectTile(a_pos);
+                    }
+                    `}
                 }
                 `;
 
                 fsSource = `#version 300 es
                 precision highp float;
 
-                in vec2 v_texcoord;
+                in vec2 v_uv;
                 out vec4 fragColor;
 
                 uniform sampler2D u_dataTexture;
@@ -226,11 +260,7 @@ export function createPrecipShaderLayer(mapInstance) {
                 ${fragmentShaderBody}
 
                 void main() {
-                    float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
-                    float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
-                    float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
-
-                    vec2 uv = vec2(fract(v_texcoord.x), normY);
+                    vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
                     float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
 
                     if (rawVal < 0.00001) {
@@ -249,21 +279,25 @@ export function createPrecipShaderLayer(mapInstance) {
                 }
                 `;
             } else {
-                // Fallback standard shader
                 vsSource = `
                 attribute vec2 a_pos;
-                varying vec2 v_texcoord;
+                attribute vec2 a_uv;
+                varying vec2 v_uv;
                 uniform mat4 u_matrix;
 
                 void main() {
-                    v_texcoord = a_pos;
-                    gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
+                    v_uv = a_uv;
+                    if (a_pos.y < -5.0 || a_pos.y > 5.0) {
+                        gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
+                    } else {
+                        gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
+                    }
                 }
                 `;
 
                 fsSource = `
                 precision highp float;
-                varying vec2 v_texcoord;
+                varying vec2 v_uv;
                 uniform sampler2D u_dataTexture;
                 uniform sampler2D u_paletteTexture;
                 uniform float u_opacity;
@@ -272,11 +306,7 @@ export function createPrecipShaderLayer(mapInstance) {
                 ${fragmentShaderBody.replace(/texture\(/g, 'texture2D(')}
 
                 void main() {
-                    float mercY = (0.5 - v_texcoord.y) * 6.28318530718;
-                    float latRad = 2.0 * atan(exp(mercY)) - 1.57079632679;
-                    float normY = clamp(0.5 - (latRad / 3.14159265359), 0.0, 1.0);
-
-                    vec2 uv = vec2(fract(v_texcoord.x), normY);
+                    vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
                     float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
 
                     if (rawVal < 0.00001) {
@@ -365,7 +395,6 @@ export function createPrecipShaderLayer(mapInstance) {
         render: function (gl, matrixOrArgs) {
             if (!this.activeTex) return;
 
-            // Handle both MapLibre v5 CustomRenderMethodInput and v4 matrix arguments
             const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
             const shaderData = isV5 ? matrixOrArgs.shaderData : null;
             const projData = isV5 ? matrixOrArgs.defaultProjectionData : null;
@@ -386,7 +415,6 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
 
-            // 🌟 Feed MapLibre v5 projection uniforms (handles globe curvature, transition, and clipping)
             if (projData) {
                 const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
                 if (locMain) gl.uniformMatrix4fv(locMain, false, projData.mainMatrix);
@@ -410,10 +438,18 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
 
+            // Bind interleaved vertex buffer [x, y, u, v]
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+            
             const aPos = gl.getAttribLocation(program, 'a_pos');
             gl.enableVertexAttribArray(aPos);
-            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+
+            const aUv = gl.getAttribLocation(program, 'a_uv');
+            if (aUv !== -1) {
+                gl.enableVertexAttribArray(aUv);
+                gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+            }
 
             gl.disable(gl.DEPTH_TEST);
             gl.enable(gl.BLEND);
