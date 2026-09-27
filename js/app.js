@@ -53,7 +53,7 @@ const map = new maplibregl.Map({
 
 /**
  * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
- * Guaranteed to stay 100% locked to the perimeter across all zoom levels, rotations, and screen sizes!
+ * Guaranteed to stay 100% locked to the perimeter across all  levels, rotations, and screen sizes!
  */
 function getGlobeScreenCircle(matrix, w, h) {
     if (!matrix) return null;
@@ -95,10 +95,10 @@ function getGlobeScreenCircle(matrix, w, h) {
 function updateAtmosphereHalo(matrix) {
     if (stateManager.activeView !== '3d' || !haloCanvas || !haloCtx || !matrix) return;
 
-    const zoom = map.getZoom();
+    const  = map.get();
 
-    // 🌟 FADES OUT COMPLETELY AS YOU ZOOM INTO CONTINENTS (Never slices across North America!)
-    if (zoom >= 2.25) {
+    // 🌟 FADES OUT COMPLETELY AS YOU  INTO CONTINENTS (Never slices across North America!)
+    if ( >= 3.0) {
         haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
         return;
     }
