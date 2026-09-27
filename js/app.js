@@ -37,10 +37,6 @@ let customShaderLayer = null;
 let renderDebounceId = null;
 let polarMapLoaded = false;
 
-// 🌟 Dedicated Atmospheric Halo Canvas for 3D Globe
-let haloCanvas = null;
-let haloCtx = null;
-
 const popup = new maplibregl.Popup({ closeButton: false });
 
 const map = new maplibregl.Map({
@@ -52,86 +48,24 @@ const map = new maplibregl.Map({
 });
 
 /**
- * 🌟 3D GLOBE LUMINOUS ATMOSPHERIC HALO RENDERER (Matches Reference Image)
+ * 🌟 NATIVE MAPLIBRE ATMOSPHERE CONTROLLER
  */
-function initGlobeAtmosphereHalo() {
-    if (haloCanvas) return;
-    haloCanvas = document.createElement('canvas');
-    haloCanvas.id = 'globe-atmosphere-halo';
-    haloCanvas.style.position = 'absolute';
-    haloCanvas.style.top = '0';
-    haloCanvas.style.left = '0';
-    haloCanvas.style.width = '100%';
-    haloCanvas.style.height = '100%';
-    haloCanvas.style.pointerEvents = 'none';
-    haloCanvas.style.zIndex = '1';
-    haloCanvas.style.display = 'none';
-
-    const mapContainer = map.getContainer();
-    if (mapContainer) {
-        mapContainer.appendChild(haloCanvas);
-    }
-    haloCtx = haloCanvas.getContext('2d');
-
-    const updateHalo = () => {
-        if (stateManager.activeView !== '3d' || !haloCanvas || !haloCtx) return;
-
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-        if (haloCanvas.width !== w * dpr || haloCanvas.height !== h * dpr) {
-            haloCanvas.width = w * dpr;
-            haloCanvas.height = h * dpr;
-        }
-
-        haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
-
-        const zoom = map.getZoom();
-        // Fade out atmospheric halo as camera zooms in towards surface level
-        if (zoom > 4.5) return;
-        const opacity = zoom <= 3.0 ? 1.0 : Math.max(0, 1.0 - (zoom - 3.0) / 1.5);
-
-        // Exact screen center and pixel radius of MapLibre globe
-        const center = map.project(map.getCenter());
-        const cx = center.x * dpr;
-        const cy = center.y * dpr;
-        const radius = ((512 * Math.pow(2, zoom)) / (2 * Math.PI)) * dpr;
-
-        if (radius <= 10) return;
-
-        haloCtx.save();
-        haloCtx.globalAlpha = opacity;
-
-        // 🌟 Luminous multi-tier atmospheric glow (inner rim + outer space radiation)
-        const outerRadius = radius * 1.14;
-        const grad = haloCtx.createRadialGradient(cx, cy, radius * 0.94, cx, cy, outerRadius);
-        grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
-        grad.addColorStop(0.40, 'rgba(56, 189, 248, 0.25)'); // Subtle inner limb
-        grad.addColorStop(0.50, 'rgba(186, 230, 253, 0.95)'); // 🌟 Brilliant electric cyan-white perimeter ring
-        grad.addColorStop(0.58, 'rgba(56, 189, 248, 0.70)');
-        grad.addColorStop(0.75, 'rgba(14, 165, 233, 0.35)');
-        grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');      // Fades smoothly into deep space
-
-        haloCtx.fillStyle = grad;
-        haloCtx.beginPath();
-        haloCtx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
-        haloCtx.fill();
-
-        haloCtx.restore();
-    };
-
-    map.on('render', updateHalo);
-    map.on('move', updateHalo);
-    map.on('zoom', updateHalo);
-    window.addEventListener('resize', updateHalo);
-}
-
-function updateAtmosphereVisibility(isGlobe) {
+function updateGlobeAtmosphere(isGlobe) {
     document.body.classList.toggle('globe-view', isGlobe);
-    if (!haloCanvas) initGlobeAtmosphereHalo();
-    if (haloCanvas) {
-        haloCanvas.style.display = isGlobe ? 'block' : 'none';
+    if (!map || typeof map.setSky !== 'function') return;
+
+    if (isGlobe) {
+        // 🌟 MapLibre's built-in WebGL atmosphere (permanently locked to globe perimeter)
+        map.setSky({
+            'atmosphere-blend': [
+                'interpolate', ['linear'], ['zoom'],
+                0, 1.0,
+                5, 1.0,
+                7, 0.0
+            ]
+        });
+    } else {
+        map.setSky(undefined);
     }
 }
 
@@ -153,7 +87,7 @@ export function updateBasemapStyle(styleUrl) {
         if (typeof map.setProjection === 'function') {
             map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
         }
-        updateAtmosphereVisibility(stateManager.activeView === '3d');
+        updateGlobeAtmosphere(stateManager.activeView === '3d');
 
         if (stateManager.activeMode === 'radar') {
             applyRadarTheme(stateManager.currentTheme);
@@ -249,12 +183,12 @@ function applyRadarTheme(theme) {
 }
 
 /**
- * 🌟 NATIVE PROJECTION / VIEW SWITCHER (MapLibre v5 2D Mercator & 3D Globe)
+ * 🌟 NATIVE PROJECTION / VIEW SWITCHER
  */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
 
-    updateAtmosphereVisibility(targetView === '3d');
+    updateGlobeAtmosphere(targetView === '3d');
 
     if (targetView === '2d' || targetView === '3d') {
         hidePolarMap();
@@ -610,7 +544,7 @@ export async function switchAppMode(targetMode) {
                 if (typeof map.setProjection === 'function') {
                     map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
                 }
-                updateAtmosphereVisibility(stateManager.activeView === '3d');
+                updateGlobeAtmosphere(stateManager.activeView === '3d');
 
                 try { initCityOverlay(map); } catch (e) {}
                 try { initVectorContours(map); } catch (e) {}
@@ -625,7 +559,7 @@ export async function switchAppMode(targetMode) {
             if (typeof map.setProjection === 'function') {
                 map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
             }
-            updateAtmosphereVisibility(stateManager.activeView === '3d');
+            updateGlobeAtmosphere(stateManager.activeView === '3d');
 
             try { initCityOverlay(map); } catch (e) {}
             try { initVectorContours(map); } catch (e) {}
@@ -657,7 +591,6 @@ map.on('error', (e) => {
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
     setBasemapLabelsVisibility(map, false);
-    initGlobeAtmosphereHalo();
     try { initVectorContours(map); } catch (err) {}
 });
 
