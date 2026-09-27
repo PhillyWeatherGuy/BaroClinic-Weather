@@ -55,21 +55,21 @@ function updateGlobeAtmosphere(isGlobe) {
     if (!map || typeof map.setSky !== 'function') return;
 
     if (isGlobe) {
-        // Luminous cyan/blue atmospheric limb glow around the globe horizon
+        // 🌟 High-radiance cyan-blue atmospheric limb halo
         map.setSky({
-            'sky-color': '#030712',
-            'horizon-color': '#38bdf8',
-            'fog-color': '#030712',
-            'sky-horizon-blend': 0.85,
-            'horizon-fog-blend': 0.45,
+            'sky-color': '#02040a',
+            'horizon-color': '#38bdf8',      // Vivid electric cyan halo
+            'fog-color': '#0ea5e9',          // Deep sky-blue atmospheric transition
+            'sky-horizon-blend': 0.95,
+            'horizon-fog-blend': 0.75,
             'atmosphere-blend': [
                 'interpolate', ['linear'], ['zoom'],
                 0, 1.0,
-                5, 0.85,
-                7, 0.0
+                4, 0.95,
+                7, 0.4,
+                9, 0.0
             ]
         });
-        // Make background layer transparent so the CSS starfield shows in space
         if (map.getLayer('background')) {
             map.setPaintProperty('background', 'background-opacity', 0);
         }
