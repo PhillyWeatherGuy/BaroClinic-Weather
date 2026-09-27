@@ -37,6 +37,10 @@ let customShaderLayer = null;
 let renderDebounceId = null;
 let polarMapLoaded = false;
 
+// 🌟 Dedicated Atmospheric Halo Canvas for 3D Globe
+let haloCanvas = null;
+let haloCtx = null;
+
 const popup = new maplibregl.Popup({ closeButton: false });
 
 const map = new maplibregl.Map({
@@ -48,36 +52,86 @@ const map = new maplibregl.Map({
 });
 
 /**
- * 🌟 3D GLOBE ATMOSPHERIC GLOW & COSMIC SPACE TOGGLE
+ * 🌟 3D GLOBE LUMINOUS ATMOSPHERIC HALO RENDERER (Matches Reference Image)
  */
-function updateGlobeAtmosphere(isGlobe) {
-    document.body.classList.toggle('globe-view', isGlobe);
-    if (!map || typeof map.setSky !== 'function') return;
+function initGlobeAtmosphereHalo() {
+    if (haloCanvas) return;
+    haloCanvas = document.createElement('canvas');
+    haloCanvas.id = 'globe-atmosphere-halo';
+    haloCanvas.style.position = 'absolute';
+    haloCanvas.style.top = '0';
+    haloCanvas.style.left = '0';
+    haloCanvas.style.width = '100%';
+    haloCanvas.style.height = '100%';
+    haloCanvas.style.pointerEvents = 'none';
+    haloCanvas.style.zIndex = '1';
+    haloCanvas.style.display = 'none';
 
-    if (isGlobe) {
-        // 🌟 High-radiance cyan-blue atmospheric limb halo
-        map.setSky({
-            'sky-color': '#02040a',
-            'horizon-color': '#38bdf8',      // Vivid electric cyan halo
-            'fog-color': '#0ea5e9',          // Deep sky-blue atmospheric transition
-            'sky-horizon-blend': 0.95,
-            'horizon-fog-blend': 0.75,
-            'atmosphere-blend': [
-                'interpolate', ['linear'], ['zoom'],
-                0, 1.0,
-                4, 0.95,
-                7, 0.4,
-                9, 0.0
-            ]
-        });
-        if (map.getLayer('background')) {
-            map.setPaintProperty('background', 'background-opacity', 0);
+    const mapContainer = map.getContainer();
+    if (mapContainer) {
+        mapContainer.appendChild(haloCanvas);
+    }
+    haloCtx = haloCanvas.getContext('2d');
+
+    const updateHalo = () => {
+        if (stateManager.activeView !== '3d' || !haloCanvas || !haloCtx) return;
+
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        if (haloCanvas.width !== w * dpr || haloCanvas.height !== h * dpr) {
+            haloCanvas.width = w * dpr;
+            haloCanvas.height = h * dpr;
         }
-    } else {
-        map.setSky(undefined);
-        if (map.getLayer('background')) {
-            map.setPaintProperty('background', 'background-opacity', 1);
-        }
+
+        haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
+
+        const zoom = map.getZoom();
+        // Fade out atmospheric halo as camera zooms in towards surface level
+        if (zoom > 4.5) return;
+        const opacity = zoom <= 3.0 ? 1.0 : Math.max(0, 1.0 - (zoom - 3.0) / 1.5);
+
+        // Exact screen center and pixel radius of MapLibre globe
+        const center = map.project(map.getCenter());
+        const cx = center.x * dpr;
+        const cy = center.y * dpr;
+        const radius = ((512 * Math.pow(2, zoom)) / (2 * Math.PI)) * dpr;
+
+        if (radius <= 10) return;
+
+        haloCtx.save();
+        haloCtx.globalAlpha = opacity;
+
+        // 🌟 Luminous multi-tier atmospheric glow (inner rim + outer space radiation)
+        const outerRadius = radius * 1.14;
+        const grad = haloCtx.createRadialGradient(cx, cy, radius * 0.94, cx, cy, outerRadius);
+        grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
+        grad.addColorStop(0.40, 'rgba(56, 189, 248, 0.25)'); // Subtle inner limb
+        grad.addColorStop(0.50, 'rgba(186, 230, 253, 0.95)'); // 🌟 Brilliant electric cyan-white perimeter ring
+        grad.addColorStop(0.58, 'rgba(56, 189, 248, 0.70)');
+        grad.addColorStop(0.75, 'rgba(14, 165, 233, 0.35)');
+        grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');      // Fades smoothly into deep space
+
+        haloCtx.fillStyle = grad;
+        haloCtx.beginPath();
+        haloCtx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
+        haloCtx.fill();
+
+        haloCtx.restore();
+    };
+
+    map.on('render', updateHalo);
+    map.on('move', updateHalo);
+    map.on('zoom', updateHalo);
+    window.addEventListener('resize', updateHalo);
+}
+
+function updateAtmosphereVisibility(isGlobe) {
+    document.body.classList.toggle('globe-view', isGlobe);
+    if (!haloCanvas) initGlobeAtmosphereHalo();
+    if (haloCanvas) {
+        haloCanvas.style.display = isGlobe ? 'block' : 'none';
     }
 }
 
@@ -96,11 +150,10 @@ export function updateBasemapStyle(styleUrl) {
         loaded = true;
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
-        // 🌟 Re-apply active projection so switching styles/themes doesn't snap back to Mercator!
         if (typeof map.setProjection === 'function') {
             map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
         }
-        updateGlobeAtmosphere(stateManager.activeView === '3d');
+        updateAtmosphereVisibility(stateManager.activeView === '3d');
 
         if (stateManager.activeMode === 'radar') {
             applyRadarTheme(stateManager.currentTheme);
@@ -125,18 +178,15 @@ export function updateBasemapStyle(styleUrl) {
 
 /**
  * 🌟 ZERO-RELOAD RADAR THEME SWITCHER
- * Changes basemap colors in-place without reloading the style or restarting the radar loop!
  */
 function applyRadarTheme(theme) {
     if (!map || !map.isStyleLoaded()) return;
     const isDark = (theme === 'dark');
 
-    // 1. Land Background
     if (map.getLayer('background')) {
         map.setPaintProperty('background', 'background-color', isDark ? 'rgb(59, 51, 59)' : 'rgba(253, 229, 207, 1)');
     }
 
-    // 2. Oceans & Water
     const waterColor = isDark ? 'rgba(2, 20, 37, 1)' : '#E7F1F4';
     if (map.getLayer('ocean_far')) {
         map.setPaintProperty('ocean_far', 'fill-color', waterColor);
@@ -145,7 +195,6 @@ function applyRadarTheme(theme) {
         map.setPaintProperty('water', 'fill-color', waterColor);
     }
 
-    // 3. Coastlines & Boundaries (White in dark mode, Black in light mode)
     const outlineColor = isDark ? '#ffffff' : '#000000';
     const outlineLayers = [
         'coastline_far',
@@ -161,7 +210,6 @@ function applyRadarTheme(theme) {
         }
     });
 
-    // 4. Remove muddy gray urban/building fills in light mode
     const fillLayers = ['landuse_residential', 'landcover_wood', 'landcover_ice_shelf', 'landcover_glacier', 'building', 'aeroway-area', 'road_area_pier'];
     fillLayers.forEach(id => {
         if (map.getLayer(id)) {
@@ -172,7 +220,6 @@ function applyRadarTheme(theme) {
         map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : 'rgba(253, 229, 207, 1)');
     }
 
-    // 5. Streets & Highways (White roads in light mode!)
     const streetColor = isDark ? '#181818' : '#ffffff';
     const streetCasing = isDark ? 'rgba(60, 60, 60, 0.8)' : 'rgba(0, 0, 0, 0.25)';
 
@@ -186,7 +233,6 @@ function applyRadarTheme(theme) {
         map.setPaintProperty('highway_minor', 'line-color', isDark ? '#181818' : 'rgba(255, 255, 255, 0.8)');
     }
 
-    // 6. Place Labels
     const labelColor = isDark ? '#ffffff' : '#000000';
     const haloColor = isDark ? '#000000' : '#ffffff';
     const labelLayers = [
@@ -208,7 +254,7 @@ function applyRadarTheme(theme) {
 export function applyView(targetView) {
     stateManager.activeView = targetView;
 
-    updateGlobeAtmosphere(targetView === '3d');
+    updateAtmosphereVisibility(targetView === '3d');
 
     if (targetView === '2d' || targetView === '3d') {
         hidePolarMap();
@@ -221,7 +267,6 @@ export function applyView(targetView) {
         if (mapDiv) mapDiv.style.display = 'block';
 
         if (map) {
-            // 🌟 Switch natively between 2D Mercator and 3D Globe in MapLibre v5
             if (typeof map.setProjection === 'function') {
                 map.setProjection({ type: targetView === '3d' ? 'globe' : 'mercator' });
             }
@@ -426,9 +471,6 @@ async function renderFrame(globalIdx) {
     }
 }
 
-/**
- * 🌟 CONTINUOUS BACKGROUND PRELOADER
- */
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
     const totalChunks = stateManager.manifest.chunks.length;
@@ -458,9 +500,6 @@ export async function preloadRemainingChunks(currentGen) {
     }
 }
 
-/**
- * 🌟 LOAD INITIAL MODEL FORECAST DATA
- */
 async function loadInitialModelData() {
     const thisGen = stateManager.loadGeneration;
     try {
@@ -489,9 +528,6 @@ async function loadInitialModelData() {
     }
 }
 
-/**
- * 🌟 DYNAMIC APP MODE SWITCHER (Models vs Radar vs Satellite)
- */
 export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
@@ -571,11 +607,10 @@ export async function switchAppMode(targetMode) {
                 if (loaded) return;
                 loaded = true;
 
-                // 🌟 Preserve 3D Globe projection across initial model load
                 if (typeof map.setProjection === 'function') {
                     map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
                 }
-                updateGlobeAtmosphere(stateManager.activeView === '3d');
+                updateAtmosphereVisibility(stateManager.activeView === '3d');
 
                 try { initCityOverlay(map); } catch (e) {}
                 try { initVectorContours(map); } catch (e) {}
@@ -590,7 +625,7 @@ export async function switchAppMode(targetMode) {
             if (typeof map.setProjection === 'function') {
                 map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
             }
-            updateGlobeAtmosphere(stateManager.activeView === '3d');
+            updateAtmosphereVisibility(stateManager.activeView === '3d');
 
             try { initCityOverlay(map); } catch (e) {}
             try { initVectorContours(map); } catch (e) {}
@@ -622,6 +657,7 @@ map.on('error', (e) => {
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
     setBasemapLabelsVisibility(map, false);
+    initGlobeAtmosphereHalo();
     try { initVectorContours(map); } catch (err) {}
 });
 
