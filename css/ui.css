@@ -1178,3 +1178,14 @@ body.globe-view #map {
     background-size: 1000px 520px;
     background-repeat: repeat;
 }
+
+/* ==========================================
+   3D GLOBE COSMIC SPACE
+   ========================================== */
+body.globe-view {
+    background-color: #030712 !important;
+}
+
+body.globe-view #map {
+    background-color: #030712 !important;
+}
