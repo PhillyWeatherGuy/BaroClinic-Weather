@@ -10,7 +10,7 @@ export function initHubTransition(onSelectMode = null) {
     if (!splash || !grid) return;
 
     const elapsed = performance.now() - startTime;
-    const minDisplayTime = 5000; 
+    const minDisplayTime = 70000; 
     const remainingTime = Math.max(0, minDisplayTime - elapsed);
 
     // 1. REVEAL THE HUB GRID
