@@ -1,20 +1,6 @@
 // js/components/homeScreen.js
 const startTime = performance.now();
 
-export function showHomeScreen() {
-    const splash = document.getElementById('splash-screen');
-    const grid = document.getElementById('home-menu-grid');
-    const splashText = document.getElementById('splash-text');
-
-    if (!splash || !grid) return;
-
-    splash.style.display = '';
-    splash.classList.remove('fade-out');
-    splash.classList.add('hub-active');
-    grid.classList.remove('exiting');
-    if (splashText) splashText.textContent = 'READY';
-}
-
 // Renamed this to reflect its new job
 export function initHubTransition(onSelectMode = null) {
     const splash = document.getElementById('splash-screen');
@@ -52,6 +38,7 @@ export function initHubTransition(onSelectMode = null) {
                 
                 // Wait 600ms for background to fade, then destroy the container
                 setTimeout(() => {
+                    splash.remove();
                     console.log(`Entering view: ${targetView}. Map is interactive.`);
                     
                     // 🌟 Notify app to switch modes and unload previous weather data
