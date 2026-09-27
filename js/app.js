@@ -3,7 +3,7 @@ import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from './core/dataLoader.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
-import { initHubTransition } from './components/homeScreen.js'; 
+import { initHubTransition, showHomeScreen } from './components/homeScreen.js';
 import { 
     initViewerUI, 
     syncTimelineWithManifest, 
@@ -573,6 +573,11 @@ export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
+    const topNav = document.getElementById('top-nav');
+    const timeline = document.getElementById('timeline-container');
+    if (topNav) topNav.style.display = 'flex';
+    if (timeline) timeline.style.display = 'flex';
+
     destroyRadarMode(map);
     hideStormVolume();
     purgeAllAppMemory(customShaderLayer);
@@ -674,9 +679,45 @@ export async function switchAppMode(targetMode) {
     }
 }
 
+export function returnToHome() {
+    console.log('[App] Returning to home screen.');
+
+    destroyRadarMode(map);
+    hideStormVolume();
+    destroyCityOverlay();
+    hidePolarMap();
+    clearPolarTextures();
+    purgeAllAppMemory(customShaderLayer);
+
+    if (map.getLayer('weather-gpu-shader')) {
+        map.removeLayer('weather-gpu-shader');
+    }
+    if (map.getLayer('radar-gpu-shader')) {
+        map.removeLayer('radar-gpu-shader');
+    }
+
+    stateManager.activeMode = null;
+
+    const viewerControls = [
+        'top-nav',
+        'timeline-container',
+        'model-category-bar',
+        'param-category-bar',
+        'radar-tools-container'
+    ];
+    viewerControls.forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) element.style.display = 'none';
+    });
+
+    showHomeScreen();
+}
+
 initHubTransition((selectedMode) => {
     switchAppMode(selectedMode);
 });
+
+document.getElementById('btn-home')?.addEventListener('click', returnToHome);
 
 initViewerUI(
     (stepIndex) => {
