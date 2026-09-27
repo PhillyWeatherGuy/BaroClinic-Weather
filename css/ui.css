@@ -1140,25 +1140,41 @@ body.radar-box-armed #map canvas {
 }
 
 /* ==========================================
-   3D GLOBE COSMIC SPACE & STARFIELD
+   3D GLOBE CINEMATIC DEEP SPACE & NEBULA
    ========================================== */
 body.globe-view {
-    background-color: #030712 !important;
+    background-color: #02040a !important;
 }
 
 body.globe-view #map {
-    background-color: #030712 !important;
-    background-image: 
-        radial-gradient(1px 1px at 25px 35px, #ffffff 100%, transparent),
-        radial-gradient(1.5px 1.5px at 150px 75px, rgba(255, 255, 255, 0.9) 100%, transparent),
-        radial-gradient(1px 1px at 85px 220px, rgba(255, 255, 255, 0.7) 100%, transparent),
-        radial-gradient(2px 2px at 280px 180px, rgba(56, 189, 248, 0.9) 100%, transparent),
-        radial-gradient(1px 1px at 320px 310px, rgba(255, 255, 255, 0.6) 100%, transparent),
-        radial-gradient(1.5px 1.5px at 450px 120px, rgba(255, 255, 255, 0.8) 100%, transparent),
-        radial-gradient(1px 1px at 580px 260px, rgba(255, 255, 255, 0.5) 100%, transparent),
-        radial-gradient(2px 2px at 720px 90px, rgba(255, 255, 255, 0.85) 100%, transparent),
-        radial-gradient(1px 1px at 810px 340px, rgba(56, 189, 248, 0.7) 100%, transparent),
-        radial-gradient(1.5px 1.5px at 930px 190px, rgba(255, 255, 255, 0.8) 100%, transparent);
-    background-size: 960px 420px;
+    background-color: #02040a !important;
+    background-image:
+        /* Subtle cosmic blue & violet nebula gas clouds */
+        radial-gradient(ellipse 60% 50% at 20% 20%, rgba(30, 58, 138, 0.18) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 60% at 85% 75%, rgba(67, 56, 202, 0.14) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 40% at 50% 90%, rgba(14, 116, 144, 0.12) 0%, transparent 60%),
+        /* Prominent glowing primary stars (with slight halos) */
+        radial-gradient(2.5px 2.5px at 120px 80px, #ffffff 100%, rgba(255,255,255,0.4) 2px, transparent 4px),
+        radial-gradient(2px 2px at 340px 210px, #38bdf8 100%, rgba(56,189,248,0.4) 2px, transparent 4px),
+        radial-gradient(2.5px 2.5px at 780px 140px, #ffffff 100%, rgba(255,255,255,0.4) 2px, transparent 4px),
+        radial-gradient(2px 2px at 910px 380px, #93c5fd 100%, rgba(147,197,253,0.3) 2px, transparent 4px),
+        radial-gradient(2px 2px at 560px 480px, #fbcfe8 100%, rgba(251,207,232,0.3) 2px, transparent 4px),
+        /* Mid-magnitude stars */
+        radial-gradient(1.5px 1.5px at 45px 160px, rgba(255,255,255,0.85) 100%, transparent),
+        radial-gradient(1.5px 1.5px at 230px 40px, rgba(255,255,255,0.8) 100%, transparent),
+        radial-gradient(1.5px 1.5px at 410px 320px, rgba(255,255,255,0.75) 100%, transparent),
+        radial-gradient(1.5px 1.5px at 670px 240px, rgba(255,255,255,0.85) 100%, transparent),
+        radial-gradient(1.5px 1.5px at 840px 60px, rgba(255,255,255,0.8) 100%, transparent),
+        /* Dense micro-star dust */
+        radial-gradient(1px 1px at 80px 310px, rgba(255,255,255,0.5) 100%, transparent),
+        radial-gradient(1px 1px at 170px 190px, rgba(255,255,255,0.4) 100%, transparent),
+        radial-gradient(1px 1px at 290px 120px, rgba(255,255,255,0.45) 100%, transparent),
+        radial-gradient(1px 1px at 480px 70px, rgba(255,255,255,0.4) 100%, transparent),
+        radial-gradient(1px 1px at 530px 290px, rgba(255,255,255,0.5) 100%, transparent),
+        radial-gradient(1px 1px at 620px 420px, rgba(255,255,255,0.45) 100%, transparent),
+        radial-gradient(1px 1px at 740px 330px, rgba(255,255,255,0.4) 100%, transparent),
+        radial-gradient(1px 1px at 890px 220px, rgba(255,255,255,0.5) 100%, transparent),
+        radial-gradient(1px 1px at 970px 90px, rgba(255,255,255,0.45) 100%, transparent);
+    background-size: 1000px 520px;
     background-repeat: repeat;
 }
