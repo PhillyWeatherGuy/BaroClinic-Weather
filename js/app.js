@@ -62,6 +62,11 @@ export function updateBasemapStyle(styleUrl) {
         loaded = true;
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
+        // 🌟 Re-apply active projection so switching styles/themes doesn't snap back to Mercator!
+        if (typeof map.setProjection === 'function') {
+            map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
+        }
+
         if (stateManager.activeMode === 'radar') {
             applyRadarTheme(stateManager.currentTheme);
             setBasemapLabelsVisibility(map, true);
@@ -528,6 +533,12 @@ export async function switchAppMode(targetMode) {
             const onReady = async () => {
                 if (loaded) return;
                 loaded = true;
+
+                // 🌟 Preserve 3D Globe projection across initial model load
+                if (typeof map.setProjection === 'function') {
+                    map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
+                }
+
                 try { initCityOverlay(map); } catch (e) {}
                 try { initVectorContours(map); } catch (e) {}
                 await loadInitialModelData();
@@ -535,9 +546,12 @@ export async function switchAppMode(targetMode) {
             };
 
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000);
+            setTimeout(onReady, 2000); // Fail-safe
             map.setStyle(targetStyle);
         } else {
+            if (typeof map.setProjection === 'function') {
+                map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
+            }
             try { initCityOverlay(map); } catch (e) {}
             try { initVectorContours(map); } catch (e) {}
             await loadInitialModelData();
