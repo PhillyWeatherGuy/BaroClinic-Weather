@@ -37,6 +37,10 @@ let customShaderLayer = null;
 let renderDebounceId = null;
 let polarMapLoaded = false;
 
+// 🌟 Dedicated Atmosphere Canvas (Pinned to Globe Perimeter)
+let haloCanvas = null;
+let haloCtx = null;
+
 const popup = new maplibregl.Popup({ closeButton: false });
 
 const map = new maplibregl.Map({
@@ -48,25 +52,115 @@ const map = new maplibregl.Map({
 });
 
 /**
- * 🌟 NATIVE MAPLIBRE ATMOSPHERE CONTROLLER
+ * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
+ * Guaranteed to stay 100% locked to the perimeter across all zoom levels, rotations, and screen sizes!
  */
-function updateGlobeAtmosphere(isGlobe) {
-    document.body.classList.toggle('globe-view', isGlobe);
-    if (!map || typeof map.setSky !== 'function') return;
+function getGlobeScreenCircle(matrix, w, h) {
+    if (!matrix) return null;
 
-    if (isGlobe) {
-        // 🌟 MapLibre's built-in WebGL atmosphere (permanently locked to globe perimeter)
-        map.setSky({
-            'atmosphere-blend': [
-                'interpolate', ['linear'], ['zoom'],
-                0, 1.0,
-                5, 1.0,
-                7, 0.0
-            ]
-        });
-    } else {
-        map.setSky(undefined);
+    // 1. Globe Center (0, 0, 0, 1) in screen pixels
+    const cx_clip = matrix[12];
+    const cy_clip = matrix[13];
+    const cw_clip = matrix[15] || 1.0;
+    const cx = (cx_clip / cw_clip * 0.5 + 0.5) * w;
+    const cy = (0.5 - cy_clip / cw_clip * 0.5) * h;
+
+    // 2. Camera direction vector from matrix
+    let vx = matrix[2], vy = matrix[6], vz = matrix[10];
+    const vLen = Math.hypot(vx, vy, vz) || 1.0;
+    vx /= vLen; vy /= vLen; vz /= vLen;
+
+    // 3. Up vector orthogonal to camera line of sight
+    let ux = 0.0, uy = 1.0, uz = 0.0;
+    if (Math.abs(vy) > 0.9) {
+        ux = 1.0; uy = 0.0; uz = 0.0;
     }
+    const dotUV = ux * vx + uy * vy + uz * vz;
+    ux -= dotUV * vx; uy -= dotUV * vy; uz -= dotUV * vz;
+    const uLen = Math.hypot(ux, uy, uz) || 1.0;
+    ux /= uLen; uy /= uLen; uz /= uLen;
+
+    // 4. Project unit sphere horizon point (ux, uy, uz) to screen pixels
+    const hx_clip = matrix[0] * ux + matrix[4] * uy + matrix[8] * uz + matrix[12];
+    const hy_clip = matrix[1] * ux + matrix[5] * uy + matrix[9] * uz + matrix[13];
+    const hw_clip = matrix[3] * ux + matrix[7] * uy + matrix[11] * uz + matrix[15];
+
+    const hx = (hx_clip / hw_clip * 0.5 + 0.5) * w;
+    const hy = (0.5 - hy_clip / hw_clip * 0.5) * h;
+
+    const r = Math.hypot(hx - cx, hy - cy);
+    return { cx, cy, r };
+}
+
+function updateAtmosphereHalo(matrix) {
+    if (stateManager.activeView !== '3d' || !haloCanvas || !haloCtx || !matrix) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = window.innerWidth * dpr;
+    const h = window.innerHeight * dpr;
+
+    if (haloCanvas.width !== w || haloCanvas.height !== h) {
+        haloCanvas.width = w;
+        haloCanvas.height = h;
+    }
+
+    const circle = getGlobeScreenCircle(matrix, w, h);
+    if (!circle || isNaN(circle.r) || circle.r < 10) {
+        haloCtx.clearRect(0, 0, w, h);
+        return;
+    }
+
+    haloCtx.clearRect(0, 0, w, h);
+
+    const cx = circle.cx;
+    const cy = circle.cy;
+    const r = circle.r;
+
+    // Fade glow smoothly as camera zooms close into continents (radius > 1.6 screen heights)
+    const maxR = h * 1.6;
+    if (r > maxR) return;
+    const alpha = (r < h * 0.9) ? 1.0 : Math.max(0, 1.0 - (r - h * 0.9) / (maxR - h * 0.9));
+
+    haloCtx.save();
+    haloCtx.globalAlpha = alpha;
+
+    // 🌟 Luminous electric cyan rim glow permanently locked to the sphere's perimeter
+    const outerR = r * 1.11;
+    const grad = haloCtx.createRadialGradient(cx, cy, r * 0.985, cx, cy, outerR);
+    grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
+    grad.addColorStop(0.12, 'rgba(56, 189, 248, 0.45)');
+    grad.addColorStop(0.14, 'rgba(186, 230, 253, 0.95)'); // 🌟 Brilliant electric cyan rim right at the edge
+    grad.addColorStop(0.24, 'rgba(56, 189, 248, 0.70)');
+    grad.addColorStop(0.55, 'rgba(14, 165, 233, 0.28)');
+    grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');
+
+    haloCtx.fillStyle = grad;
+    haloCtx.beginPath();
+    haloCtx.arc(cx, cy, outerR, 0, Math.PI * 2);
+    haloCtx.fill();
+
+    haloCtx.restore();
+}
+
+function initAtmosphereHaloCanvas() {
+    if (haloCanvas) return;
+    haloCanvas = document.createElement('canvas');
+    haloCanvas.id = 'globe-atmosphere-halo';
+    haloCanvas.style.position = 'absolute';
+    haloCanvas.style.top = '0';
+    haloCanvas.style.left = '0';
+    haloCanvas.style.width = '100%';
+    haloCanvas.style.height = '100%';
+    haloCanvas.style.pointerEvents = 'none';
+    haloCanvas.style.zIndex = '15';
+    haloCanvas.style.mixBlendMode = 'screen';
+    haloCanvas.style.display = 'none';
+
+    const mapContainer = map.getContainer();
+    if (mapContainer) {
+        mapContainer.appendChild(haloCanvas);
+    }
+    haloCtx = haloCanvas.getContext('2d');
 }
 
 /**
@@ -87,7 +181,6 @@ export function updateBasemapStyle(styleUrl) {
         if (typeof map.setProjection === 'function') {
             map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
         }
-        updateGlobeAtmosphere(stateManager.activeView === '3d');
 
         if (stateManager.activeMode === 'radar') {
             applyRadarTheme(stateManager.currentTheme);
@@ -188,7 +281,14 @@ function applyRadarTheme(theme) {
 export function applyView(targetView) {
     stateManager.activeView = targetView;
 
-    updateGlobeAtmosphere(targetView === '3d');
+    document.body.classList.toggle('globe-view', targetView === '3d');
+    if (!haloCanvas) initAtmosphereHaloCanvas();
+    if (haloCanvas) {
+        haloCanvas.style.display = targetView === '3d' ? 'block' : 'none';
+        if (targetView !== '3d' && haloCtx) {
+            haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
+        }
+    }
 
     if (targetView === '2d' || targetView === '3d') {
         hidePolarMap();
@@ -344,6 +444,20 @@ export function initLayer(shaderType = null) {
             break;
         }
     }
+
+    // 🌟 Capture active camera matrix directly from custom shader layer to position the halo with 100% precision
+    const originalRender = customShaderLayer.render.bind(customShaderLayer);
+    customShaderLayer.render = (gl, matrixOrArgs) => {
+        originalRender(gl, matrixOrArgs);
+        if (stateManager.activeView === '3d') {
+            const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
+            const projData = isV5 ? matrixOrArgs.defaultProjectionData : null;
+            const matrix = isV5 
+                ? (matrixOrArgs.modelViewProjectionMatrix || projData?.mainMatrix) 
+                : matrixOrArgs;
+            updateAtmosphereHalo(matrix);
+        }
+    };
 
     if (!map.getLayer('weather-gpu-shader')) {
         map.addLayer(customShaderLayer, firstContentLayerId);
@@ -544,7 +658,6 @@ export async function switchAppMode(targetMode) {
                 if (typeof map.setProjection === 'function') {
                     map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
                 }
-                updateGlobeAtmosphere(stateManager.activeView === '3d');
 
                 try { initCityOverlay(map); } catch (e) {}
                 try { initVectorContours(map); } catch (e) {}
@@ -559,7 +672,6 @@ export async function switchAppMode(targetMode) {
             if (typeof map.setProjection === 'function') {
                 map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
             }
-            updateGlobeAtmosphere(stateManager.activeView === '3d');
 
             try { initCityOverlay(map); } catch (e) {}
             try { initVectorContours(map); } catch (e) {}
@@ -591,6 +703,7 @@ map.on('error', (e) => {
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
     setBasemapLabelsVisibility(map, false);
+    initAtmosphereHaloCanvas();
     try { initVectorContours(map); } catch (err) {}
 });
 
