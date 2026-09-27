@@ -1182,10 +1182,7 @@ body.globe-view #map {
 /* ==========================================
    3D GLOBE COSMIC SPACE
    ========================================== */
-body.globe-view {
-    background-color: #030712 !important;
-}
-
+body.globe-view,
 body.globe-view #map {
-    background-color: #030712 !important;
+    background-color: #02040a !important;
 }
