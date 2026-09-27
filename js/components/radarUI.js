@@ -5,6 +5,7 @@ import { getRadarStationsGeoJson } from '../config/radarStations.js';
 import { decodeLevel3, sampleRadarSweep, formatRadarValue } from '../core/level3Decoder.js';
 import { createSingleSiteRadarLayer } from '../shaders/singleSiteRadarShader.js';
 import { stateManager } from '../core/stateManager.js';
+import { getViewerPreferences, saveViewerPreferences } from '../core/viewerPreferences.js';
 import { getRadarPalette } from '../config/radarPalettes.js';
 import { sync3DVolumeWithCurrentFrame } from './viewerUI.js'; 
 
@@ -360,11 +361,23 @@ export async function initRadarMode(mapInstance) {
     if (!mapInstance) return;
     radarMapInstance = mapInstance;
 
+    const preferences = getViewerPreferences();
+    if (preferences.radarProduct) {
+        stateManager.activeRadarProduct = preferences.radarProduct;
+    }
+    if (preferences.radarStation) {
+        stateManager.activeRadarStation = preferences.radarStation;
+    }
+
     if (typeof mapInstance.setMaxTileCacheSize === 'function') {
         mapInstance.setMaxTileCacheSize(1200);
     }
 
     await switchRadarTimeline(null);
+
+    if (Number.isInteger(preferences.radarFrame)) {
+        setRadarFrame(Math.max(0, Math.min(preferences.radarFrame, radarState.frames.length - 1)));
+    }
 
     bindRadarControls();
     setBasemapLabelsVisibility(mapInstance, true);
@@ -500,7 +513,7 @@ export async function switchRadarTimeline(startUtcDate = null, durationHours = 1
     }
 
     syncRadarTimelineUI();
-    setRadarFrame(defaultIndex);
+    setRadarFrame(defaultIndex, false);
 
     // Stagger remaining composite frames in background
     let delay = 25;
@@ -519,13 +532,14 @@ export async function switchRadarTimeline(startUtcDate = null, durationHours = 1
 /**
  * 🌟 3. Instant Zero-Blink GPU Frame Swapping
  */
-export function setRadarFrame(frameIndex) {
+export function setRadarFrame(frameIndex, persist = true) {
     const totalFrames = radarState.frames?.length || 12;
     if (frameIndex < 0 || frameIndex >= totalFrames) return;
 
     const prevIndex = currentVisibleIndex;
     currentVisibleIndex = frameIndex;
     radarState.activeFrameIndex = frameIndex;
+    if (persist) saveViewerPreferences({ radarFrame: frameIndex });
 
     if (radarMapInstance) {
         if (activeRadarViewType === 'composite') {
@@ -1123,6 +1137,7 @@ function initRadarParamDropdown() {
                 if (stateManager.activeRadarProduct === selectedProd) return;
 
                 stateManager.activeRadarProduct = selectedProd;
+                saveViewerPreferences({ radarProduct: selectedProd });
                 const prodInfo = RADAR_PRODUCTS.find(p => p.id === selectedProd);
                 if (prodInfo) {
                     paramBtn.querySelector('span').textContent = prodInfo.name;

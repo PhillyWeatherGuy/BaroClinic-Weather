@@ -1,6 +1,7 @@
 // js/app.js
 import { stateManager } from './core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from './core/dataLoader.js';
+import { getViewerPreferences } from './core/viewerPreferences.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { initHubTransition } from './components/homeScreen.js';
@@ -10,6 +11,7 @@ import {
     syncModelRunDropdown,
     setShaderLayerReference,
     updateSliderTrackAndBounds,
+    setStepIndex,
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
@@ -153,6 +155,49 @@ function initAtmosphereHaloCanvas() {
         mapContainer.insertBefore(haloCanvas, mapContainer.firstChild);
     }
     haloCtx = haloCanvas.getContext('2d');
+}
+
+function updateModeNavigation(activeMode) {
+    document.querySelectorAll('.mode-nav-btn').forEach((button) => {
+        button.classList.toggle('active', button.dataset.mode === activeMode);
+    });
+}
+
+function unloadActiveViewer() {
+    destroyRadarMode(map);
+    hideStormVolume();
+    destroyCityOverlay();
+    hidePolarMap();
+    clearPolarTextures();
+    purgeAllAppMemory(customShaderLayer);
+
+    if (map.getLayer('weather-gpu-shader')) {
+        map.removeLayer('weather-gpu-shader');
+    }
+    if (map.getLayer('radar-gpu-shader')) {
+        map.removeLayer('radar-gpu-shader');
+    }
+}
+
+function showComingSoonScreen(targetMode) {
+    const comingSoonScreen = document.getElementById('coming-soon-screen');
+    const comingSoonTitle = document.getElementById('coming-soon-title');
+    const mapContainer = document.getElementById('map');
+    const globeContainer = document.getElementById('globe-container');
+
+    if (comingSoonTitle) {
+        comingSoonTitle.textContent = targetMode === 'satellite' ? 'Satellite' : 'Tropics';
+    }
+    if (mapContainer) mapContainer.style.display = 'none';
+    if (globeContainer) globeContainer.style.display = 'none';
+    if (comingSoonScreen) comingSoonScreen.style.display = 'flex';
+}
+
+function hideComingSoonScreen() {
+    const comingSoonScreen = document.getElementById('coming-soon-screen');
+    const mapContainer = document.getElementById('map');
+    if (comingSoonScreen) comingSoonScreen.style.display = 'none';
+    if (mapContainer) mapContainer.style.display = 'block';
 }
 
 /**
@@ -544,7 +589,11 @@ export async function preloadRemainingChunks(currentGen) {
 async function loadInitialModelData() {
     const thisGen = stateManager.loadGeneration;
     try {
-        await fetchManifest(null, 'ecmwf', '2t');
+        const preferences = getViewerPreferences();
+        if (preferences.model) stateManager.activeModel = preferences.model;
+        if (preferences.param) stateManager.activeParam = preferences.param;
+
+        await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
         initLayer();
         try { initVectorContours(map); } catch (e) {}
         syncModelRunDropdown();
@@ -556,7 +605,11 @@ async function loadInitialModelData() {
             }
 
             syncTimelineWithManifest();
-            await renderFrame(0);
+            const savedStep = Number.isInteger(preferences.modelStep)
+                ? Math.min(preferences.modelStep, stateManager.globalSteps.length - 1)
+                : 0;
+            setStepIndex(Math.max(0, savedStep));
+            await renderFrame(Math.max(0, savedStep));
             hideToast();
 
             preloadRemainingChunks(thisGen);
@@ -573,20 +626,15 @@ export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
-    destroyRadarMode(map);
-    hideStormVolume();
-    purgeAllAppMemory(customShaderLayer);
-    if (map.getLayer('weather-gpu-shader')) {
-        map.removeLayer('weather-gpu-shader');
-    }
-    if (map.getLayer('radar-gpu-shader')) {
-        map.removeLayer('radar-gpu-shader');
-    }
+    updateModeNavigation(targetMode);
+    unloadActiveViewer();
 
     const radarTools = document.getElementById('radar-tools-container');
+    const timeline = document.getElementById('timeline-container');
     if (radarTools) {
         radarTools.style.display = (targetMode === 'radar') ? 'flex' : 'none';
     }
+    if (timeline) timeline.style.display = 'flex';
 
     const modelBtn = document.getElementById('btn-model-menu');
     const paramBtn = document.getElementById('btn-param-menu');
@@ -597,6 +645,19 @@ export async function switchAppMode(targetMode) {
     if (paramBar) paramBar.style.display = 'none';
     if (modelBtn) modelBtn.classList.remove('active', 'open');
     if (paramBtn) paramBtn.classList.remove('active', 'open');
+
+    if (targetMode === 'satellite' || targetMode === 'tropics') {
+        if (timeline) timeline.style.display = 'none';
+        if (radarTools) radarTools.style.display = 'none';
+        if (modelBtn) modelBtn.style.display = 'none';
+        if (paramBtn) paramBtn.style.display = 'none';
+        showComingSoonScreen(targetMode);
+        return;
+    }
+
+    if (modelBtn) modelBtn.style.display = '';
+    if (paramBtn) paramBtn.style.display = '';
+    hideComingSoonScreen();
 
     if (targetMode === 'radar') {
         showToast("Loading Real-Time Radar...");
@@ -676,6 +737,10 @@ export async function switchAppMode(targetMode) {
 
 initHubTransition((selectedMode) => {
     switchAppMode(selectedMode);
+});
+
+document.querySelectorAll('.mode-nav-btn').forEach((button) => {
+    button.addEventListener('click', () => switchAppMode(button.dataset.mode));
 });
 
 initViewerUI(

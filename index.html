@@ -55,6 +55,12 @@
             <div id="top-time-container">
                 <div id="app-clock" class="clock-display">--:--</div>
             </div>
+            <div class="mode-nav" role="navigation" aria-label="Weather viewer modes">
+                <button class="mode-nav-btn active" type="button" data-mode="modelViewer">Models</button>
+                <button class="mode-nav-btn" type="button" data-mode="radar">Radar</button>
+                <button class="mode-nav-btn" type="button" data-mode="satellite">Satellite</button>
+                <button class="mode-nav-btn" type="button" data-mode="tropics">Tropics</button>
+            </div>
         </div>
         <div class="nav-right">
             <!-- 🌟 Model Button (Defaults to ECMWF) -->
@@ -207,6 +213,14 @@
 
     <div id="map"></div>
     <div id="globe-container" style="display: none;"></div>
+
+    <div id="coming-soon-screen" class="coming-soon-screen" style="display: none;">
+        <div class="coming-soon-content">
+            <div class="coming-soon-kicker">BAROCLINIC</div>
+            <h1 id="coming-soon-title">Satellite</h1>
+            <p>COMING SOON</p>
+        </div>
+    </div>
 
     <!-- 🌟 3D Volumetric Storm Cell Viewport -->
     <div id="storm-volume-container" style="display: none;">

@@ -1,5 +1,6 @@
 // js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
+import { saveViewerPreferences } from '../core/viewerPreferences.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js';
 import { updatePolarPalette } from '../layers/polarMap.js';
@@ -252,6 +253,7 @@ export function initRadarBoxTool(map) {
 
         const station = stMeta.id;
         stateManager.activeRadarStation = station;
+        saveViewerPreferences({ radarStation: station });
 
         sync3DVolumeWithCurrentFrame(radarState.activeFrameIndex);
     });
@@ -590,6 +592,7 @@ export function initModelCategoryBar() {
 
                 showToast(`Loading model ${model.name}...`);
                 stateManager.activeModel = model.id;
+                saveViewerPreferences({ model: model.id });
                 
                 purgeAllAppMemory(shaderLayerRef);
                 highestPreloadedChunk = 0;
@@ -765,6 +768,7 @@ export function initParameterCategoryBar() {
                 stateManager.paramConfig = param;
                 stateManager.activeParam = param.id;
                 stateManager.activeShader = param.shader || 'scalar';
+                saveViewerPreferences({ param: param.id });
 
                 const targetStyle = (stateManager.currentTheme === 'dark' && param.map_style_dark)
                     ? param.map_style_dark
@@ -1198,6 +1202,7 @@ export function setStepIndex(index) {
     if (!stateManager.globalSteps || index < 0 || index >= stateManager.globalSteps.length) return;
 
     stateManager.currentStepIndex = index;
+    saveViewerPreferences({ modelStep: index });
 
     const slider = document.getElementById('timeline-slider');
     if (slider) slider.value = index.toString();
