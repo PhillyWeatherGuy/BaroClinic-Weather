@@ -97,12 +97,12 @@ function updateAtmosphereHalo(matrix) {
 
     const zoom = map.getZoom();
 
-    // 🌟 Extended zoom range: stays active much longer, gently fading out between zoom 2.6 and 3.5
-    if (zoom >= 3.5) {
+    // 🌟 Perfect sweet spot: ends right at continental framing (zoom 2.5)
+    if (zoom >= 2.5) {
         haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
         return;
     }
-    const alpha = Math.max(0, Math.min(1.0, (3.5 - zoom) / 0.9));
+    const alpha = Math.max(0, Math.min(1.0, (2.5 - zoom) / 0.7));
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = window.innerWidth * dpr;
@@ -125,23 +125,19 @@ function updateAtmosphereHalo(matrix) {
     const cy = circle.cy;
     const r = circle.r;
 
-    // Allow halo to scale with deeper zoom levels
-    const maxR = h * 2.5;
-    if (r > maxR) return;
-
     haloCtx.save();
     haloCtx.globalAlpha = alpha;
 
-    // 🌟 Thicker, multi-layered atmospheric rim glow (expanded to 1.18x radius)
+    // 🌟 Luminous electric cyan rim glow
     const outerR = r * 1.18;
     const grad = haloCtx.createRadialGradient(cx, cy, r * 0.97, cx, cy, outerR);
     grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
     grad.addColorStop(0.14, 'rgba(56, 189, 248, 0.40)');
-    grad.addColorStop(0.18, 'rgba(224, 242, 254, 0.98)'); // 🌟 Brilliant electric cyan/white core line right at the perimeter
-    grad.addColorStop(0.26, 'rgba(56, 189, 248, 0.85)'); // Thick radiant blue layer
+    grad.addColorStop(0.18, 'rgba(224, 242, 254, 0.98)');
+    grad.addColorStop(0.26, 'rgba(56, 189, 248, 0.85)');
     grad.addColorStop(0.48, 'rgba(14, 165, 233, 0.50)');
     grad.addColorStop(0.72, 'rgba(2, 132, 199, 0.22)');
-    grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');      // Soft falloff into space
+    grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');
 
     haloCtx.fillStyle = grad;
     haloCtx.beginPath();
