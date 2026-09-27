@@ -37,7 +37,7 @@ let customShaderLayer = null;
 let renderDebounceId = null;
 let polarMapLoaded = false;
 
-// 🌟 Dedicated Atmosphere Canvas (Pinned to Globe Perimeter)
+// 🌟 Dedicated Atmosphere Canvas (Placed BEHIND MapLibre canvas for draw-order occlusion)
 let haloCanvas = null;
 let haloCtx = null;
 
@@ -95,15 +95,6 @@ function getGlobeScreenCircle(matrix, w, h) {
 function updateAtmosphereHalo(matrix) {
     if (stateManager.activeView !== '3d' || !haloCanvas || !haloCtx || !matrix) return;
 
-    const zoom = map.getZoom();
-
-    // 🌟 Perfect sweet spot: ends right at continental framing (zoom 2.5)
-    if (zoom >= 2.5) {
-        haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
-        return;
-    }
-    const alpha = Math.max(0, Math.min(1.0, (2.5 - zoom) / 0.7));
-
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = window.innerWidth * dpr;
     const h = window.innerHeight * dpr;
@@ -125,26 +116,21 @@ function updateAtmosphereHalo(matrix) {
     const cy = circle.cy;
     const r = circle.r;
 
-    haloCtx.save();
-    haloCtx.globalAlpha = alpha;
-
-    // 🌟 Luminous electric cyan rim glow
-    const outerR = r * 1.18;
-    const grad = haloCtx.createRadialGradient(cx, cy, r * 0.97, cx, cy, outerR);
+    // 🌟 Thicker, multi-layered atmospheric rim glow drawn BEHIND the planet
+    // Because it is behind the globe, the opaque Earth naturally blocks the center at all zooms!
+    const outerR = r * 1.22;
+    const grad = haloCtx.createRadialGradient(cx, cy, r * 0.96, cx, cy, outerR);
     grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
-    grad.addColorStop(0.14, 'rgba(56, 189, 248, 0.40)');
-    grad.addColorStop(0.18, 'rgba(224, 242, 254, 0.98)');
-    grad.addColorStop(0.26, 'rgba(56, 189, 248, 0.85)');
-    grad.addColorStop(0.48, 'rgba(14, 165, 233, 0.50)');
-    grad.addColorStop(0.72, 'rgba(2, 132, 199, 0.22)');
+    grad.addColorStop(0.18, 'rgba(224, 242, 254, 0.98)'); // Intense electric rim at the horizon
+    grad.addColorStop(0.35, 'rgba(56, 189, 248, 0.85)'); // Thick radiant blue layer
+    grad.addColorStop(0.60, 'rgba(14, 165, 233, 0.45)');
+    grad.addColorStop(0.85, 'rgba(2, 132, 199, 0.15)');
     grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');
 
     haloCtx.fillStyle = grad;
     haloCtx.beginPath();
     haloCtx.arc(cx, cy, outerR, 0, Math.PI * 2);
     haloCtx.fill();
-
-    haloCtx.restore();
 }
 
 function initAtmosphereHaloCanvas() {
@@ -157,13 +143,14 @@ function initAtmosphereHaloCanvas() {
     haloCanvas.style.width = '100%';
     haloCanvas.style.height = '100%';
     haloCanvas.style.pointerEvents = 'none';
-    haloCanvas.style.zIndex = '15';
-    haloCanvas.style.mixBlendMode = 'screen';
+    
+    // 🌟 Placed BEHIND the MapLibre canvas so Earth naturally occludes the center across ALL zoom levels
+    haloCanvas.style.zIndex = '0';
     haloCanvas.style.display = 'none';
 
     const mapContainer = map.getContainer();
     if (mapContainer) {
-        mapContainer.appendChild(haloCanvas);
+        mapContainer.insertBefore(haloCanvas, mapContainer.firstChild);
     }
     haloCtx = haloCanvas.getContext('2d');
 }
@@ -183,6 +170,7 @@ export function updateBasemapStyle(styleUrl) {
         loaded = true;
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
+        // 🌟 Re-apply active projection so switching styles/themes doesn't snap back to Mercator
         if (typeof map.setProjection === 'function') {
             map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
         }
@@ -450,7 +438,7 @@ export function initLayer(shaderType = null) {
         }
     }
 
-    // 🌟 Matrix-pinned halo updates with MapLibre's camera
+    // 🌟 Capture camera matrix on every frame to update the atmosphere halo in exact lockstep
     const originalRender = customShaderLayer.render.bind(customShaderLayer);
     customShaderLayer.render = (gl, matrixOrArgs) => {
         originalRender(gl, matrixOrArgs);
