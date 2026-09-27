@@ -2,7 +2,6 @@
 import { stateManager } from '../core/stateManager.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js';
-import { showThreeGlobe, hideThreeGlobe, updateThreeGlobePalette } from '../layers/threeGlobe.js';
 import { updatePolarPalette } from '../layers/polarMap.js';
 
 // 🛰️ Radar Imports
@@ -254,7 +253,6 @@ export function initRadarBoxTool(map) {
         const station = stMeta.id;
         stateManager.activeRadarStation = station;
 
-        // Fetch and render 3D volume for current frame
         sync3DVolumeWithCurrentFrame(radarState.activeFrameIndex);
     });
 }
@@ -486,9 +484,6 @@ export function initThemeToggle() {
     });
 }
 
-/**
- * 🌟 MEMORY-AWARE STEP INDEX CHECKER (For Model Viewer)
- */
 export function getMaxLoadedStepIndex() {
     if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) {
         highestPreloadedChunk = 0;
@@ -790,7 +785,6 @@ export function initParameterCategoryBar() {
                 if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
                     shaderLayerRef.updatePalette(param.palette || param.id);
                 }
-                try { updateThreeGlobePalette(param.palette || param.id); } catch (e) {}
                 try { updatePolarPalette(param.palette || param.id); } catch (e) {}
 
                 try {
@@ -913,7 +907,6 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
         initRadarBoxTool(mapInstance);
     }
 
-    // 🌟 Unified Slider Input (Auto-routes between Model Viewer and Radar)
     if (slider) {
         slider.addEventListener('input', (e) => {
             const targetVal = parseInt(e.target.value, 10);
@@ -942,7 +935,6 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
         });
     }
 
-    // 🌟 Unified Play/Pause Button
     if (playBtn) {
         playBtn.addEventListener('click', () => {
             if (stateManager.activeMode === 'radar') {
@@ -953,7 +945,6 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
         });
     }
 
-    // 🌟 Unified Previous Frame Button
     if (prevBtn) {
         prevBtn.addEventListener('click', () => {
             if (stateManager.activeMode === 'radar') {
@@ -971,7 +962,6 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
         });
     }
 
-    // 🌟 Unified Next Frame Button
     if (nextBtn) {
         nextBtn.addEventListener('click', () => {
             if (stateManager.activeMode === 'radar') {
