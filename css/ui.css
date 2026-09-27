@@ -1138,3 +1138,27 @@ body.radar-box-armed #map canvas {
     text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
     letter-spacing: 0.5px;
 }
+
+/* ==========================================
+   3D GLOBE COSMIC SPACE & STARFIELD
+   ========================================== */
+body.globe-view {
+    background-color: #030712 !important;
+}
+
+body.globe-view #map {
+    background-color: #030712 !important;
+    background-image: 
+        radial-gradient(1px 1px at 25px 35px, #ffffff 100%, transparent),
+        radial-gradient(1.5px 1.5px at 150px 75px, rgba(255, 255, 255, 0.9) 100%, transparent),
+        radial-gradient(1px 1px at 85px 220px, rgba(255, 255, 255, 0.7) 100%, transparent),
+        radial-gradient(2px 2px at 280px 180px, rgba(56, 189, 248, 0.9) 100%, transparent),
+        radial-gradient(1px 1px at 320px 310px, rgba(255, 255, 255, 0.6) 100%, transparent),
+        radial-gradient(1.5px 1.5px at 450px 120px, rgba(255, 255, 255, 0.8) 100%, transparent),
+        radial-gradient(1px 1px at 580px 260px, rgba(255, 255, 255, 0.5) 100%, transparent),
+        radial-gradient(2px 2px at 720px 90px, rgba(255, 255, 255, 0.85) 100%, transparent),
+        radial-gradient(1px 1px at 810px 340px, rgba(56, 189, 248, 0.7) 100%, transparent),
+        radial-gradient(1.5px 1.5px at 930px 190px, rgba(255, 255, 255, 0.8) 100%, transparent);
+    background-size: 960px 420px;
+    background-repeat: repeat;
+}
