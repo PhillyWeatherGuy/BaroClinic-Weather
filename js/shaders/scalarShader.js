@@ -22,7 +22,6 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
     const vBottomEdge = mercatorYToV(1.0); // ~0.9725 (85.05°S)
 
     // 1. North Polar Cap (85.05°N to exact 90°N pole)
-    // Continuous x coordinates (NO modulo) prevent any streak
     for (let c = 0; c < cols; c++) {
         const x0 = minX + c * dx;
         const x1 = minX + (c + 1) * dx;
@@ -215,29 +214,38 @@ export function createScalarShaderLayer(mapInstance) {
                 in vec2 a_pos;
                 in vec2 a_uv;
                 out vec2 v_uv;
+                out float v_limb;
 
                 void main() {
                     v_uv = a_uv;
 
                     ${isGlobe ? `
+                    vec3 sphereNorm;
                     if (a_pos.y < -5.0) {
-                        vec3 pos = vec3(0.0, 1.0, 0.0);
-                        if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
+                        sphereNorm = vec3(0.0, 1.0, 0.0);
+                        if (dot(sphereNorm, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
                             gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
                         } else {
-                            gl_Position = u_projection_matrix * vec4(pos, 1.0);
+                            gl_Position = u_projection_matrix * vec4(sphereNorm, 1.0);
                         }
                     } else if (a_pos.y > 5.0) {
-                        vec3 pos = vec3(0.0, -1.0, 0.0);
-                        if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
+                        sphereNorm = vec3(0.0, -1.0, 0.0);
+                        if (dot(sphereNorm, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
                             gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
                         } else {
-                            gl_Position = u_projection_matrix * vec4(pos, 1.0);
+                            gl_Position = u_projection_matrix * vec4(sphereNorm, 1.0);
                         }
                     } else {
+                        float lonRad = a_pos.x * 6.28318530718 - 3.14159265359;
+                        float latRad = 2.0 * atan(exp((0.5 - a_pos.y) * 6.28318530718)) - 1.57079632679;
+                        sphereNorm = vec3(cos(latRad) * sin(lonRad), sin(latRad), cos(latRad) * cos(lonRad));
                         gl_Position = projectTile(a_pos);
                     }
+
+                    // 🌟 Calculate distance to globe horizon: 0.0 at edge, 1.0 at center
+                    v_limb = clamp((dot(sphereNorm, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w) / max(u_projection_clipping_plane.w + 1.0, 0.001), 0.0, 1.0);
                     ` : `
+                    v_limb = 1.0;
                     if (a_pos.y < -5.0 || a_pos.y > 5.0) {
                         gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
                     } else {
@@ -247,11 +255,11 @@ export function createScalarShaderLayer(mapInstance) {
                 }
                 `;
 
-                // 🌟 fract(v_uv.x) wraps cleanly per-pixel: ZERO STREAK!
                 fsSource = `#version 300 es
                 precision highp float;
 
                 in vec2 v_uv;
+                in float v_limb;
                 out vec4 fragColor;
 
                 uniform sampler2D u_dataTexture;
@@ -270,7 +278,14 @@ export function createScalarShaderLayer(mapInstance) {
                         discard;
                     }
 
+                    ${isGlobe ? `
+                    // 🌟 Luminous cyan atmospheric limb glow along the globe edge (#38bdf8)
+                    float edgeGlow = pow(1.0 - clamp(v_limb, 0.0, 1.0), 3.5) * 0.45;
+                    vec3 glowColor = vec3(0.22, 0.74, 0.97);
+                    fragColor = vec4(color.rgb + glowColor * edgeGlow, color.a * u_opacity);
+                    ` : `
                     fragColor = vec4(color.rgb, color.a * u_opacity);
+                    `}
                 }
                 `;
             } else {
