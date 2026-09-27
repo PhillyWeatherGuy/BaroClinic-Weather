@@ -48,6 +48,40 @@ const map = new maplibregl.Map({
 });
 
 /**
+ * 🌟 3D GLOBE ATMOSPHERIC GLOW & COSMIC SPACE TOGGLE
+ */
+function updateGlobeAtmosphere(isGlobe) {
+    document.body.classList.toggle('globe-view', isGlobe);
+    if (!map || typeof map.setSky !== 'function') return;
+
+    if (isGlobe) {
+        // Luminous cyan/blue atmospheric limb glow around the globe horizon
+        map.setSky({
+            'sky-color': '#030712',
+            'horizon-color': '#38bdf8',
+            'fog-color': '#030712',
+            'sky-horizon-blend': 0.85,
+            'horizon-fog-blend': 0.45,
+            'atmosphere-blend': [
+                'interpolate', ['linear'], ['zoom'],
+                0, 1.0,
+                5, 0.85,
+                7, 0.0
+            ]
+        });
+        // Make background layer transparent so the CSS starfield shows in space
+        if (map.getLayer('background')) {
+            map.setPaintProperty('background', 'background-opacity', 0);
+        }
+    } else {
+        map.setSky(undefined);
+        if (map.getLayer('background')) {
+            map.setPaintProperty('background', 'background-opacity', 1);
+        }
+    }
+}
+
+/**
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
 export function updateBasemapStyle(styleUrl) {
@@ -66,6 +100,7 @@ export function updateBasemapStyle(styleUrl) {
         if (typeof map.setProjection === 'function') {
             map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
         }
+        updateGlobeAtmosphere(stateManager.activeView === '3d');
 
         if (stateManager.activeMode === 'radar') {
             applyRadarTheme(stateManager.currentTheme);
@@ -172,6 +207,8 @@ function applyRadarTheme(theme) {
  */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
+
+    updateGlobeAtmosphere(targetView === '3d');
 
     if (targetView === '2d' || targetView === '3d') {
         hidePolarMap();
@@ -538,6 +575,7 @@ export async function switchAppMode(targetMode) {
                 if (typeof map.setProjection === 'function') {
                     map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
                 }
+                updateGlobeAtmosphere(stateManager.activeView === '3d');
 
                 try { initCityOverlay(map); } catch (e) {}
                 try { initVectorContours(map); } catch (e) {}
@@ -552,6 +590,8 @@ export async function switchAppMode(targetMode) {
             if (typeof map.setProjection === 'function') {
                 map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
             }
+            updateGlobeAtmosphere(stateManager.activeView === '3d');
+
             try { initCityOverlay(map); } catch (e) {}
             try { initVectorContours(map); } catch (e) {}
             await loadInitialModelData();
