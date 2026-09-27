@@ -53,7 +53,7 @@ const map = new maplibregl.Map({
 
 /**
  * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
- * Guaranteed to stay 100% locked to the perimeter across all  levels, rotations, and screen sizes!
+ * Guaranteed to stay 100% locked to the perimeter across all zoom levels, rotations, and screen sizes!
  */
 function getGlobeScreenCircle(matrix, w, h) {
     if (!matrix) return null;
@@ -95,14 +95,14 @@ function getGlobeScreenCircle(matrix, w, h) {
 function updateAtmosphereHalo(matrix) {
     if (stateManager.activeView !== '3d' || !haloCanvas || !haloCtx || !matrix) return;
 
-    const  = map.get();
+    const zoom = map.getZoom();
 
-    // 🌟 FADES OUT COMPLETELY AS YOU  INTO CONTINENTS (Never slices across North America!)
-    if ( >= 3.0) {
+    // 🌟 Extended zoom range: stays active much longer, gently fading out between zoom 2.6 and 3.5
+    if (zoom >= 3.5) {
         haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
         return;
     }
-    const alpha = Math.max(0, Math.min(1.0, (2.2 - zoom) / 0.5));
+    const alpha = Math.max(0, Math.min(1.0, (3.5 - zoom) / 0.9));
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = window.innerWidth * dpr;
@@ -124,6 +124,10 @@ function updateAtmosphereHalo(matrix) {
     const cx = circle.cx;
     const cy = circle.cy;
     const r = circle.r;
+
+    // Allow halo to scale with deeper zoom levels
+    const maxR = h * 2.5;
+    if (r > maxR) return;
 
     haloCtx.save();
     haloCtx.globalAlpha = alpha;
