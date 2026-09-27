@@ -1571,11 +1571,20 @@ export function destroyRadarMode(mapInstance) {
 
     if (radarModeMenuEl) {
         radarModeMenuEl.style.display = 'none';
+        radarModeMenuEl.remove();
+        radarModeMenuEl = null;
     }
 
     if (radarParamMenuEl) {
         radarParamMenuEl.style.display = 'none';
+        radarParamMenuEl.remove();
+        radarParamMenuEl = null;
     }
+
+    const modelBtn = document.getElementById('btn-model-menu');
+    const paramBtn = document.getElementById('btn-param-menu');
+    if (modelBtn) modelBtn.onclick = null;
+    if (paramBtn) paramBtn.onclick = null;
 
     if (stationHoverPopup) {
         stationHoverPopup.remove();
