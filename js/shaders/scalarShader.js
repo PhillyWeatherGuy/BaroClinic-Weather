@@ -214,37 +214,29 @@ export function createScalarShaderLayer(mapInstance) {
                 in vec2 a_pos;
                 in vec2 a_uv;
                 out vec2 v_uv;
-                out vec3 v_norm;
-
-                const float PI = 3.14159265358979323846;
 
                 void main() {
                     v_uv = a_uv;
 
                     ${isGlobe ? `
-                    vec3 spherePos;
                     if (a_pos.y < -5.0) {
-                        spherePos = vec3(0.0, 1.0, 0.0);
-                    } else if (a_pos.y > 5.0) {
-                        spherePos = vec3(0.0, -1.0, 0.0);
-                    } else {
-                        float lonRad = a_pos.x * 2.0 * PI - PI;
-                        float latRad = 2.0 * atan(exp((0.5 - a_pos.y) * 2.0 * PI)) - (PI * 0.5);
-                        spherePos = vec3(cos(latRad) * sin(lonRad), sin(latRad), cos(latRad) * cos(lonRad));
-                    }
-                    v_norm = spherePos;
-
-                    if (a_pos.y < -5.0 || a_pos.y > 5.0) {
-                        if (dot(spherePos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
+                        vec3 pos = vec3(0.0, 1.0, 0.0);
+                        if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
                             gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
                         } else {
-                            gl_Position = u_projection_matrix * vec4(spherePos, 1.0);
+                            gl_Position = u_projection_matrix * vec4(pos, 1.0);
+                        }
+                    } else if (a_pos.y > 5.0) {
+                        vec3 pos = vec3(0.0, -1.0, 0.0);
+                        if (dot(pos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w < 0.0) {
+                            gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
+                        } else {
+                            gl_Position = u_projection_matrix * vec4(pos, 1.0);
                         }
                     } else {
                         gl_Position = projectTile(a_pos);
                     }
                     ` : `
-                    v_norm = vec3(0.0, 0.0, 1.0);
                     if (a_pos.y < -5.0 || a_pos.y > 5.0) {
                         gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
                     } else {
@@ -258,14 +250,12 @@ export function createScalarShaderLayer(mapInstance) {
                 precision highp float;
 
                 in vec2 v_uv;
-                in vec3 v_norm;
                 out vec4 fragColor;
 
                 uniform sampler2D u_dataTexture;
                 uniform sampler2D u_paletteTexture;
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
-                ${isGlobe ? 'uniform vec4 u_projection_clipping_plane;' : ''}
 
                 ${fragmentShaderBody}
 
@@ -278,17 +268,7 @@ export function createScalarShaderLayer(mapInstance) {
                         discard;
                     }
 
-                    ${isGlobe ? `
-                    // 🌟 3D Physical Atmosphere: Only glows at the true tangent horizon
-                    float horizonDist = dot(normalize(v_norm), u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w;
-                    float limbFactor = clamp(horizonDist * 4.5, 0.0, 1.0);
-                    float edgeGlow = pow(1.0 - limbFactor, 3.5) * 0.45;
-                    vec3 glowColor = vec3(0.22, 0.74, 0.97); // Electric cyan #38bdf8
-
-                    fragColor = vec4(color.rgb + glowColor * edgeGlow, color.a * u_opacity);
-                    ` : `
                     fragColor = vec4(color.rgb, color.a * u_opacity);
-                    `}
                 }
                 `;
             } else {
