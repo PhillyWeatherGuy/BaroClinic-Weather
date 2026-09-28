@@ -11,42 +11,6 @@ const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
-function getPvaContourThemeColor() {
-    return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
-}
-
-function stripDamSuffix(value) {
-    if (typeof value !== 'string') return value;
-    return value.replace(/\s*dam\s*$/i, '').trim();
-}
-
-function themePvaContourFeatures(featureCollection) {
-    if (!featureCollection || !Array.isArray(featureCollection.features)) {
-        return featureCollection;
-    }
-
-    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    if (activeParamId !== 'pva') {
-        return featureCollection;
-    }
-
-    const contourColor = getPvaContourThemeColor();
-    for (const feature of featureCollection.features) {
-        if (!feature || !feature.properties) continue;
-        feature.properties.color = contourColor;
-        feature.properties.stroke = contourColor;
-        feature.properties.width = Number(feature.properties.width || 2) * 2.5;
-        feature.properties.opacity = Math.max(Number(feature.properties.opacity || 0.9), 0.95);
-
-        const rawName = feature.properties.name;
-        if (typeof rawName === 'string') {
-            feature.properties.name = stripDamSuffix(rawName);
-        }
-    }
-
-    return featureCollection;
-}
-
 export function initVectorContours(map) {
     mapInstance = map;
 
@@ -67,7 +31,7 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': ['coalesce', ['get', 'width'], 3.5],
+                'line-width': ['coalesce', ['get', 'width'], 2.0],
                 'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
             }
         });
@@ -80,7 +44,7 @@ export function initVectorContours(map) {
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
-                'text-size': 12,
+                'text-size': 11,
                 // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
                 'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
@@ -183,8 +147,7 @@ export async function updateVectorContours(step) {
                          masterData.steps[step];
 
         if (stepData) {
-            const themedStepData = themePvaContourFeatures(stepData);
-            source.setData(themedStepData);
+            source.setData(stepData);
             return;
         }
     }

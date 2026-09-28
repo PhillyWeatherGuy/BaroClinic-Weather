@@ -59,8 +59,8 @@
     },
     "pva": {
       "id": "pva",
-      "name": "500mb PVA",
-      "unit": "10⁻⁵ s⁻¹",
+      "name": "500mb Height",
+      "unit": "dam",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
       "palette": "pva",
