@@ -32,6 +32,8 @@ function themePvaContourFeatures(featureCollection) {
         const featureColor = is540Line ? '#4169E1' : contourColor;
         feature.properties.color = featureColor;
         feature.properties.stroke = featureColor;
+        feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
+        feature.properties.labelHaloColor = contourColor;
         if (is540Line) {
             feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
         }
@@ -73,16 +75,16 @@ export function initVectorContours(map) {
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
-                'text-size': 11,
+                'text-size': ['case', ['has', 'labelColor'], 14, 11],
                 // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
                 'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
                 'text-padding': 12
             },
             paint: {
-                'text-color': ['coalesce', ['get', 'color'], '#FFFFFF'],
-                'text-halo-color': '#0b0f19',
-                'text-halo-width': 2.0
+                'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
+                'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
+                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
             }
         });
     }
