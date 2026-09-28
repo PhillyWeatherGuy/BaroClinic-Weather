@@ -17,7 +17,7 @@ function getPvaContourThemeColor() {
 }
 
 function getPvaContourGlowColor() {
-    return stateManager.currentTheme === 'dark' ? '#00c8ff' : '#ff8a00';
+    return stateManager.currentTheme === 'dark' ? '#00c8ff' : '#b39bff';
 }
 
 function pvaZoomWidthExpression(baseWidth, isGlow = false) {
