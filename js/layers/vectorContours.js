@@ -7,6 +7,7 @@ let activeMasterKey = null;
 let fetchPromise = null;
 
 const SOURCE_ID = 'contour-master-source';
+const CASING_LAYER_ID = 'contour-master-casing-layer';
 const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
@@ -32,6 +33,7 @@ function themePvaContourFeatures(featureCollection) {
         const featureColor = is540Line ? '#4169E1' : contourColor;
         feature.properties.color = featureColor;
         feature.properties.stroke = featureColor;
+        feature.properties.outlineColor = contourColor === '#ffffff' ? '#000000' : '#ffffff';
         feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
         feature.properties.labelHaloColor = contourColor;
         if (is540Line) {
@@ -49,6 +51,22 @@ export function initVectorContours(map) {
         map.addSource(SOURCE_ID, {
             type: 'geojson',
             data: EMPTY_GEOJSON
+        });
+
+        map.addLayer({
+            id: CASING_LAYER_ID,
+            type: 'line',
+            source: SOURCE_ID,
+            filter: ['has', 'outlineColor'],
+            layout: {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            paint: {
+                'line-color': ['get', 'outlineColor'],
+                'line-width': ['+', ['coalesce', ['get', 'width'], 1.6], 2.4],
+                'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
+            }
         });
 
         // 1. Smooth Vector Line Layer
