@@ -11,6 +11,30 @@ const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
+function getPvaContourThemeColor() {
+    return stateManager.currentTheme === 'dark' ? '#000000' : '#ffffff';
+}
+
+function themePvaContourFeatures(featureCollection) {
+    if (!featureCollection || !Array.isArray(featureCollection.features)) {
+        return featureCollection;
+    }
+
+    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+    if (activeParamId !== 'pva') {
+        return featureCollection;
+    }
+
+    const contourColor = getPvaContourThemeColor();
+    for (const feature of featureCollection.features) {
+        if (!feature || !feature.properties) continue;
+        feature.properties.color = contourColor;
+        feature.properties.stroke = contourColor;
+    }
+
+    return featureCollection;
+}
+
 export function initVectorContours(map) {
     mapInstance = map;
 
@@ -97,12 +121,18 @@ async function loadMasterContourFile() {
     activeMasterKey = currentKey;
 
     const urlsToTry = [];
-    if (targetDate && runCycle) {
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?t=${Date.now()}`);
+    if (param === 'pva') {
+        if (targetDate && runCycle) {
+            urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+        }
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
     }
-    urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?t=${Date.now()}`);
+    if (targetDate && runCycle) {
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+    }
+    urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?v=${Date.now()}`);
     if (param === '2t' || param.includes('temp')) {
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?t=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?v=${Date.now()}`);
     }
 
     fetchPromise = (async () => {
@@ -147,7 +177,8 @@ export async function updateVectorContours(step) {
                          masterData.steps[step];
 
         if (stepData) {
-            source.setData(stepData);
+            const themedStepData = themePvaContourFeatures(stepData);
+            source.setData(themedStepData);
             return;
         }
     }
