@@ -16,6 +16,24 @@ function getPvaContourThemeColor() {
     return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
 }
 
+function getPvaContourGlowColor() {
+    return stateManager.currentTheme === 'dark' ? '#00c8ff' : '#ff8a00';
+}
+
+function pvaZoomWidthExpression(baseWidth, isGlow = false) {
+    const expression = ['interpolate', ['linear'], ['zoom']];
+    const zoomStops = [[2, 0.9, 3.2], [5, 1.0, 3.4], [8, 1.3, 3.8], [11, 1.65, 4.1], [14, 1.9, 4.4]];
+
+    for (const [zoom, scale, glowWidth] of zoomStops) {
+        const scaledWidth = ['*', baseWidth, scale];
+        expression.push(zoom, isGlow
+            ? ['+', scaledWidth, glowWidth]
+            : ['case', ['has', 'outlineColor'], scaledWidth, baseWidth]);
+    }
+
+    return expression;
+}
+
 function themePvaContourFeatures(featureCollection) {
     if (!featureCollection || !Array.isArray(featureCollection.features)) {
         return featureCollection;
@@ -27,13 +45,14 @@ function themePvaContourFeatures(featureCollection) {
     }
 
     const contourColor = getPvaContourThemeColor();
+    const glowColor = getPvaContourGlowColor();
     for (const feature of featureCollection.features) {
         if (!feature || !feature.properties) continue;
         const is540Line = Number(feature.properties.name) === 540;
         const featureColor = is540Line ? '#4169E1' : contourColor;
         feature.properties.color = featureColor;
         feature.properties.stroke = featureColor;
-        feature.properties.outlineColor = contourColor === '#ffffff' ? '#000000' : '#ffffff';
+        feature.properties.outlineColor = glowColor;
         feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
         feature.properties.labelHaloColor = contourColor;
         if (is540Line) {
@@ -64,7 +83,7 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['get', 'outlineColor'],
-                'line-width': ['+', ['coalesce', ['get', 'width'], 1.6], 4.4],
+                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
                 'line-opacity': 0.8,
                 'line-blur': 2.0
             }
@@ -81,7 +100,7 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': ['coalesce', ['get', 'width'], 2.0],
+                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
                 'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
             }
         });
