@@ -22,7 +22,7 @@ function getPvaContourGlowColor() {
 
 function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     const expression = ['interpolate', ['linear'], ['zoom']];
-    const zoomStops = [[2, 0.9, 3.2], [5, 1.0, 3.4], [8, 1.3, 3.8], [11, 1.65, 4.1], [14, 1.9, 4.4]];
+    const zoomStops = [[2, 0.9, 3.2], [5, 1.0, 3.4], [8, 1.35, 3.9], [11, 1.8, 4.3], [14, 2.1, 4.7]];
 
     for (const [zoom, scale, glowWidth] of zoomStops) {
         const scaledWidth = ['*', baseWidth, scale];
