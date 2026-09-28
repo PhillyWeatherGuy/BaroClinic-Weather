@@ -143,19 +143,26 @@ export function formatParameterValue(decodedVal, manifest) {
     if (decodedVal === undefined || isNaN(decodedVal)) return "--";
 
     const unit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim();
+    const normalizedUnit = unit.toLowerCase();
+    const isMetric = stateManager.currentUnits === 'metric';
 
-    if (unit === 'in' || unit.toLowerCase().includes('inch')) {
-        return `${decodedVal.toFixed(2)}"`;
+    if (unit.includes('°') || normalizedUnit.includes('fahrenheit') || normalizedUnit.includes('celsius')) {
+        let celsius = decodedVal;
+        if (decodedVal > 150) {
+            celsius = decodedVal - 273.15;
+        } else if (normalizedUnit.includes('f')) {
+            celsius = (decodedVal - 32) * (5 / 9);
+        }
+        const temperature = isMetric ? celsius : (celsius * (9 / 5)) + 32;
+        return `${Math.round(temperature)}°${isMetric ? 'C' : 'F'}`;
     }
 
-    if (unit.includes('°') || unit.toLowerCase().includes('f') || unit.toLowerCase().includes('c')) {
-        let tempVal = decodedVal;
-        if (decodedVal > 150 && (unit.includes('F') || unit.includes('f'))) {
-            tempVal = (decodedVal - 273.15) * 1.8 + 32.0;
-        } else if (decodedVal > 150 && (unit.includes('C') || unit.includes('c'))) {
-            tempVal = decodedVal - 273.15;
-        }
-        return `${Math.round(tempVal)}°`;
+    if (normalizedUnit === 'in' || normalizedUnit.includes('inch')) {
+        return isMetric ? `${(decodedVal * 25.4).toFixed(1)} mm` : `${decodedVal.toFixed(2)} in`;
+    }
+
+    if (normalizedUnit === 'mm' || normalizedUnit.includes('millimeter')) {
+        return isMetric ? `${decodedVal.toFixed(1)} mm` : `${(decodedVal / 25.4).toFixed(2)} in`;
     }
 
     if (unit === '%') return `${Math.round(decodedVal)}%`;
@@ -359,7 +366,7 @@ function renderCityValues(activeFrameState, manifest) {
     if (!activeFrameState || stateManager.activeMode !== 'modelViewer') return;
 
     const activeUnit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim().toLowerCase();
-    const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch');
+    const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch') || activeUnit === 'mm' || activeUnit.includes('millimeter');
 
     for (let i = 0; i < activeCities.length; i++) {
         const city = activeCities[i];

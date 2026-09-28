@@ -1,6 +1,7 @@
 // js/core/level3Decoder.js
 import { unzlibSync, inflateSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
+import { stateManager } from './stateManager.js';
 
 /**
  * 🌟 Cache of dynamic calibration factors per product from the decoded PDB
@@ -380,7 +381,9 @@ export function formatRadarValue(rawByte, productOrSweep, optScale = null, optOf
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
         if (rawByte === 1) return 'RF'; // Range Folded
         const mph = Math.round((rawByte - 129) * 1.11847);
-        return (mph > 0 ? `+${mph}` : `${mph}`) + ' MPH';
+        const speed = stateManager.currentUnits === 'metric' ? Math.round(mph * 1.60934) : mph;
+        const speedLabel = speed > 0 ? `+${speed}` : `${speed}`;
+        return `${speedLabel} ${stateManager.currentUnits === 'metric' ? 'km/h' : 'MPH'}`;
     }
 
     // 2. Correlation Coefficient (N0C / CC / RHO)
@@ -397,7 +400,7 @@ export function formatRadarValue(rawByte, productOrSweep, optScale = null, optOf
             ? ((rawByte - (offset || 0)) / scale) * 0.01
             : (rawByte - 1) * 0.01;
         if (inches <= 0) return null;
-        return inches.toFixed(2) + ' in';
+        return stateManager.currentUnits === 'metric' ? `${(inches * 25.4).toFixed(1)} mm` : `${inches.toFixed(2)} in`;
     }
 
     // 4. Storm Total Accumulation (DTA / DSP / NTP)
@@ -407,7 +410,7 @@ export function formatRadarValue(rawByte, productOrSweep, optScale = null, optOf
             ? ((rawByte - (offset || 0)) / scale) * 0.01
             : (rawByte - 1) * 0.01;
         if (inches <= 0) return null;
-        return inches.toFixed(2) + ' in';
+        return stateManager.currentUnits === 'metric' ? `${(inches * 25.4).toFixed(1)} mm` : `${inches.toFixed(2)} in`;
     }
 
     // 5. Default: Base Reflectivity (dBZ)

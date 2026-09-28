@@ -1028,6 +1028,61 @@
     color: #94a3b8;
 }
 
+.unit-toggle-pill {
+    position: absolute;
+    top: 62px;
+    left: 76px;
+    z-index: 26;
+    width: 84px;
+    height: 30px;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    background: rgba(11, 15, 25, 0.88);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    color: #cbd5e1;
+    cursor: pointer;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.unit-toggle-pill:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(11, 15, 25, 0.95);
+}
+
+.unit-toggle-track {
+    position: relative;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+}
+
+.unit-option {
+    z-index: 2;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.unit-thumb {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 50%;
+    border: 1px solid rgba(56, 189, 248, 0.8);
+    border-radius: 14px;
+    background: rgba(56, 189, 248, 0.3);
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.unit-toggle-pill.metric-mode .unit-thumb {
+    transform: translateX(100%);
+}
+
 /* ==========================================
    RADAR HOVER INSPECTION BADGE
    ========================================== */
@@ -1058,7 +1113,7 @@
 #radar-tools-container {
     position: absolute;
     top: 62px;
-    left: 74px; /* Sits right next to #btn-theme-toggle */
+    left: 170px;
     z-index: 26;
     display: flex;
     align-items: center;
@@ -1070,6 +1125,18 @@
     border-radius: 20px;
     padding: 3px 6px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 1023px) {
+    .unit-toggle-pill {
+        right: 16px;
+        left: auto;
+    }
+
+    #radar-tools-container {
+        top: 104px;
+        left: 16px;
+    }
 }
 
 .radar-tool-btn {

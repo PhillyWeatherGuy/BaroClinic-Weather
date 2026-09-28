@@ -15,6 +15,7 @@ export const stateManager = {
     activeRadarProduct: 'N0B', // 🌟 Active Single-Site Radar Product ('N0B' | 'N0U' | 'DAA' | 'N3P' | 'DTA')
     currentMapStyle: null,   // 🌟 Active Basemap Style URL
     currentTheme: 'light',   // 🌟 Active Theme ('light' | 'dark')
+    currentUnits: 'imperial',
     activeView: '2d',        // 🌟 Active Projection ('2d' | '3d' | 'polar')
     loadGeneration: 0,       // 🌟 Cancellation token
 

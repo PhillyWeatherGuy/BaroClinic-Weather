@@ -1,6 +1,6 @@
 // js/components/viewerUI.js
 import { stateManager } from '../core/stateManager.js';
-import { saveViewerPreferences } from '../core/viewerPreferences.js';
+import { getViewerPreferences, saveViewerPreferences } from '../core/viewerPreferences.js';
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js';
 import { updatePolarPalette } from '../layers/polarMap.js';
@@ -486,6 +486,32 @@ export function initThemeToggle() {
     });
 }
 
+function initUnitToggle(onChange) {
+    const unitsBtn = document.getElementById('btn-unit-toggle');
+    if (!unitsBtn) return;
+
+    const savedUnits = getViewerPreferences().units;
+    stateManager.currentUnits = savedUnits === 'metric' ? 'metric' : 'imperial';
+
+    const updateControl = () => {
+        const isMetric = stateManager.currentUnits === 'metric';
+        const label = `Units: ${isMetric ? 'Metric' : 'Imperial'}`;
+        unitsBtn.classList.toggle('metric-mode', isMetric);
+        unitsBtn.setAttribute('aria-checked', String(isMetric));
+        unitsBtn.setAttribute('aria-label', label);
+        unitsBtn.title = label;
+    };
+
+    updateControl();
+    unitsBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        stateManager.currentUnits = stateManager.currentUnits === 'imperial' ? 'metric' : 'imperial';
+        saveViewerPreferences({ units: stateManager.currentUnits });
+        updateControl();
+        if (typeof onChange === 'function') onChange(stateManager.currentUnits);
+    });
+}
+
 export function getMaxLoadedStepIndex() {
     if (!stateManager.globalSteps || stateManager.globalSteps.length === 0) {
         highestPreloadedChunk = 0;
@@ -891,7 +917,7 @@ export function initParameterCategoryBar() {
     });
 }
 
-export function initViewerUI(stepCallback, themeCallback = null, viewCallback = null, zoomCallback = null, mapInstance = null) {
+export function initViewerUI(stepCallback, themeCallback = null, viewCallback = null, zoomCallback = null, mapInstance = null, unitsCallback = null) {
     onStepChangeCallback = stepCallback;
     onThemeChangeCallback = themeCallback;
 
@@ -905,6 +931,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
     initModelCategoryBar();
     initParameterCategoryBar();
     initThemeToggle();
+    initUnitToggle(unitsCallback);
     initViewSelector(viewCallback);
     initKeyboardControls(zoomCallback);
     initTiltSelector();

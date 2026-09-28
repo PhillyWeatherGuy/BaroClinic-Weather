@@ -51,6 +51,29 @@ const RADAR_PRODUCTS = [
     { id: 'DTA', name: 'Storm Total Precip (in)' }
 ];
 
+function getRadarProductLabel(product) {
+    if (stateManager.currentUnits !== 'metric') return product.name;
+    if (product.id === 'N0U') return product.name.replace('MPH', 'km/h');
+    if (['DAA', 'N3P', 'DTA'].includes(product.id)) return product.name.replace('(in)', '(mm)');
+    return product.name;
+}
+
+export function updateRadarUnitLabels() {
+    if (stateManager.activeMode !== 'radar') return;
+
+    const currentProduct = RADAR_PRODUCTS.find(product => product.id === stateManager.activeRadarProduct);
+    const paramLabel = document.querySelector('#btn-param-menu span');
+    if (currentProduct && paramLabel) paramLabel.textContent = getRadarProductLabel(currentProduct);
+
+    if (radarParamMenuEl) {
+        radarParamMenuEl.querySelectorAll('.radar-top-item').forEach((item) => {
+            const product = RADAR_PRODUCTS.find(candidate => candidate.id === item.dataset.product);
+            const label = item.querySelector('span');
+            if (product && label) label.textContent = getRadarProductLabel(product);
+        });
+    }
+}
+
 function ensureArchiveStyles() {
     if (document.getElementById('radar-archive-styles')) return;
     const style = document.createElement('style');
@@ -1121,7 +1144,7 @@ function initRadarParamDropdown() {
         const currentProd = stateManager.activeRadarProduct || 'N0B';
         radarParamMenuEl.innerHTML = RADAR_PRODUCTS.map(p => `
             <button class="radar-top-item ${currentProd === p.id ? 'active' : ''}" data-product="${p.id}">
-                <span>${p.name}</span>
+            <span>${getRadarProductLabel(p)}</span>
             </button>
         `).join('');
 
@@ -1140,7 +1163,7 @@ function initRadarParamDropdown() {
                 saveViewerPreferences({ radarProduct: selectedProd });
                 const prodInfo = RADAR_PRODUCTS.find(p => p.id === selectedProd);
                 if (prodInfo) {
-                    paramBtn.querySelector('span').textContent = prodInfo.name;
+                    paramBtn.querySelector('span').textContent = getRadarProductLabel(prodInfo);
                 }
 
                 radarParamMenuEl.querySelectorAll('.radar-top-item').forEach(b => {

@@ -29,7 +29,7 @@ import { initVectorContours, updateVectorContours, preloadAllContours } from './
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
 
 // 🛰️ Real-Time Radar Engine
-import { initRadarMode, destroyRadarMode } from './components/radarUI.js';
+import { initRadarMode, destroyRadarMode, updateRadarUnitLabels } from './components/radarUI.js';
 import { hideStormVolume } from './layers/stormVolume3D.js';
 
 import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
@@ -751,7 +751,18 @@ initViewerUI(
     (newTheme) => { applyTheme(newTheme); },
     (newView) => { applyView(newView); },
     (direction, x, y) => { handleKeyboardZoom(direction, x, y); },
-    map
+    map,
+    () => {
+        updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
+        updateRadarUnitLabels();
+        const location = popup.getLngLat();
+        if (popup.isOpen() && location && stateManager.activeFrameState && stateManager.activeMode !== 'radar') {
+            const value = sampleBilinearValue(location.lng, location.lat, stateManager.activeFrameState, stateManager.manifest);
+            const formattedText = formatParameterValue(value, stateManager.manifest);
+            const paramName = stateManager.manifest?.name || stateManager.manifest?.parameter || 'Value';
+            popup.setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`);
+        }
+    }
 );
 
 map.on('error', (e) => {
