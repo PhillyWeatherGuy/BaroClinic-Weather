@@ -64,9 +64,9 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['get', 'outlineColor'],
-                'line-width': ['+', ['coalesce', ['get', 'width'], 1.6], 3.2],
-                'line-opacity': 0.6,
-                'line-blur': 1.3
+                'line-width': ['+', ['coalesce', ['get', 'width'], 1.6], 4.4],
+                'line-opacity': 0.8,
+                'line-blur': 2.0
             }
         });
 
