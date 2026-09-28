@@ -15,6 +15,11 @@ function getPvaContourThemeColor() {
     return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
 }
 
+function stripDamSuffix(value) {
+    if (typeof value !== 'string') return value;
+    return value.replace(/\s*dam\s*$/i, '').trim();
+}
+
 function themePvaContourFeatures(featureCollection) {
     if (!featureCollection || !Array.isArray(featureCollection.features)) {
         return featureCollection;
@@ -30,6 +35,13 @@ function themePvaContourFeatures(featureCollection) {
         if (!feature || !feature.properties) continue;
         feature.properties.color = contourColor;
         feature.properties.stroke = contourColor;
+        feature.properties.width = Number(feature.properties.width || 2) * 2.5;
+        feature.properties.opacity = Math.max(Number(feature.properties.opacity || 0.9), 0.95);
+
+        const rawName = feature.properties.name;
+        if (typeof rawName === 'string') {
+            feature.properties.name = stripDamSuffix(rawName);
+        }
     }
 
     return featureCollection;
@@ -55,7 +67,7 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': ['coalesce', ['get', 'width'], 2.0],
+                'line-width': ['coalesce', ['get', 'width'], 3.5],
                 'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
             }
         });
@@ -68,7 +80,7 @@ export function initVectorContours(map) {
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
-                'text-size': 11,
+                'text-size': 12,
                 // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
                 'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
