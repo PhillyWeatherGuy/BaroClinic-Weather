@@ -22,7 +22,7 @@ function getPvaContourGlowColor() {
 
 function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     const expression = ['interpolate', ['linear'], ['zoom']];
-    const zoomStops = [[2, 0.9, 3.2], [5, 1.0, 3.4], [8, 1.35, 3.9], [11, 1.8, 4.3], [14, 2.1, 4.7]];
+    const zoomStops = [[2, 0.65, 1.8], [5, 0.85, 2.1], [8, 1.2, 2.8], [11, 1.7, 3.6], [14, 2.1, 4.4]];
 
     for (const [zoom, scale, glowWidth] of zoomStops) {
         const scaledWidth = ['*', baseWidth, scale];
@@ -50,7 +50,7 @@ function themePvaContourFeatures(featureCollection) {
     for (const feature of featureCollection.features) {
         if (!feature || !feature.properties) continue;
         const is540Line = Number(feature.properties.name) === 540;
-        const featureColor = is540Line ? '#4169E1' : contourColor;
+        const featureColor = is540Line ? (isDarkTheme ? '#4169E1' : '#1e3a8a') : contourColor;
         feature.properties.color = featureColor;
         feature.properties.stroke = featureColor;
         feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
