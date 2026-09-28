@@ -12,7 +12,7 @@ const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
 function getPvaContourThemeColor() {
-    return stateManager.currentTheme === 'dark' ? '#000000' : '#ffffff';
+    return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
 }
 
 function themePvaContourFeatures(featureCollection) {
@@ -28,8 +28,13 @@ function themePvaContourFeatures(featureCollection) {
     const contourColor = getPvaContourThemeColor();
     for (const feature of featureCollection.features) {
         if (!feature || !feature.properties) continue;
-        feature.properties.color = contourColor;
-        feature.properties.stroke = contourColor;
+        const is540Line = Number(feature.properties.name) === 540;
+        const featureColor = is540Line ? '#4169E1' : contourColor;
+        feature.properties.color = featureColor;
+        feature.properties.stroke = featureColor;
+        if (is540Line) {
+            feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
+        }
     }
 
     return featureCollection;
