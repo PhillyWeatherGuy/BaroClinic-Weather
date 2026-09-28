@@ -600,6 +600,7 @@ export function initModelCategoryBar() {
 
                 try {
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
+                    syncModelRunDropdown();
 
                     const bitmap0 = await loadChunkBitmap(0, thisGen);
                     if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
@@ -793,6 +794,7 @@ export function initParameterCategoryBar() {
 
                 try {
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
+                    syncModelRunDropdown();
 
                     const bitmap0 = await loadChunkBitmap(0, thisGen);
                     if (shaderLayerRef && thisGen === stateManager.loadGeneration) {

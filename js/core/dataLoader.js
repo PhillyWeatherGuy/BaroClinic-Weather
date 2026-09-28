@@ -14,13 +14,23 @@ export async function fetchManifest(run = null, model = null, param = null) {
     }
 
     const urlsToTry = [];
+    const manifestParam = activeParam === 'pva' ? 'z500' : activeParam;
+    const latestUrl = `${stateManager.BASE_URL}${activeModel}_${manifestParam}_manifest.json`;
 
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
-        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
+        if (activeParam === 'pva') {
+            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_z500_${dateStr}_${cycleStr}_manifest.json`);
+        } else {
+            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
+        }
     }
-    urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_manifest.json`);
+    if (!run) {
+        urlsToTry.unshift(latestUrl);
+    } else {
+        urlsToTry.push(latestUrl);
+    }
 
     let fetchedData = null;
 
