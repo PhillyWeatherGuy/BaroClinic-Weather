@@ -46,13 +46,16 @@ function themePvaContourFeatures(featureCollection) {
 
     const contourColor = getPvaContourThemeColor();
     const glowColor = getPvaContourGlowColor();
+    const isDarkTheme = stateManager.currentTheme === 'dark';
     for (const feature of featureCollection.features) {
         if (!feature || !feature.properties) continue;
         const is540Line = Number(feature.properties.name) === 540;
         const featureColor = is540Line ? '#4169E1' : contourColor;
         feature.properties.color = featureColor;
         feature.properties.stroke = featureColor;
-        feature.properties.outlineColor = glowColor;
+        feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
+        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
+        feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
         feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
         feature.properties.labelHaloColor = contourColor;
         if (is540Line) {
@@ -84,8 +87,8 @@ export function initVectorContours(map) {
             paint: {
                 'line-color': ['get', 'outlineColor'],
                 'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
-                'line-opacity': 0.8,
-                'line-blur': 2.0
+                'line-opacity': ['coalesce', ['get', 'outlineOpacity'], 0.8],
+                'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
             }
         });
 
