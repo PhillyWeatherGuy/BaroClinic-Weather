@@ -755,6 +755,8 @@ initViewerUI(
     () => {
         updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
         updateRadarUnitLabels();
+        const currentStep = stateManager.globalSteps[stateManager.currentStepIndex]?.step;
+        if (currentStep !== undefined) updateVectorContours(currentStep);
         const location = popup.getLngLat();
         if (popup.isOpen() && location && stateManager.activeFrameState && stateManager.activeMode !== 'radar') {
             const value = sampleBilinearValue(location.lng, location.lat, stateManager.activeFrameState, stateManager.manifest);

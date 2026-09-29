@@ -34,12 +34,23 @@ function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     return expression;
 }
 
-function themePvaContourFeatures(featureCollection) {
+function themeContourFeatures(featureCollection) {
     if (!featureCollection || !Array.isArray(featureCollection.features)) {
         return featureCollection;
     }
 
     const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+    if (activeParamId === '2t') {
+        const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C Freezing Line' : '32°F Freezing Line';
+        for (const feature of featureCollection.features) {
+            const name = String(feature?.properties?.name || '');
+            if (feature?.properties && (Number(name) === 273.15 || /freez|273\.15/i.test(name))) {
+                feature.properties.name = freezingLabel;
+            }
+        }
+        return featureCollection;
+    }
+
     if (activeParamId !== 'pva') {
         return featureCollection;
     }
@@ -225,7 +236,7 @@ export async function updateVectorContours(step) {
                          masterData.steps[step];
 
         if (stepData) {
-            const themedStepData = themePvaContourFeatures(stepData);
+            const themedStepData = themeContourFeatures(stepData);
             source.setData(themedStepData);
             return;
         }
