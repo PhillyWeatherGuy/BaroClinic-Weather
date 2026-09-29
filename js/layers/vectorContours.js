@@ -41,7 +41,7 @@ function themeContourFeatures(featureCollection) {
 
     const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
     if (activeParamId === '2t') {
-        const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C Freezing Line' : '32°F Freezing Line';
+        const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
         for (const feature of featureCollection.features) {
             const name = String(feature?.properties?.name || '');
             if (feature?.properties && (Number(name) === 273.15 || /freez|273\.15/i.test(name))) {
