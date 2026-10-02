@@ -5,6 +5,7 @@ let mapInstance = null;
 let activeMasterContours = null;
 let activeMasterKey = null;
 let fetchPromise = null;
+let activeContourBinary = null;
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -147,6 +148,7 @@ export function initVectorContours(map) {
  */
 export function clearVectorContours() {
     activeMasterContours = null;
+    activeContourBinary = null;
     activeMasterKey = null;
     fetchPromise = null;
     if (!mapInstance) return;
@@ -202,6 +204,12 @@ async function loadMasterContourFile() {
                     const data = await resp.json().catch(() => null);
                     if (data && data.steps) {
                         activeMasterContours = data;
+                        if (data.binary?.file && typeof DecompressionStream !== 'undefined') {
+                            const binaryResp = await fetch(`${stateManager.BASE_URL}${data.binary.file}?v=${Date.now()}`).catch(() => null);
+                            if (binaryResp?.ok) {
+                                activeContourBinary = await decodeContourBinary(await binaryResp.arrayBuffer());
+                            }
+                        }
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
                         return activeMasterContours;
                     }
@@ -213,6 +221,63 @@ async function loadMasterContourFile() {
     })();
 
     return await fetchPromise;
+}
+
+async function decodeContourBinary(buffer) {
+    let bytes = new Uint8Array(buffer);
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+        bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (String.fromCharCode(...bytes.subarray(0, 4)) !== 'CTV1') return null;
+    let offset = 4;
+    const stepCount = view.getUint32(offset, true);
+    offset += 4;
+    const steps = new Map();
+
+    for (let stepIndex = 0; stepIndex < stepCount; stepIndex++) {
+        const step = view.getUint32(offset, true);
+        const featureCount = view.getUint32(offset + 4, true);
+        offset += 8;
+        const features = [];
+        for (let featureIndex = 0; featureIndex < featureCount; featureIndex++) {
+            const lineCount = view.getUint32(offset, true);
+            offset += 4;
+            const lines = [];
+            for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+                const pointCount = view.getUint32(offset, true);
+                offset += 4;
+                const line = [];
+                let x = 0;
+                let y = 0;
+                for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+                    x += view.getInt32(offset, true);
+                    y += view.getInt32(offset + 4, true);
+                    offset += 8;
+                    line.push([x / 1000, y / 1000]);
+                }
+                lines.push(line);
+            }
+            features.push({ type: 'Feature', geometry: { type: 'MultiLineString', coordinates: lines } });
+        }
+        steps.set(String(step), features);
+    }
+    return steps;
+}
+
+function binaryStepToGeoJson(step, masterData) {
+    const features = activeContourBinary?.get(String(step));
+    const metadata = masterData.steps?.[String(step)]?.features?.map(feature => feature.properties) || [];
+    if (!features) return null;
+    return {
+        type: 'FeatureCollection',
+        features: features.map((feature, index) => ({
+            ...feature,
+            properties: metadata[index] || {}
+        }))
+    };
 }
 
 /**
@@ -236,7 +301,8 @@ export async function updateVectorContours(step) {
                          masterData.steps[step];
 
         if (stepData) {
-            const themedStepData = themeContourFeatures(stepData);
+            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
+            const themedStepData = themeContourFeatures(decodedStepData);
             source.setData(themedStepData);
             return;
         }
