@@ -127,59 +127,52 @@ const fragmentShaderBody = `
 
     vec4 sampleSmoothPtypeColor(sampler2D ptypeTex, vec2 uv, vec2 texRes, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
         vec2 pos = uv * texRes - 0.5;
-        vec2 f = fract(pos);
         vec2 i = floor(pos);
-
-        vec4 wx = cubicBSpline(f.x);
-        vec4 wy = cubicBSpline(f.y);
-
+        vec2 f = fract(pos);
         vec2 invTex = 1.0 / texRes;
-        float x0 = fract((i.x - 0.5) * invTex.x + 1.0);
-        float x1 = fract((i.x + 0.5) * invTex.x + 1.0);
-        float x2 = fract((i.x + 1.5) * invTex.x + 1.0);
-        float x3 = fract((i.x + 2.5) * invTex.x + 1.0);
+
+        // 🌟 5x5 Isotropic Gaussian Curvature Filter (sigma = 1.15)
+        // Eliminates 1-cell checkerboard scalloping, teeth, and isolated convective specks,
+        // transforming discrete ptype decisions into broad, sweeping, natural curves!
+        const float invTwoSigmaSq = 0.378;
+
+        float wy[5];
+        for (int y = 0; y < 5; y++) {
+            float d = float(y - 2) - f.y;
+            wy[y] = exp(-d * d * invTwoSigmaSq);
+        }
+
+        float wx[5];
+        for (int x = 0; x < 5; x++) {
+            float d = float(x - 2) - f.x;
+            wx[x] = exp(-d * d * invTwoSigmaSq);
+        }
 
         float wSnow = 0.0;
         float wFrzr = 0.0;
         float wSleet = 0.0;
         float wRain = 0.0;
 
-        // 🌟 Evaluate 4x4 cubic B-spline neighborhood matching prate's exact continuous curvature
-        for (int y = -1; y <= 2; y++) {
-            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
-            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
+        for (int dy = -2; dy <= 2; dy++) {
+            float yCoord = clamp((i.y + float(dy) + 0.5) * invTex.y, 0.0, 1.0);
+            float weightY = wy[dy + 2];
 
-            // Col 0
-            float c0 = floor(texture(ptypeTex, vec2(x0, yCoord)).r * 255.0 + 0.5);
-            float w0 = w_y * wx.x;
-            if (c0 == 5.0 || c0 == 6.0 || c0 == 9.0 || c0 == 10.0) wSnow += w0;
-            else if (c0 == 3.0 || c0 == 4.0 || c0 == 12.0) wFrzr += w0;
-            else if (c0 == 7.0 || c0 == 8.0) wSleet += w0;
-            else if (c0 > 0.5) wRain += w0;
+            for (int dx = -2; dx <= 2; dx++) {
+                float xCoord = fract((i.x + float(dx) + 0.5) * invTex.x + 1.0);
+                float weight = weightY * wx[dx + 2];
 
-            // Col 1
-            float c1 = floor(texture(ptypeTex, vec2(x1, yCoord)).r * 255.0 + 0.5);
-            float w1 = w_y * wx.y;
-            if (c1 == 5.0 || c1 == 6.0 || c1 == 9.0 || c1 == 10.0) wSnow += w1;
-            else if (c1 == 3.0 || c1 == 4.0 || c1 == 12.0) wFrzr += w1;
-            else if (c1 == 7.0 || c1 == 8.0) wSleet += w1;
-            else if (c1 > 0.5) wRain += w1;
+                float code = floor(texture(ptypeTex, vec2(xCoord, yCoord)).r * 255.0 + 0.5);
 
-            // Col 2
-            float c2 = floor(texture(ptypeTex, vec2(x2, yCoord)).r * 255.0 + 0.5);
-            float w2 = w_y * wx.z;
-            if (c2 == 5.0 || c2 == 6.0 || c2 == 9.0 || c2 == 10.0) wSnow += w2;
-            else if (c2 == 3.0 || c2 == 4.0 || c2 == 12.0) wFrzr += w2;
-            else if (c2 == 7.0 || c2 == 8.0) wSleet += w2;
-            else if (c2 > 0.5) wRain += w2;
-
-            // Col 3
-            float c3 = floor(texture(ptypeTex, vec2(x3, yCoord)).r * 255.0 + 0.5);
-            float w3 = w_y * wx.w;
-            if (c3 == 5.0 || c3 == 6.0 || c3 == 9.0 || c3 == 10.0) wSnow += w3;
-            else if (c3 == 3.0 || c3 == 4.0 || c3 == 12.0) wFrzr += w3;
-            else if (c3 == 7.0 || c3 == 8.0) wSleet += w3;
-            else if (c3 > 0.5) wRain += w3;
+                if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
+                    wSnow += weight;
+                } else if (code == 3.0 || code == 4.0 || code == 12.0) {
+                    wFrzr += weight;
+                } else if (code == 7.0 || code == 8.0) {
+                    wSleet += weight;
+                } else if (code > 0.5) {
+                    wRain += weight;
+                }
+            }
         }
 
         float totalPrecip = wSnow + wFrzr + wSleet + wRain;
@@ -187,10 +180,7 @@ const fragmentShaderBody = `
             return texture(palTex, vec2(palU, 0.5));
         }
 
-        // 🌟 Crisp Bicubic Boundary:
-        // Uses the 4x4 cubic B-spline weights to find the dominant category at this fragment.
-        // The boundary is an exact analytic curve with 100% solid, crisp colors (zero blurriness)
-        // while strictly preserving real types and keeping fake freezing rain 100% off!
+        // Dominant category selection with clean solid colors (zero blurriness, zero fake freezing rain)
         float maxW = max(max(wSnow, wSleet), max(wFrzr, wRain));
 
         if (maxW == wFrzr) {
