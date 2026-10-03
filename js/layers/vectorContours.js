@@ -207,7 +207,10 @@ async function loadMasterContourFile() {
                         if (data.binary?.file && typeof DecompressionStream !== 'undefined') {
                             const binaryResp = await fetch(`${stateManager.BASE_URL}${data.binary.file}?v=${Date.now()}`).catch(() => null);
                             if (binaryResp?.ok) {
-                                activeContourBinary = await decodeContourBinary(await binaryResp.arrayBuffer());
+                                activeContourBinary = await decodeContourBinary(
+                                    await binaryResp.arrayBuffer(),
+                                    data.binary.scale || 1000
+                                );
                             }
                         }
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
@@ -223,7 +226,7 @@ async function loadMasterContourFile() {
     return await fetchPromise;
 }
 
-async function decodeContourBinary(buffer) {
+async function decodeContourBinary(buffer, coordinateScale = 1000) {
     let bytes = new Uint8Array(buffer);
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
@@ -231,7 +234,9 @@ async function decodeContourBinary(buffer) {
     }
 
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    if (String.fromCharCode(...bytes.subarray(0, 4)) !== 'CTV1') return null;
+    const format = String.fromCharCode(...bytes.subarray(0, 4));
+    if (format === 'CTV2') return decodeContourV2(view, coordinateScale);
+    if (format !== 'CTV1') return null;
     let offset = 4;
     const stepCount = view.getUint32(offset, true);
     offset += 4;
@@ -262,6 +267,77 @@ async function decodeContourBinary(buffer) {
             }
             features.push({ type: 'Feature', geometry: { type: 'MultiLineString', coordinates: lines } });
         }
+        steps.set(String(step), features);
+    }
+    return steps;
+}
+
+function decodeContourV2(view, coordinateScale) {
+    let offset = 4;
+    const stepCount = view.getUint32(offset, true);
+    offset += 4;
+    const steps = new Map();
+
+    for (let stepIndex = 0; stepIndex < stepCount; stepIndex++) {
+        const step = view.getUint32(offset, true);
+        const featureCount = view.getUint32(offset + 4, true);
+        const payloadLength = view.getUint32(offset + 8, true);
+        offset += 12;
+        const payloadEnd = offset + payloadLength;
+        const features = [];
+
+        for (let featureIndex = 0; featureIndex < featureCount; featureIndex++) {
+            const lineCount = view.getUint32(offset, true);
+            offset += 4;
+            const lengths = [];
+            let pointCount = 0;
+            for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+                const length = view.getUint32(offset, true);
+                offset += 4;
+                lengths.push(length);
+                pointCount += length;
+            }
+
+            const starts = [];
+            for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+                starts.push([
+                    view.getInt32(offset, true) / coordinateScale,
+                    view.getInt32(offset + lineCount * 4, true) / coordinateScale
+                ]);
+                offset += 4;
+            }
+            offset += lineCount * 4;
+
+            const deltaCount = pointCount - lineCount;
+            const deltaX = [];
+            const deltaY = [];
+            for (let deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++) {
+                deltaX.push(view.getInt16(offset, true));
+                offset += 2;
+            }
+            for (let deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++) {
+                deltaY.push(view.getInt16(offset, true));
+                offset += 2;
+            }
+
+            const lines = [];
+            let deltaIndex = 0;
+            for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+                let x = starts[lineIndex][0];
+                let y = starts[lineIndex][1];
+                const line = [[x, y]];
+                for (let pointIndex = 1; pointIndex < lengths[lineIndex]; pointIndex++) {
+                    x += deltaX[deltaIndex] / coordinateScale;
+                    y += deltaY[deltaIndex] / coordinateScale;
+                    deltaIndex++;
+                    line.push([x, y]);
+                }
+                lines.push(line);
+            }
+            features.push({ type: 'Feature', geometry: { type: 'MultiLineString', coordinates: lines } });
+        }
+
+        if (offset !== payloadEnd) return null;
         steps.set(String(step), features);
     }
     return steps;
