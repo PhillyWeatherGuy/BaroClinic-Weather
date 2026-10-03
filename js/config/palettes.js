@@ -58,19 +58,22 @@ export const TEMP_PALETTE = [
 
 // 🌧️ Matplotlib Light Mode Precip Levels (Inches)
 const LIGHT_PRECIP_LEVELS = [
-    0.01, 0.02, 0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
-    1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5,
-    9.0, 9.5, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 50.0
+    0.01, 0.02, 0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
+    0.9, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5,
+    7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 50.0
 ];
 
 // 🌧️ Matplotlib Light Mode Precip Hex Colors
 const LIGHT_PRECIP_HEX = [
-"#D0D0D0", "#A8A8A8", "#8A8A8A", "#787878", "#8C9987", "#B1CFA4", "#91CB7F", "#5DAD4E", "#4F9C3C", "#448D31",
-"#37725C", "#3361B6", "#5687C3", "#7BA6CA", "#A1BCCF", "#C5D0C8", "#D3CFAA", "#CFC37C", "#CBAC58", "#C88931",
-"#C67B30", "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841", "#8B7069", "#9D827B",
-"#B19E97", "#BEB5B4", "#A69EB5", "#877E9D", "#756A92", "#635785", "#594176", "#66136B", "#A223AA", "#B627BF",
-"#C038CA", "#C45BCD", "#C574CD"
+    "#D0D0D0", "#A8A8A8", "#8A8A8A", "#787878", "#8C9987", "#B1CFA4", "#91CB7F", "#5DAD4E", "#4F9C3C", "#448D31",
+    "#37725C", "#3361B6", "#5687C3", "#7BA6CA", "#A1BCCF", "#C5D0C8", "#D3CFAA", "#CFC37C", "#CBAC58", "#C88931",
+    "#C67B30", "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841", "#8B7069", "#9D827B",
+    "#B19E97", "#BEB5B4", "#A69EB5", "#877E9D", "#756A92", "#635785", "#594176", "#66136B", "#A223AA", "#B627BF",
+    "#C038CA", "#C45BCD", "#C574CD"
 ];
+
+const LIGHT_PRATE_LEVELS = [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0];
+const LIGHT_PRATE_HEX = ["#bebebe", "#a3ccb5", "#76c296", "#4cb377", "#22c55e", "#15803d", "#14532d", "#ffd700", "#ffaa00", "#ff7700", "#ff007f", "#ff0055", "#ff0033", "#d500f9", "#aa00ff", "#7c00ea", "#311b92", "#1a237e", "#01030a"];
 
 // 💧 Light Mode PWAT Levels (Inches)
 const LIGHT_PWAT_LEVELS = [
@@ -142,8 +145,16 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
 export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     LIGHT_PRECIP_LEVELS, 
     LIGHT_PRECIP_HEX, 
-    [0.0, 1.0, 10.0, 30.0], 
+    [0.0, 1.0, 10.0, 30.0],
     [0, 100, 200, 255], 
+    256
+);
+
+export const PRATE_PALETTE = createNonLinearPrecipPalette(
+    LIGHT_PRATE_LEVELS,
+    LIGHT_PRATE_HEX,
+    [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0],
+    [0, 13, 26, 39, 52, 65, 78, 91, 104, 117, 130, 143, 156, 169, 182, 195, 208, 221, 234, 255],
     256
 );
 
@@ -170,6 +181,9 @@ export const PVA_PALETTE = createNonLinearPrecipPalette(
  */
 export function getPaletteForParameter(paramId) {
     const id = (paramId || '').toLowerCase();
+    if (id === 'prate') {
+        return PRATE_PALETTE;
+    }
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
     }

@@ -70,10 +70,12 @@ const DARK_PRECIP_HEX = [
     '#0C6945', '#008855', '#009A69', '#00B087', '#00B59C', '#00BAB0', '#00CDD4', '#00B8DE',
     '#0094F0', '#0070FA', '#1C6CF8', '#3764F9', '#5752FA', '#7949FA', '#A241FA', '#C238FA',
     '#E52DFA', '#FA2AE3', '#FF3C00', '#FF6A00', '#FF9100', '#FFB300', '#FFCC11', '#FFE522',
-    '#FFEE55', '#FFFBBA', '#FFFFFF',
-    // ---- Fixed Top End: Continuous bright, crisp ice colors that never darken ----
-    '#E6FAFF', '#CDf5FF', '#B3F0FF', '#99EAFF', '#80E5FF', '#66E0FF', '#4DDBFF', '#33D6FF', '#1AD1FF'
+    '#FFEE55', '#FFFBBA', '#FFFFFF', '#E6FAFF', '#CDf5FF', '#B3F0FF', '#99EAFF', '#80E5FF',
+    '#66E0FF', '#4DDBFF', '#33D6FF', '#1AD1FF'
 ];
+
+const DARK_PRATE_LEVELS = [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0];
+const DARK_PRATE_HEX = ["#bebebe", "#a3ccb5", "#76c296", "#4cb377", "#22c55e", "#15803d", "#14532d", "#ffd700", "#ffaa00", "#ff7700", "#ff007f", "#ff0055", "#ff0033", "#d500f9", "#aa00ff", "#7c00ea", "#311b92", "#1a237e", "#01030a"];
 
 // 💧 Dark Mode PWAT Levels (Inches)
 const DARK_PWAT_LEVELS = [
@@ -133,8 +135,16 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
 export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     DARK_PRECIP_LEVELS, 
     DARK_PRECIP_HEX, 
-    [0.0, 1.0, 10.0, 30.0], 
+    [0.0, 1.0, 10.0, 30.0],
     [0, 100, 200, 255], 
+    256
+);
+
+export const PRATE_PALETTE = createNonLinearPrecipPalette(
+    DARK_PRATE_LEVELS,
+    DARK_PRATE_HEX,
+    [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0],
+    [0, 13, 26, 39, 52, 65, 78, 91, 104, 117, 130, 143, 156, 169, 182, 195, 208, 221, 234, 255],
     256
 );
 
@@ -152,6 +162,9 @@ export const PWAT_PALETTE = createNonLinearPrecipPalette(
  */
 export function getPaletteForParameter(paramId) {
     const id = (paramId || '').toLowerCase();
+    if (id === 'prate') {
+        return PRATE_PALETTE;
+    }
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
     }
