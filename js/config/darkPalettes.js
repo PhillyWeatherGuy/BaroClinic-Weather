@@ -1,4 +1,5 @@
 // js/config/darkPalettes.js
+import { PRATE_PALETTE as LIGHT_PRATE_PALETTE } from './palettes.js';
 
 /**
  * 🌡️ Exact 2m Temperature Palette extracted from provided_colors[::-1]
@@ -74,9 +75,6 @@ const DARK_PRECIP_HEX = [
     '#66E0FF', '#4DDBFF', '#33D6FF', '#1AD1FF'
 ];
 
-const DARK_PRATE_LEVELS = [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0];
-const DARK_PRATE_HEX = ["#bebebe", "#a3ccb5", "#76c296", "#4cb377", "#22c55e", "#15803d", "#14532d", "#ffd700", "#ffaa00", "#ff7700", "#ff007f", "#ff0055", "#ff0033", "#d500f9", "#aa00ff", "#7c00ea", "#311b92", "#1a237e", "#01030a"];
-
 // 💧 Dark Mode PWAT Levels (Inches)
 const DARK_PWAT_LEVELS = [
     0.00, 0.05, 0.11, 0.16, 0.21, 0.26, 0.31, 0.37, 0.42, 0.47,
@@ -140,13 +138,7 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
-export const PRATE_PALETTE = createNonLinearPrecipPalette(
-    DARK_PRATE_LEVELS,
-    DARK_PRATE_HEX,
-    [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0],
-    [0, 13, 26, 39, 52, 65, 78, 91, 104, 117, 130, 143, 156, 169, 182, 195, 208, 221, 234, 255],
-    256
-);
+export const PRATE_PALETTE = LIGHT_PRATE_PALETTE;
 
 // 💧 Dark Mode PWAT Palette (0.0" -> 4.0" piecewise mapped matching parameters.json)
 export const PWAT_PALETTE = createNonLinearPrecipPalette(

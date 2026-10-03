@@ -72,8 +72,28 @@ const LIGHT_PRECIP_HEX = [
     "#C038CA", "#C45BCD", "#C574CD"
 ];
 
-const LIGHT_PRATE_LEVELS = [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0];
-const LIGHT_PRATE_HEX = ["#bebebe", "#a3ccb5", "#76c296", "#4cb377", "#22c55e", "#15803d", "#14532d", "#ffd700", "#ffaa00", "#ff7700", "#ff007f", "#ff0055", "#ff0033", "#d500f9", "#aa00ff", "#7c00ea", "#311b92", "#1a237e", "#01030a"];
+const PRATE_DBZ_COLORS = [
+    "#FFF0FA", "#FAC3F8", "#F7ACF7", "#F59EF7", "#F394F7", "#F07EE5", "#EC65D4", "#E94FC2", "#E63AF0", "#DE35EA",
+    "#CE2DDE", "#C02AD4", "#C528D9", "#BC26CE", "#B124C2", "#A922B7", "#A421C2", "#A029CB", "#9C32D4", "#993ADD",
+    "#9640DE", "#9349E3", "#9052E9", "#8D5BEF", "#8C5FF0", "#915ABF", "#9756A1", "#9D518A", "#A24DA1", "#A44697",
+    "#A63F8D", "#A73882", "#A93278", "#AC2E6E", "#AE2A63", "#B02659", "#B2234E", "#BA2647", "#C2283F", "#CA2B37",
+    "#D02C33", "#D7312D", "#DF3727", "#F33A21", "#ED401E", "#EF4C20", "#F05822", "#F26325", "#F36E27", "#F57A2C",
+    "#F78631", "#F89235", "#FA9D3A", "#F8A442", "#F6AC4A", "#F5B351", "#F3BA59", "#EFC05F", "#EAC565", "#E5CB6C",
+    "#E7CB71", "#E7D26A", "#E6D962", "#E6E05A", "#E6E652", "#E2E651", "#DDE64F", "#D9E64C", "#D5E549", "#C7E047",
+    "#9ED041", "#90CA3F", "#82C43D", "#74BE3B", "#66BA3A", "#60B539", "#5AB038", "#54AB36", "#4EA535", "#49A034",
+    "#449A33", "#3F9531", "#3B9030", "#388E30", "#358C30", "#328A31", "#308731", "#369936", "#3CAB3B", "#42BD40",
+    "#48CD44", "#4CD746", "#50E148", "#55EB4A", "#59F34C", "#59F050", "#59ED54", "#59EA59", "#59E65D", "#54DC5E",
+    "#4FD15F", "#4AC460", "#46B861", "#42AB5E", "#3E9F5B", "#3A9359", "#378656", "#3C7853", "#416A51", "#465D4E",
+    "#4C4C4C", "#565656", "#606060", "#6A6A6A", "#737373", "#7E7E7E", "#8A8A8A", "#959595", "#A1A1A1", "#ACACAC",
+    "#B7B7B7", "#C3C3C3", "#CECECE", "#DADADA", "#E5E5E5", "#F0F0F0", "#FFFFFF"
+];
+
+function createPratePalette(colors) {
+    return Array.from({ length: 256 }, (_, index) => {
+        const colorIndex = colors.length - 1 - Math.round((index / 255) * (colors.length - 1));
+        return colors[colorIndex];
+    });
+}
 
 // 💧 Light Mode PWAT Levels (Inches)
 const LIGHT_PWAT_LEVELS = [
@@ -150,13 +170,7 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
-export const PRATE_PALETTE = createNonLinearPrecipPalette(
-    LIGHT_PRATE_LEVELS,
-    LIGHT_PRATE_HEX,
-    [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 200.0],
-    [0, 13, 26, 39, 52, 65, 78, 91, 104, 117, 130, 143, 156, 169, 182, 195, 208, 221, 234, 255],
-    256
-);
+export const PRATE_PALETTE = createPratePalette(PRATE_DBZ_COLORS);
 
 // 💧 Light Mode PWAT Palette (0.0" -> 4.0" piecewise mapped matching parameters.json)
 export const PWAT_PALETTE = createNonLinearPrecipPalette(
