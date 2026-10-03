@@ -46,7 +46,7 @@
       "name": "Surface Precipitation Rate",
       "unit": "in/hr",
       "category": "Surface and Precipitation",
-      "shader": "precip",
+      "shader": "precipType",
       "palette": "prate",
       "suppress_city_overlay": true,
       "upscale_2x": false,

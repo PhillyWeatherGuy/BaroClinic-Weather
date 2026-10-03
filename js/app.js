@@ -4,6 +4,7 @@ import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from './core/dataLo
 import { getViewerPreferences } from './core/viewerPreferences.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
+import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
 import { initHubTransition } from './components/homeScreen.js';
 import { 
     initViewerUI, 
@@ -455,7 +456,9 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    if (chosenShader === 'precip') {
+    if (chosenShader === 'precipType') {
+        customShaderLayer = createPrecipTypeShaderLayer(map);
+    } else if (chosenShader === 'precip') {
         customShaderLayer = createPrecipShaderLayer(map);
     } else {
         customShaderLayer = createScalarShaderLayer(map);
