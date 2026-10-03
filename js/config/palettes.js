@@ -78,6 +78,11 @@ const PRATE_COLORS = [
     "#ffd700", "#ffaa00", "#ff7700", "#ff007f", "#ff0055", "#ff0033", "#d500f9", "#aa00ff", "#7c00ea", "#311b92", "#1a237e", "#01030a"
 ];
 
+const PRATE_ICE_LEVELS = [0.01, 0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+const FRZR_COLORS = ["#d9b4ce", "#d376b5", "#d562a5", "#da479b", "#c03973", "#c22d59", "#a82351", "#9a1e49", "#7c1628"];
+const SLEET_COLORS = ["#f2c390", "#f6ca7e", "#f2b286", "#eca96c", "#f19e51", "#ef9544", "#e58c3d", "#eb7a34", "#a4441b"];
+const SNOW_COLORS = ["#bfcfe5", "#9ca5cf", "#9790bf", "#9277ba", "#8e61ab", "#8c48a8", "#802e8e", "#72197f", "#570d5d"];
+
 // 💧 Light Mode PWAT Levels (Inches)
 const LIGHT_PWAT_LEVELS = [
     0.00, 0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45,
@@ -160,6 +165,12 @@ export const PRATE_PALETTE = createNonLinearPrecipPalette(
     [11, 22, 33, 44, 55, 66, 77, 89, 100, 111, 122, 133, 144, 155, 166, 177, 188, 199, 210, 221, 232, 244, 255],
     256
 );
+
+const PRATE_TYPE_BYTE_POINTS = [0, 100, 200, 255];
+const PRATE_TYPE_VALUE_POINTS = [0.0, 0.1, 1.0, 2.5];
+export const FRZR_PALETTE = createNonLinearPrecipPalette(PRATE_ICE_LEVELS, FRZR_COLORS, PRATE_TYPE_VALUE_POINTS, PRATE_TYPE_BYTE_POINTS, 256);
+export const SLEET_PALETTE = createNonLinearPrecipPalette(PRATE_ICE_LEVELS, SLEET_COLORS, PRATE_TYPE_VALUE_POINTS, PRATE_TYPE_BYTE_POINTS, 256);
+export const SNOW_PALETTE = createNonLinearPrecipPalette(PRATE_ICE_LEVELS, SNOW_COLORS, PRATE_TYPE_VALUE_POINTS, PRATE_TYPE_BYTE_POINTS, 256);
 
 // 💧 Light Mode PWAT Palette (0.0" -> 4.0" piecewise mapped matching parameters.json)
 export const PWAT_PALETTE = createNonLinearPrecipPalette(

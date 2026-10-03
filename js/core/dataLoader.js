@@ -196,6 +196,29 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             outFrames.push(bitmap);
         }
 
+        const ptypeFrames = [];
+        if (chunk.ptype_file) {
+            const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}?t=${Date.now()}`;
+            const ptypeResp = await fetch(ptypeUrl);
+            if (ptypeResp.ok) {
+                const ptypeBuffer = await ptypeResp.arrayBuffer();
+                let ptypeBytes = new Uint8Array(ptypeBuffer);
+                if (ptypeBytes[0] === 0x1f && ptypeBytes[1] === 0x8b) {
+                    const stream = new Response(ptypeBuffer).body.pipeThrough(new DecompressionStream('gzip'));
+                    ptypeBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+                }
+                for (let f = 0; f < numFrames; f++) {
+                    const srcStart = f * frameSize;
+                    ptypeFrames.push(await frameToBitmap(
+                        ptypeBytes.subarray(srcStart, srcStart + frameSize),
+                        frameW,
+                        frameH,
+                        shouldUpscale
+                    ));
+                }
+            }
+        }
+
         if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
             outFrames.forEach(b => { if (b && typeof b.close === 'function') b.close(); });
             throw new Error("Load cancelled");
@@ -205,6 +228,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             frames: outFrames,
             width: shouldUpscale ? frameW * 2 : frameW,
             height: shouldUpscale ? frameH * 2 : frameH,
+            ptypeFrames,
             isVolume: true
         };
 
@@ -259,6 +283,11 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
                     frame.close();
                 }
             });
+            if (item.ptypeFrames) {
+                item.ptypeFrames.forEach(frame => {
+                    if (frame && typeof frame.close === 'function') frame.close();
+                });
+            }
         } else if (item && typeof item.close === 'function') {
             item.close();
         }
