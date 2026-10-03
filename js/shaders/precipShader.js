@@ -419,7 +419,7 @@ export function createPrecipShaderLayer(mapInstance) {
                     source.ptypeFrames.forEach((frameBmp, fIdx) => {
                         const key = `${chunkIndex}_${fIdx}`;
                         if (!this.ptypeTextures[key] && frameBmp) {
-                            this.ptypeTextures[key] = uploadSingle(frameBmp, true);
+                            this.ptypeTextures[key] = uploadSingle(frameBmp, false);
                         }
                     });
                 }
