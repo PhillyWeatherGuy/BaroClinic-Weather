@@ -115,6 +115,7 @@ const fragmentShaderBody = `
     }
 
     float nearestPtypeCode(float sampledCode) {
+        if (sampledCode < 0.5) return 0.0;
         float bestCode = 1.0;
         float bestDistance = abs(sampledCode - bestCode);
         float candidateCode;
@@ -316,9 +317,11 @@ export function createPrecipShaderLayer(mapInstance) {
 
                     if (u_hasPtype > 0.5) {
                         float ptype = nearestPtypeCode(texture(u_ptypeTexture, uv).r * 255.0);
-                        if (ptype == 5.0 || ptype == 6.0) color = texture(u_snowPalette, vec2(palU, 0.5));
-                        else if (ptype == 3.0 || ptype == 12.0) color = texture(u_frzrPalette, vec2(palU, 0.5));
-                        else if (ptype == 7.0 || ptype == 8.0) color = texture(u_sleetPalette, vec2(palU, 0.5));
+                        vec4 typeColor = color;
+                        if (ptype == 5.0 || ptype == 6.0) typeColor = texture(u_snowPalette, vec2(palU, 0.5));
+                        else if (ptype == 3.0 || ptype == 12.0) typeColor = texture(u_frzrPalette, vec2(palU, 0.5));
+                        else if (ptype == 7.0 || ptype == 8.0) typeColor = texture(u_sleetPalette, vec2(palU, 0.5));
+                        color = mix(color, typeColor, smoothstep(0.02, 0.15, rawVal));
                     }
                     
                     if (color.a == 0.0) {
@@ -374,9 +377,11 @@ export function createPrecipShaderLayer(mapInstance) {
 
                     if (u_hasPtype > 0.5) {
                         float ptype = nearestPtypeCode(texture2D(u_ptypeTexture, uv).r * 255.0);
-                        if (ptype == 5.0 || ptype == 6.0) color = texture2D(u_snowPalette, vec2(palU, 0.5));
-                        else if (ptype == 3.0 || ptype == 12.0) color = texture2D(u_frzrPalette, vec2(palU, 0.5));
-                        else if (ptype == 7.0 || ptype == 8.0) color = texture2D(u_sleetPalette, vec2(palU, 0.5));
+                        vec4 typeColor = color;
+                        if (ptype == 5.0 || ptype == 6.0) typeColor = texture2D(u_snowPalette, vec2(palU, 0.5));
+                        else if (ptype == 3.0 || ptype == 12.0) typeColor = texture2D(u_frzrPalette, vec2(palU, 0.5));
+                        else if (ptype == 7.0 || ptype == 8.0) typeColor = texture2D(u_sleetPalette, vec2(palU, 0.5));
+                        color = mix(color, typeColor, smoothstep(0.02, 0.15, rawVal));
                     }
                     
                     if (color.a == 0.0) {
