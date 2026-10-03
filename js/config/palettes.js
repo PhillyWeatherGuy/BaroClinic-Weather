@@ -93,10 +93,10 @@ const SLEET_COLORS = [
 ];
 
 const SNOW_COLORS = [
-    "#bfcfe5", "#75fbfd", "#6be6fc", "#5fd0fa", "#56bcf9", "#4ba7f8",
+    "#75fbfd", "#6be6fc", "#5fd0fa", "#56bcf9", "#4ba7f8",
     "#4091f7", "#2c68e8", "#2151d9", "#183dc7", "#0f27b9", "#0816ae",
     "#120395", "#200890", "#521985", "#962181", "#c02d88", "#ea337f",
-    "#8c48a8", "#802e8e", "#72197f", "#570d5d"
+    "#8c48a8", "#802e8e", "#72197f", "#570d5d", "#420a47"
 ];
 
 // 💧 Light Mode PWAT Levels (Inches)
