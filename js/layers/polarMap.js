@@ -327,7 +327,7 @@ function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
     canvas.width = paletteHexArray.length;
     canvas.height = 1;
     const ctx = canvas.getContext('2d');
-    const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeShader === 'precip');
+    const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeShader === 'precip' || stateManager.activeShader === 'precipType');
 
     paletteHexArray.forEach((hex, i) => {
         if (isPrecip && i === 0) {
