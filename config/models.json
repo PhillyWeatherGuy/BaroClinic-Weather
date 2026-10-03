@@ -44,16 +44,16 @@
     "prate": {
       "id": "prate",
       "name": "Surface Precipitation Rate",
-      "unit": "mm/hr",
+      "unit": "in/hr",
       "category": "Surface and Precipitation",
       "shader": "precip",
       "palette": "prate",
       "upscale_2x": false,
       "scaling": {
         "mode": "piecewise",
-        "unit_multiplier": 3600.0,
-        "val_points": [0.0, 200.0],
-        "byte_points": [0, 255]
+        "unit_multiplier": 141.7322834646,
+        "val_points": [0.01, 0.10, 0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75],
+        "byte_points": [0, 13, 36, 73, 109, 146, 182, 218, 255]
       },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
