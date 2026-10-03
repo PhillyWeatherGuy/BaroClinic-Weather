@@ -114,25 +114,53 @@ const fragmentShaderBody = `
         return clamp(total, 0.0, 1.0);
     }
 
-    float nearestPtypeCode(float sampledCode) {
-        float bestCode = 1.0;
-        float bestDistance = abs(sampledCode - bestCode);
-        float candidateCode;
-        float candidateDistance;
+    vec4 getPtypeColor(float code, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
+        if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
+            return texture(snowTex, vec2(palU, 0.5));
+        } else if (code == 3.0 || code == 4.0 || code == 12.0) {
+            return texture(frzrTex, vec2(palU, 0.5));
+        } else if (code == 7.0 || code == 8.0) {
+            return texture(sleetTex, vec2(palU, 0.5));
+        }
+        return texture(palTex, vec2(palU, 0.5));
+    }
 
-        candidateCode = 3.0; candidateDistance = abs(sampledCode - candidateCode);
-        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
-        candidateCode = 5.0; candidateDistance = abs(sampledCode - candidateCode);
-        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
-        candidateCode = 6.0; candidateDistance = abs(sampledCode - candidateCode);
-        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
-        candidateCode = 7.0; candidateDistance = abs(sampledCode - candidateCode);
-        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
-        candidateCode = 8.0; candidateDistance = abs(sampledCode - candidateCode);
-        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
-        candidateCode = 12.0; candidateDistance = abs(sampledCode - candidateCode);
-        if (candidateDistance < bestDistance) { bestCode = candidateCode; }
-        return bestCode;
+    vec4 sampleSmoothPtypeColor(sampler2D ptypeTex, vec2 uv, vec2 texRes, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
+        vec2 pos = uv * texRes - 0.5;
+        vec2 i = floor(pos);
+        vec2 f = fract(pos);
+        vec2 w = smoothstep(0.0, 1.0, f);
+
+        vec2 invTex = 1.0 / texRes;
+        vec2 uv00 = vec2(fract((i.x + 0.5) * invTex.x + 1.0), clamp((i.y + 0.5) * invTex.y, 0.0, 1.0));
+        vec2 uv10 = vec2(fract((i.x + 1.5) * invTex.x + 1.0), clamp((i.y + 0.5) * invTex.y, 0.0, 1.0));
+        vec2 uv01 = vec2(fract((i.x + 0.5) * invTex.x + 1.0), clamp((i.y + 1.5) * invTex.y, 0.0, 1.0));
+        vec2 uv11 = vec2(fract((i.x + 1.5) * invTex.x + 1.0), clamp((i.y + 1.5) * invTex.y, 0.0, 1.0));
+
+        float c00 = floor(texture(ptypeTex, uv00).r * 255.0 + 0.5);
+        float c10 = floor(texture(ptypeTex, uv10).r * 255.0 + 0.5);
+        float c01 = floor(texture(ptypeTex, uv01).r * 255.0 + 0.5);
+        float c11 = floor(texture(ptypeTex, uv11).r * 255.0 + 0.5);
+
+        // Propagate valid ptype codes to adjacent dry (0.0) texels so storm edges don't turn into fake rain
+        if (c00 == 0.0) c00 = (c10 != 0.0) ? c10 : ((c01 != 0.0) ? c01 : c11);
+        if (c10 == 0.0) c10 = (c00 != 0.0) ? c00 : ((c11 != 0.0) ? c11 : c01);
+        if (c01 == 0.0) c01 = (c00 != 0.0) ? c00 : ((c11 != 0.0) ? c11 : c10);
+        if (c11 == 0.0) c11 = (c10 != 0.0) ? c10 : ((c01 != 0.0) ? c01 : c00);
+
+        // Fast path: if all 4 corners agree on the same code, no multi-palette blending needed
+        if (c00 == c10 && c10 == c01 && c01 == c11) {
+            return getPtypeColor(c00, palU, palTex, frzrTex, sleetTex, snowTex);
+        }
+
+        vec4 color00 = getPtypeColor(c00, palU, palTex, frzrTex, sleetTex, snowTex);
+        vec4 color10 = getPtypeColor(c10, palU, palTex, frzrTex, sleetTex, snowTex);
+        vec4 color01 = getPtypeColor(c01, palU, palTex, frzrTex, sleetTex, snowTex);
+        vec4 color11 = getPtypeColor(c11, palU, palTex, frzrTex, sleetTex, snowTex);
+
+        vec4 top = mix(color00, color10, w.x);
+        vec4 bottom = mix(color01, color11, w.x);
+        return mix(top, bottom, w.y);
     }
 `;
 
@@ -176,7 +204,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
         frzrPaletteTex: null,
         sleetPaletteTex: null,
         snowPaletteTex: null,
-        texResolution: [2880.0, 1442.0],
+        texResolution: [1440.0, 721.0],
         programs: {},
         vertexCount: 0,
 
@@ -213,7 +241,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
             if (this.paletteTex) {
                 this.gl.deleteTexture(this.paletteTex);
             }
-            this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray);
+            this.paletteTex = createPrecipPaletteTexture(this.gl, hexArray, true);
             mapInstance.triggerRepaint();
         },
         
@@ -229,10 +257,10 @@ export function createPrecipTypeShaderLayer(mapInstance) {
 
             const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
             const initialPalette = paletteFunc(stateManager.activeParam || 'prate');
-            this.paletteTex = createPrecipPaletteTexture(gl, initialPalette);
-            this.frzrPaletteTex = createPrecipPaletteTexture(gl, FRZR_PALETTE, false);
-            this.sleetPaletteTex = createPrecipPaletteTexture(gl, SLEET_PALETTE, false);
-            this.snowPaletteTex = createPrecipPaletteTexture(gl, SNOW_PALETTE, false);
+            this.paletteTex = createPrecipPaletteTexture(gl, initialPalette, true);
+            this.frzrPaletteTex = createPrecipPaletteTexture(gl, FRZR_PALETTE, true);
+            this.sleetPaletteTex = createPrecipPaletteTexture(gl, SLEET_PALETTE, true);
+            this.snowPaletteTex = createPrecipPaletteTexture(gl, SNOW_PALETTE, true);
         },
 
         getProgram: function(gl, shaderData) {
@@ -315,10 +343,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     vec4 color = texture(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        float ptype = nearestPtypeCode(texture(u_ptypeTexture, uv).r * 255.0);
-                        if (ptype == 5.0 || ptype == 6.0) color = texture(u_snowPalette, vec2(palU, 0.5));
-                        else if (ptype == 3.0 || ptype == 12.0) color = texture(u_frzrPalette, vec2(palU, 0.5));
-                        else if (ptype == 7.0 || ptype == 8.0) color = texture(u_sleetPalette, vec2(palU, 0.5));
+                        color = sampleSmoothPtypeColor(u_ptypeTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
                     
                     if (color.a == 0.0) {
@@ -373,10 +398,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        float ptype = nearestPtypeCode(texture2D(u_ptypeTexture, uv).r * 255.0);
-                        if (ptype == 5.0 || ptype == 6.0) color = texture2D(u_snowPalette, vec2(palU, 0.5));
-                        else if (ptype == 3.0 || ptype == 12.0) color = texture2D(u_frzrPalette, vec2(palU, 0.5));
-                        else if (ptype == 7.0 || ptype == 8.0) color = texture2D(u_sleetPalette, vec2(palU, 0.5));
+                        color = sampleSmoothPtypeColor(u_ptypeTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
                     
                     if (color.a == 0.0) {
@@ -440,7 +462,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     source.ptypeFrames.forEach((frameBmp, fIdx) => {
                         const key = `${chunkIndex}_${fIdx}`;
                         if (!this.ptypeTextures[key] && frameBmp) {
-                            this.ptypeTextures[key] = uploadSingle(frameBmp, false);
+                            this.ptypeTextures[key] = uploadSingle(frameBmp, true);
                         }
                     });
                 }
