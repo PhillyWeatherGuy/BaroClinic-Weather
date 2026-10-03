@@ -33,14 +33,14 @@
     {
       "id": "background",
       "type": "background",
-      "paint": {"background-color": "rgba(253, 229, 207, 1)"}
+      "paint": {"background-color": "#EDEDED"}
     },
     {
       "id": "WaterColor",
       "type": "fill",
       "source": "openmaptiles",
       "source-layer": "water",
-      "paint": {"fill-color": "#E7F1F4"}
+      "paint": {"fill-color": "#F5FDFF"}
     },
     {
       "id": "landcover_grass_fill",
@@ -145,7 +145,7 @@
         ["!=", "intermittent", 1]
       ],
       "layout": {"visibility": "visible"},
-      "paint": {"fill-antialias": true, "fill-color": "#E7F1F4"}
+      "paint": {"fill-antialias": true, "fill-color": "#F5FDFF"}
     },
     {
       "id": "waterway",

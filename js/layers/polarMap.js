@@ -61,9 +61,9 @@ const THEME_COLORS = {
     },
     light: {
         bg: '#f8fafc',
-        ocean: 0xE7F1F4,          // map_style_light.json: #E7F1F4
-        land: 0xFDE5CF,           // map_style_light.json: rgba(253, 229, 207, 1)
-        lakes: 0xE7F1F4,
+        ocean: 0xF5FDFF,          // map_style_light.json: #E7F1F4
+        land: 0xEDEDED,           // map_style_light.json: rgba(253, 229, 207, 1)
+        lakes: 0xF5FDFF,
         coastline: '#000000',      // Crisp black coastline
         countryBorders: '#000000',
         stateBorders: 'rgba(0, 0, 0, 0.85)',

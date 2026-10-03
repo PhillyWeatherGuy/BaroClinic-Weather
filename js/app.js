@@ -250,10 +250,10 @@ function applyRadarTheme(theme) {
     const isDark = (theme === 'dark');
 
     if (map.getLayer('background')) {
-        map.setPaintProperty('background', 'background-color', isDark ? 'rgb(59, 51, 59)' : 'rgba(253, 229, 207, 1)');
+        map.setPaintProperty('background', 'background-color', isDark ? 'rgb(59, 51, 59)' : '#EDEDED');
     }
 
-    const waterColor = isDark ? 'rgba(2, 20, 37, 1)' : '#E7F1F4';
+    const waterColor = isDark ? 'rgba(2, 20, 37, 1)' : '#F5FDFF';
     if (map.getLayer('ocean_far')) {
         map.setPaintProperty('ocean_far', 'fill-color', waterColor);
     }
@@ -283,7 +283,7 @@ function applyRadarTheme(theme) {
         }
     });
     if (map.getLayer('landuse_park')) {
-        map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : 'rgba(253, 229, 207, 1)');
+        map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : '#EDEDED');
     }
 
     const streetColor = isDark ? '#181818' : '#ffffff';
