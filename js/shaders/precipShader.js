@@ -113,6 +113,27 @@ const fragmentShaderBody = `
 
         return clamp(total, 0.0, 1.0);
     }
+
+    float nearestPtypeCode(float sampledCode) {
+        float bestCode = 1.0;
+        float bestDistance = abs(sampledCode - bestCode);
+        float candidateCode;
+        float candidateDistance;
+
+        candidateCode = 3.0; candidateDistance = abs(sampledCode - candidateCode);
+        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
+        candidateCode = 5.0; candidateDistance = abs(sampledCode - candidateCode);
+        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
+        candidateCode = 6.0; candidateDistance = abs(sampledCode - candidateCode);
+        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
+        candidateCode = 7.0; candidateDistance = abs(sampledCode - candidateCode);
+        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
+        candidateCode = 8.0; candidateDistance = abs(sampledCode - candidateCode);
+        if (candidateDistance < bestDistance) { bestCode = candidateCode; bestDistance = candidateDistance; }
+        candidateCode = 12.0; candidateDistance = abs(sampledCode - candidateCode);
+        if (candidateDistance < bestDistance) { bestCode = candidateCode; }
+        return bestCode;
+    }
 `;
 
 function createPrecipPaletteTexture(gl, paletteHexArray, transparentFirst = true) {
@@ -294,7 +315,7 @@ export function createPrecipShaderLayer(mapInstance) {
                     vec4 color = texture(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        float ptype = floor(texture(u_ptypeTexture, uv).r * 255.0 + 0.5);
+                        float ptype = nearestPtypeCode(texture(u_ptypeTexture, uv).r * 255.0);
                         if (ptype == 5.0 || ptype == 6.0) color = texture(u_snowPalette, vec2(palU, 0.5));
                         else if (ptype == 3.0 || ptype == 12.0) color = texture(u_frzrPalette, vec2(palU, 0.5));
                         else if (ptype == 7.0 || ptype == 8.0) color = texture(u_sleetPalette, vec2(palU, 0.5));
@@ -352,7 +373,7 @@ export function createPrecipShaderLayer(mapInstance) {
                     vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        float ptype = floor(texture2D(u_ptypeTexture, uv).r * 255.0 + 0.5);
+                        float ptype = nearestPtypeCode(texture2D(u_ptypeTexture, uv).r * 255.0);
                         if (ptype == 5.0 || ptype == 6.0) color = texture2D(u_snowPalette, vec2(palU, 0.5));
                         else if (ptype == 3.0 || ptype == 12.0) color = texture2D(u_frzrPalette, vec2(palU, 0.5));
                         else if (ptype == 7.0 || ptype == 8.0) color = texture2D(u_sleetPalette, vec2(palU, 0.5));
