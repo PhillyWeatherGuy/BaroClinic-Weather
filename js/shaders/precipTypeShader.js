@@ -127,40 +127,94 @@ const fragmentShaderBody = `
 
     vec4 sampleSmoothPtypeColor(sampler2D ptypeTex, vec2 uv, vec2 texRes, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
         vec2 pos = uv * texRes - 0.5;
-        vec2 i = floor(pos);
         vec2 f = fract(pos);
-        vec2 w = smoothstep(0.0, 1.0, f);
+        vec2 i = floor(pos);
+
+        vec4 wx = cubicBSpline(f.x);
+        vec4 wy = cubicBSpline(f.y);
 
         vec2 invTex = 1.0 / texRes;
-        vec2 uv00 = vec2(fract((i.x + 0.5) * invTex.x + 1.0), clamp((i.y + 0.5) * invTex.y, 0.0, 1.0));
-        vec2 uv10 = vec2(fract((i.x + 1.5) * invTex.x + 1.0), clamp((i.y + 0.5) * invTex.y, 0.0, 1.0));
-        vec2 uv01 = vec2(fract((i.x + 0.5) * invTex.x + 1.0), clamp((i.y + 1.5) * invTex.y, 0.0, 1.0));
-        vec2 uv11 = vec2(fract((i.x + 1.5) * invTex.x + 1.0), clamp((i.y + 1.5) * invTex.y, 0.0, 1.0));
+        float x0 = fract((i.x - 0.5) * invTex.x + 1.0);
+        float x1 = fract((i.x + 0.5) * invTex.x + 1.0);
+        float x2 = fract((i.x + 1.5) * invTex.x + 1.0);
+        float x3 = fract((i.x + 2.5) * invTex.x + 1.0);
 
-        float c00 = floor(texture(ptypeTex, uv00).r * 255.0 + 0.5);
-        float c10 = floor(texture(ptypeTex, uv10).r * 255.0 + 0.5);
-        float c01 = floor(texture(ptypeTex, uv01).r * 255.0 + 0.5);
-        float c11 = floor(texture(ptypeTex, uv11).r * 255.0 + 0.5);
+        float wSnow = 0.0;
+        float wFrzr = 0.0;
+        float wSleet = 0.0;
+        float wRain = 0.0;
 
-        // Propagate valid ptype codes to adjacent dry (0.0) texels so storm edges don't turn into fake rain
-        if (c00 == 0.0) c00 = (c10 != 0.0) ? c10 : ((c01 != 0.0) ? c01 : c11);
-        if (c10 == 0.0) c10 = (c00 != 0.0) ? c00 : ((c11 != 0.0) ? c11 : c01);
-        if (c01 == 0.0) c01 = (c00 != 0.0) ? c00 : ((c11 != 0.0) ? c11 : c10);
-        if (c11 == 0.0) c11 = (c10 != 0.0) ? c10 : ((c01 != 0.0) ? c01 : c00);
+        // 🌟 Evaluate 4x4 cubic B-spline neighborhood matching prate's exact continuous curvature
+        for (int y = -1; y <= 2; y++) {
+            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
+            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
 
-        // Fast path: if all 4 corners agree on the same code, no multi-palette blending needed
-        if (c00 == c10 && c10 == c01 && c01 == c11) {
-            return getPtypeColor(c00, palU, palTex, frzrTex, sleetTex, snowTex);
+            // Col 0
+            float c0 = floor(texture(ptypeTex, vec2(x0, yCoord)).r * 255.0 + 0.5);
+            float w0 = w_y * wx.x;
+            if (c0 == 5.0 || c0 == 6.0 || c0 == 9.0 || c0 == 10.0) wSnow += w0;
+            else if (c0 == 3.0 || c0 == 4.0 || c0 == 12.0) wFrzr += w0;
+            else if (c0 == 7.0 || c0 == 8.0) wSleet += w0;
+            else if (c0 > 0.5) wRain += w0;
+
+            // Col 1
+            float c1 = floor(texture(ptypeTex, vec2(x1, yCoord)).r * 255.0 + 0.5);
+            float w1 = w_y * wx.y;
+            if (c1 == 5.0 || c1 == 6.0 || c1 == 9.0 || c1 == 10.0) wSnow += w1;
+            else if (c1 == 3.0 || c1 == 4.0 || c1 == 12.0) wFrzr += w1;
+            else if (c1 == 7.0 || c1 == 8.0) wSleet += w1;
+            else if (c1 > 0.5) wRain += w1;
+
+            // Col 2
+            float c2 = floor(texture(ptypeTex, vec2(x2, yCoord)).r * 255.0 + 0.5);
+            float w2 = w_y * wx.z;
+            if (c2 == 5.0 || c2 == 6.0 || c2 == 9.0 || c2 == 10.0) wSnow += w2;
+            else if (c2 == 3.0 || c2 == 4.0 || c2 == 12.0) wFrzr += w2;
+            else if (c2 == 7.0 || c2 == 8.0) wSleet += w2;
+            else if (c2 > 0.5) wRain += w2;
+
+            // Col 3
+            float c3 = floor(texture(ptypeTex, vec2(x3, yCoord)).r * 255.0 + 0.5);
+            float w3 = w_y * wx.w;
+            if (c3 == 5.0 || c3 == 6.0 || c3 == 9.0 || c3 == 10.0) wSnow += w3;
+            else if (c3 == 3.0 || c3 == 4.0 || c3 == 12.0) wFrzr += w3;
+            else if (c3 == 7.0 || c3 == 8.0) wSleet += w3;
+            else if (c3 > 0.5) wRain += w3;
         }
 
-        vec4 color00 = getPtypeColor(c00, palU, palTex, frzrTex, sleetTex, snowTex);
-        vec4 color10 = getPtypeColor(c10, palU, palTex, frzrTex, sleetTex, snowTex);
-        vec4 color01 = getPtypeColor(c01, palU, palTex, frzrTex, sleetTex, snowTex);
-        vec4 color11 = getPtypeColor(c11, palU, palTex, frzrTex, sleetTex, snowTex);
+        float totalPrecip = wSnow + wFrzr + wSleet + wRain;
+        if (totalPrecip < 0.0001) {
+            return texture(palTex, vec2(palU, 0.5));
+        }
 
-        vec4 top = mix(color00, color10, w.x);
-        vec4 bottom = mix(color01, color11, w.x);
-        return mix(top, bottom, w.y);
+        wSnow /= totalPrecip;
+        wFrzr /= totalPrecip;
+        wSleet /= totalPrecip;
+        wRain /= totalPrecip;
+
+        // Sharpen the bicubic weights so ptype regions have crisp, smooth continuous curves
+        float pSnow = pow(wSnow, 5.0);
+        float pFrzr = pow(wFrzr, 5.0);
+        float pSleet = pow(wSleet, 5.0);
+        float pRain = pow(wRain, 5.0);
+        float pTotal = pSnow + pFrzr + pSleet + pRain;
+
+        if (pTotal > 0.0001) {
+            pSnow /= pTotal;
+            pFrzr /= pTotal;
+            pSleet /= pTotal;
+            pRain /= pTotal;
+        } else {
+            pRain = 1.0;
+        }
+
+        vec4 outColor = vec4(0.0);
+        if (pSnow > 0.001) outColor += pSnow * texture(snowTex, vec2(palU, 0.5));
+        if (pFrzr > 0.001) outColor += pFrzr * texture(frzrTex, vec2(palU, 0.5));
+        if (pSleet > 0.001) outColor += pSleet * texture(sleetTex, vec2(palU, 0.5));
+        if (pRain > 0.001) outColor += pRain * texture(palTex, vec2(palU, 0.5));
+
+        return outColor;
     }
 `;
 
