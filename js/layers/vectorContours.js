@@ -67,28 +67,52 @@ function themeContourFeatures(featureCollection) {
         return featureCollection;
     }
 
-    // 2. Surface Precipitation Rate (MSLP Isobars)
+    // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
     if (activeParamId === 'prate') {
         const isDark = stateManager.currentTheme === 'dark';
         const mslpColor = isDark ? '#ffffff' : '#000000';
         const zoom = mapInstance ? mapInstance.getZoom() : 5;
 
-        // When zoomed out (< 5.0), show only 4 mb intervals; when zoomed in, show all 2 mb intervals
+        // When zoomed out (< 5.0), keep all thickness lines but filter MSLP to 4 mb intervals
         if (zoom < 5.0) {
             featureCollection.features = featureCollection.features.filter(f => {
                 const val = parseFloat(f?.properties?.name);
+                const isThickness = f?.properties?.unit === 'dam' || (!isNaN(val) && val >= 400 && val <= 650);
+                if (isThickness) return true;
                 return isNaN(val) || Math.round(val) % 4 === 0;
             });
         }
 
         for (const feature of featureCollection.features) {
             if (!feature || !feature.properties) continue;
-            feature.properties.color = mslpColor;
-            feature.properties.stroke = mslpColor;
-            feature.properties.labelColor = mslpColor;
-            feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-            feature.properties.width = 1.5;
-            feature.properties.opacity = 0.9;
+
+            const val = parseFloat(feature.properties.name);
+            const isThickness = feature.properties.unit === 'dam' || (!isNaN(val) && val >= 400 && val <= 650);
+
+            if (isThickness) {
+                // 🌟 1000-500mb Thickness: Blue for <= 540 dam, Red for > 540 dam, and dotted
+                const isCold = !isNaN(val) && val <= 540;
+                const thickColor = isCold ? '#2563eb' : '#dc2626';
+
+                feature.properties.color = thickColor;
+                feature.properties.stroke = thickColor;
+                feature.properties.labelColor = thickColor;
+                feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
+                feature.properties.width = (val === 540) ? 2.0 : 1.4;
+                feature.properties.opacity = 0.95;
+                feature.properties.dotted = true;
+                feature.properties.outlineColor = null;
+            } else {
+                // MSLP Isobars: Solid line themed to dark/light mode
+                feature.properties.color = mslpColor;
+                feature.properties.stroke = mslpColor;
+                feature.properties.labelColor = mslpColor;
+                feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
+                feature.properties.width = 1.4;
+                feature.properties.opacity = 0.85;
+                feature.properties.dotted = false;
+                feature.properties.outlineColor = null;
+            }
         }
         return featureCollection;
     }
@@ -128,9 +152,9 @@ function themeContourFeatures(featureCollection) {
 
 // ───────────────────────── GPU line layer ─────────────────────────
 
-// One instance per line segment, 28 bytes:
-//   f32 p0.x p0.y p1.x p1.y (web-mercator 0..1) | f32 width (css px) | u8x4 line RGBA | u8x4 casing RGBA (alpha 0 = no casing)
-const INSTANCE_STRIDE = 28;
+// One instance per line segment, 32 bytes (aligned 8 x 4 bytes):
+//   f32 p0.x p0.y p1.x p1.y (web-mercator 0..1) | f32 width (<0 = dotted) | u8x4 color | u8x4 outline | f32 cumDist
+const INSTANCE_STRIDE = 32;
 const WIDTH_STOPS = [[2, 0.9, 2.4], [5, 1.0, 2.6], [8, 1.4, 3.2], [11, 1.8, 4.0], [14, 2.1, 4.8]]; // [zoom, scale, glow]
 
 // Shared vertex shader body. PROJECT(p) turns a mercator (0..1) position into clip space.
@@ -141,6 +165,7 @@ layout(location=2) in vec2 a_p1;
 layout(location=3) in float a_width;
 layout(location=4) in vec4 a_color;
 layout(location=5) in vec4 a_outline;
+layout(location=6) in float a_dist;
 uniform vec2 u_viewport;
 uniform float u_offsetX;
 uniform float u_pass;
@@ -148,6 +173,9 @@ uniform float u_scale;
 uniform float u_glow;
 uniform float u_dpr;
 out vec4 v_color;
+out float v_dist;
+out float v_isDotted;
+
 void main() {
     vec4 c0 = PROJECT(vec2(a_p0.x + u_offsetX, a_p0.y));
     vec4 c1 = PROJECT(vec2(a_p1.x + u_offsetX, a_p1.y));
@@ -156,14 +184,22 @@ void main() {
     vec2 s1 = c1.xy / c1.w * hv;
 
     bool outlined = a_outline.a > 0.0;
-    float w = a_width;
+    float rawWidth = abs(a_width);
+    float w = rawWidth;
     vec4 col = a_color;
+
     if (u_pass > 0.5) {
-        if (!outlined) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); v_color = vec4(0.0); return; }
-        w = a_width * u_scale + u_glow;
+        if (!outlined) { 
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0); 
+            v_color = vec4(0.0); 
+            v_dist = 0.0; 
+            v_isDotted = 0.0; 
+            return; 
+        }
+        w = rawWidth * u_scale + u_glow;
         col = a_outline;
     } else if (outlined) {
-        w = a_width * u_scale;
+        w = rawWidth * u_scale;
     }
     w *= u_dpr;
 
@@ -176,6 +212,12 @@ void main() {
     float zv = USE_PROJ_Z == 1 ? mix(c0.z, c1.z, a_corner.x) : 0.0;
     gl_Position = vec4(pos / hv * wv, zv, wv);
     v_color = col;
+
+    // Screen-space continuous pixel distance calculation
+    v_isDotted = a_width < 0.0 ? 1.0 : 0.0;
+    float mercLen = length(a_p1 - a_p0);
+    float pxScale = mercLen > 0.00001 ? len / mercLen : 0.0;
+    v_dist = (a_dist + a_corner.x * mercLen) * pxScale;
 }`;
 
 // Flat map: our own matrix
@@ -196,8 +238,18 @@ function makeGlobeVert(sd, preludeFirst) {
 const FRAG_SRC = `#version 300 es
 precision mediump float;
 in vec4 v_color;
+in float v_dist;
+in float v_isDotted;
+uniform float u_dpr;
 out vec4 outColor;
+
 void main() {
+    if (v_isDotted > 0.5) {
+        float patternPeriod = 8.0 * max(1.0, u_dpr);
+        if (mod(v_dist, patternPeriod) > patternPeriod * 0.5) {
+            discard;
+        }
+    }
     outColor = vec4(v_color.rgb * v_color.a, v_color.a);
 }`;
 
@@ -336,6 +388,7 @@ const gpuLayer = {
         gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, S, 16); gl.vertexAttribDivisor(3, 1);
         gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, S, 20); gl.vertexAttribDivisor(4, 1);
         gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, S, 24); gl.vertexAttribDivisor(5, 1);
+        gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 1, gl.FLOAT, false, S, 28); gl.vertexAttribDivisor(6, 1);
 
         gl.bindVertexArray(null);
         gpu.ready = true;
@@ -618,7 +671,8 @@ function prepareStep(featureCollection) {
 
     for (const { props, lines } of items) {
         const hasOutline = props.outlineColor !== undefined && props.outlineColor !== null;
-        const width = Number(props.width) > 0 ? Number(props.width) : 2.0;
+        let width = Number(props.width) > 0 ? Number(props.width) : 2.0;
+        if (props.dotted) width = -width; // Negative width signals dotted line to vertex shader
         const color = packColor(props.color || props.stroke, props.opacity ?? 0.95, '#4169E1');
         const outline = hasOutline ? packColor(props.outlineColor, props.outlineOpacity ?? 0.8) : 0;
         const name = props.name;
@@ -630,11 +684,13 @@ function prepareStep(featureCollection) {
             const len = line.length;
             if (len < 2) continue;
 
+            let cumDist = 0.0;
             let prev = line[0];
             for (let i = 1; i < len; i++) {
                 const cur = line[i];
                 if (Math.abs(cur[0] - prev[0]) < 0.5) {   // skip segments that wrap across the dateline
-                    const o = n * 7;
+                    const segDist = Math.hypot(cur[0] - prev[0], cur[1] - prev[1]);
+                    const o = n * 8;
                     f32[o]     = prev[0]; 
                     f32[o + 1] = prev[1];
                     f32[o + 2] = cur[0];  
@@ -642,7 +698,11 @@ function prepareStep(featureCollection) {
                     f32[o + 4] = width;
                     u32[o + 5] = color;
                     u32[o + 6] = outline;
+                    f32[o + 7] = cumDist;
+                    cumDist += segDist;
                     n++;
+                } else {
+                    cumDist = 0.0;
                 }
                 prev = cur;
             }
