@@ -83,10 +83,24 @@ const DARK_ASNOW_LEVELS = [
 
 // ❄️ Dark Mode Total Snowfall (10:1) Radar Glow Colors
 const SNOW_RADAR_GLOW = [
-  "#596571", "#64707d", "#6f7c89", "#7b8895", "#3557be", "#4658c9",
-  "#5658d2", "#6558db", "#7558e2", "#8657e7", "#9855ea", "#aa54ea",
-  "#ba55e6", "#ca57e1", "#d958db", "#e65bd6", "#f160cf", "#f66ec6",
-  "#fe85c6", "#ffa6d1", "#ffc8e0", "#ffecf3"
+  "#596571", "#64707d", "#6f7c89", "#7b8895",
+  // blues: 2 - 6 (0.5 steps)
+  "#add7f9", "#90bff7", "#70acf1", "#5f9fed", "#4b8bec", "#3d79e3", "#336ed0", "#2c62c3",
+  // purples to magenta: 6 - 10 (0.5 steps)
+  "#3f0792", "#4d0a94", "#5c0e90", "#691290", "#82188c", "#9d208b", "#be2888", "#df3185",
+  // magenta to pink to lavender to cyan: 10 - 28 (1 inch steps)
+  "#e0358d", "#e654a3", "#e972b3", "#ee80bd", "#ed94c8", "#e89cca", "#e3a3cf", "#e0a9d1",
+  "#d5b7d7", "#d2bddb", "#cbcce2", "#c2dbe9", "#bfe4ef", "#b8eef3", "#b3f8f9", "#b2f3f3",
+  "#a1dfe0", "#92c3c8",
+  // teal-gray to lavender: 28 - 48 (wider bins)
+  "#97bed3",  // 28 - 31
+  "#94b4d6",  // 31 - 32
+  "#a2b3d9",  // 32 - 35
+  "#a9addc",  // 35 - 38
+  "#afa9e0",  // 38 - 41
+  "#b9a0e7",  // 41 - 44
+  "#c49bed",  // 44 - 47
+  "#cb95f2"   // 47 - 48
 ];
 
 // 💧 Dark Mode PWAT Levels (Inches)
