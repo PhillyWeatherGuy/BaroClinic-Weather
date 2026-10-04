@@ -48,12 +48,13 @@ function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     return expression;
 }
 
-function themeContourFeatures(featureCollection) {
+function themeContourFeatures(featureCollection, masterData) {
     if (!featureCollection || !Array.isArray(featureCollection.features)) {
         return featureCollection;
     }
 
     const activeParam = (
+        masterData?.parameter ||
         stateManager.paramConfig?.id ||
         stateManager.activeParam ||
         stateManager.manifest?.parameter ||
@@ -73,29 +74,17 @@ function themeContourFeatures(featureCollection) {
     }
 
     // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
-    const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || activeMasterContours?.parameter === 'prate';
+    const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || masterData?.parameter === 'prate';
     if (isPrate) {
         const isDark = stateManager.currentTheme === 'dark';
         const mslpColor = isDark ? '#ffffff' : '#000000';
         const zoom = mapInstance ? mapInstance.getZoom() : 5;
 
-        // When zoomed out (< 5.0), show only 4 mb MSLP intervals; keep all thickness lines
-        if (zoom < 5.0) {
-            featureCollection.features = featureCollection.features.filter(f => {
-                const p = f?.properties || {};
-                const rawVal = p.name ?? p.level ?? p.value ?? p.val ?? p.target;
-                const v = parseFloat(String(rawVal || '').replace(/[^0-9.-]/g, ''));
-                const isThick = p.unit === 'dam' || (v >= 350 && v <= 750) || (v >= 3500 && v <= 7500);
-                if (isThick) return true;
-                return isNaN(v) || Math.round(v) % 4 === 0;
-            });
-        }
-
         for (const feature of featureCollection.features) {
             if (!feature) continue;
             const props = feature.properties || (feature.properties = {});
 
-            // Read level value from any possible key
+            // Extract numeric value from any possible property key
             const rawVal = props.name ?? props.level ?? props.value ?? props.val ?? props.target;
             const val = parseFloat(String(rawVal || '').replace(/[^0-9.-]/g, ''));
 
@@ -103,7 +92,10 @@ function themeContourFeatures(featureCollection) {
             const idStr = String(props.id || '').toLowerCase();
             const nameStr = String(props.name || '').toLowerCase();
 
-            // Robust Thickness Detection (handles dam, meters, units, or values 350-750)
+            // 🌟 Thickness Identification:
+            // - Any value between 350 and 750 (dam)
+            // - Any value between 3500 and 7500 (meters)
+            // - Any contour tagged with "dam", "thick", etc.
             let isThickness = false;
             let thickDam = val;
 
@@ -131,7 +123,7 @@ function themeContourFeatures(featureCollection) {
                 props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
                 props.width = Math.abs(thickDam - 540) < 0.5 ? 2.2 : 1.4;
                 props.opacity = 0.95;
-                props.dotted = true; // Flag for dotted lines
+                props.dotted = true; // Dotted line
             } else {
                 // MSLP Isobars (solid line)
                 props.color = mslpColor;
@@ -143,6 +135,23 @@ function themeContourFeatures(featureCollection) {
                 props.dotted = false;
             }
         }
+
+        // When zoomed out (< 5.0), decimate 2mb MSLP intervals down to 4mb; keep all thickness lines
+        if (zoom < 5.0) {
+            featureCollection.features = featureCollection.features.filter(f => {
+                if (f?.properties?.dotted) return true; // Keep all thickness lines
+                const v = parseFloat(String(f?.properties?.name || ''));
+                return isNaN(v) || Math.round(v) % 4 === 0;
+            });
+        }
+
+        // Console diagnostic to verify levels loaded in memory
+        console.log('[Contours] Step levels loaded:', featureCollection.features.map(f => ({
+            name: f.properties.name,
+            color: f.properties.color,
+            dotted: f.properties.dotted
+        })));
+
         return featureCollection;
     }
 
@@ -545,9 +554,6 @@ function mercToLonLat(x, y) {
     return [lon, lat];
 }
 
-/**
- * 🌟 Smooths polyline points in Mercator space using a tension-controlled Cardinal spline.
- */
 function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
     if (!rawCoords || rawCoords.length < 3) {
         return rawCoords.map(c => lonLatToMerc(c[0], c[1]));
@@ -619,10 +625,7 @@ function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
     return smoothed;
 }
 
-/**
- * 🌟 Walks a polyline and emits dashed/dotted segments.
- * Scaled to ~10px dash and ~7px gap at typical map zoom levels.
- */
+// 🌟 Enlarged dash/gap pattern (~12px dash, ~8px gap) so dots/dashes are crisp and visible
 function emitDashedSegments(line, dashLen, gapLen, onSegment) {
     let isDrawing = true;
     let remainingInPhase = dashLen;
@@ -727,8 +730,8 @@ function prepareStep(featureCollection) {
             if (len < 2) continue;
 
             if (props.dotted) {
-                // Clearly visible dashed/dotted segments (~10px dash, ~7px gap at zoom 4-5)
-                emitDashedSegments(line, 0.0022, 0.0016, (pA, pB) => {
+                // High-visibility dots/dashes
+                emitDashedSegments(line, 0.0030, 0.0020, (pA, pB) => {
                     if (n * 7 + 6 >= f32.length) return;
                     const o = n * 7;
                     f32[o]     = pA[0]; 
@@ -741,7 +744,6 @@ function prepareStep(featureCollection) {
                     n++;
                 });
             } else {
-                // Solid lines (MSLP isobars, etc.)
                 let prev = line[0];
                 for (let i = 1; i < len; i++) {
                     const cur = line[i];
@@ -804,7 +806,7 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
 
     const decoded = binaryStepToGeoJson(stepNum, masterData) ||
                     { ...stepData, features: (stepData.features || []).slice() };
-    const themed = themeContourFeatures(decoded);
+    const themed = themeContourFeatures(decoded, masterData);
     const prepared = prepareStep(themed);
     stepCache.set(cacheKey, prepared);
     return prepared;
@@ -1132,7 +1134,6 @@ function decodeContourV2(view, coordinateScale) {
     return steps;
 }
 
-// 🌟 Step-key safe resolver (handles "0", "000", "F000", 0) so metadata properties are never lost
 function binaryStepToGeoJson(step, masterData) {
     if (!masterData?.steps) return null;
     const stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
