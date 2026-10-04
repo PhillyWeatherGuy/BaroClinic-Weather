@@ -172,7 +172,7 @@ void main() {
     v_color = col;
 }`;
 
-// Flat map: our own matrix (the one that worked)
+// Flat map: our own matrix
 const MERCATOR_VERT = `#version 300 es
 uniform mat4 u_matrix;
 #define PROJECT(p) (u_matrix * vec4((p), 0.0, 1.0))
@@ -244,7 +244,7 @@ function getGlobeProgram(gl, sd) {
     if (gpu.globePrograms.has(key)) return gpu.globePrograms.get(key);
 
     let prog = buildProgram(gl, makeGlobeVert(sd, true));
-    if (!prog) prog = buildProgram(gl, makeGlobeVert(sd, false));   // some versions want define first
+    if (!prog) prog = buildProgram(gl, makeGlobeVert(sd, false));
 
     let entry = null;
     if (prog) {
@@ -340,7 +340,6 @@ const gpuLayer = {
     render(gl, arg) {
         if (!gpu.ready) { logOnce('render-before-ready'); return; }
 
-        // Upload newly selected step (a single bufferData call)
         if (gpu.dirty) {
             gl.bindBuffer(gl.ARRAY_BUFFER, gpu.instBuf);
             gl.bufferData(gl.ARRAY_BUFFER, gpu.pending || new Uint8Array(0), gl.DYNAMIC_DRAW);
@@ -353,7 +352,6 @@ const gpuLayer = {
         const map = gpu.map;
         const pd = arg && arg.defaultProjectionData;
         const sd = arg && arg.shaderData;
-        // projectionTransition > 0 means MapLibre is (partly) in globe projection
         const globe = !!(pd && sd && pd.projectionTransition > 0);
 
         const zs = zoomStops(map.getZoom());
@@ -368,10 +366,8 @@ const gpuLayer = {
             if (!gp) return;
             program = gp.program;
             U = gp.u;
-            offsets = [wc];                 // a sphere has no world copies
+            offsets = [wc];
         } else {
-            // MapLibre versions disagree on which matrix maps mercator (0..1) coordinates to clip space,
-            // so test each candidate: the right one puts the map center near the middle of the screen.
             const candidates = [];
             if (pd && pd.fallbackMatrix) candidates.push(['fallbackMatrix', pd.fallbackMatrix]);
             if (pd && pd.mainMatrix) candidates.push(['mainMatrix', pd.mainMatrix]);
@@ -397,7 +393,7 @@ const gpuLayer = {
             if (!m) { logOnce('no-matrix', 'render args keys:', arg ? Object.keys(arg) : arg); return; }
             program = gpu.program;
             U = gpu.u;
-            offsets = [wc - 1, wc, wc + 1]; // world copies so it still draws when zoomed far out
+            offsets = [wc - 1, wc, wc + 1];
         }
 
         gl.disable(gl.DEPTH_TEST);
@@ -424,7 +420,7 @@ const gpuLayer = {
         gl.uniform1f(U.dpr, dpr);
 
         gl.bindVertexArray(gpu.vao);
-        for (let pass = 1; pass >= 0; pass--) {       // casing first, then the line on top
+        for (let pass = 1; pass >= 0; pass--) {
             gl.uniform1f(U.pass, pass);
             for (const w of offsets) {
                 gl.uniform1f(U.offsetX, w);
@@ -484,6 +480,93 @@ function lonLatToMerc(lon, lat) {
     ];
 }
 
+function mercToLonLat(x, y) {
+    let lon = x * 360 - 180;
+    if (lon > 180) lon -= 360;
+    else if (lon < -180) lon += 360;
+    const latRad = 2 * Math.atan(Math.exp((0.5 - y) * 2 * Math.PI)) - Math.PI / 2;
+    const lat = (latRad * 180) / Math.PI;
+    return [lon, lat];
+}
+
+/**
+ * 🌟 Smooths polyline points in Mercator space using a tension-controlled Cardinal spline.
+ * - Passes strictly through original data points (no coordinate drift or isobar shrinking).
+ * - Closed-loop aware (seamless circular/elliptical low & high pressure centers).
+ * - Dateline jump protected.
+ */
+function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
+    if (!rawCoords || rawCoords.length < 3) {
+        return rawCoords.map(c => lonLatToMerc(c[0], c[1]));
+    }
+
+    const pts = new Array(rawCoords.length);
+    for (let i = 0; i < rawCoords.length; i++) {
+        pts[i] = lonLatToMerc(rawCoords[i][0], rawCoords[i][1]);
+    }
+
+    const n = pts.length;
+    const isClosed = Math.hypot(pts[0][0] - pts[n - 1][0], pts[0][1] - pts[n - 1][1]) < 1e-6;
+
+    const ring = isClosed ? pts.slice(0, -1) : pts;
+    const count = ring.length;
+    if (count < 3) return pts;
+
+    const smoothed = [];
+    const numSegments = isClosed ? count : count - 1;
+
+    for (let i = 0; i < numSegments; i++) {
+        const p1 = ring[i];
+        const p2 = ring[(i + 1) % count];
+
+        // Skip interpolation across the antimeridian dateline jump
+        if (Math.abs(p2[0] - p1[0]) > 0.4) {
+            smoothed.push(p1);
+            continue;
+        }
+
+        let p0, p3;
+        if (isClosed) {
+            p0 = ring[(i - 1 + count) % count];
+            p3 = ring[(i + 2) % count];
+        } else {
+            p0 = i > 0 ? ring[i - 1] : [2 * p1[0] - p2[0], 2 * p1[1] - p2[1]];
+            p3 = (i + 2 < count) ? ring[i + 2] : [2 * p2[0] - p1[0], 2 * p2[1] - p1[1]];
+        }
+
+        if (Math.abs(p1[0] - p0[0]) > 0.4) p0 = [2 * p1[0] - p2[0], 2 * p1[1] - p2[1]];
+        if (Math.abs(p3[0] - p2[0]) > 0.4) p3 = [2 * p2[0] - p1[0], 2 * p2[1] - p1[1]];
+
+        const t1x = tension * (p2[0] - p0[0]);
+        const t1y = tension * (p2[1] - p0[1]);
+        const t2x = tension * (p3[0] - p1[0]);
+        const t2y = tension * (p3[1] - p1[1]);
+
+        for (let s = 0; s < subdivisions; s++) {
+            const t = s / subdivisions;
+            const t2 = t * t;
+            const t3 = t2 * t;
+
+            const h00 = 2 * t3 - 3 * t2 + 1;
+            const h10 = t3 - 2 * t2 + t;
+            const h01 = -2 * t3 + 3 * t2;
+            const h11 = t3 - t2;
+
+            const x = h00 * p1[0] + h10 * t1x + h01 * p2[0] + h11 * t2x;
+            const y = h00 * p1[1] + h10 * t1y + h01 * p2[1] + h11 * t2y;
+            smoothed.push([x, y]);
+        }
+    }
+
+    if (isClosed) {
+        smoothed.push([smoothed[0][0], smoothed[0][1]]);
+    } else {
+        smoothed.push(pts[n - 1]);
+    }
+
+    return smoothed;
+}
+
 function packColor(str, alpha, fallback = '#ffffff') {
     const s = String(str || fallback).trim();
     let r = 255, g = 255, b = 255;
@@ -505,6 +588,7 @@ function packColor(str, alpha, fallback = '#ffffff') {
 // Themed GeoJSON -> compact GPU instance bytes + label points
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
+    const SUBDIVISIONS = 3;
     let maxSegs = 0;
     const items = [];
     for (const f of feats) {
@@ -512,7 +596,11 @@ function prepareStep(featureCollection) {
         if (!g) continue;
         const lines = g.type === 'MultiLineString' ? g.coordinates : (g.type === 'LineString' ? [g.coordinates] : null);
         if (!lines) continue;
-        for (const l of lines) if (l.length > 1) maxSegs += l.length - 1;
+        for (const l of lines) {
+            if (l.length > 1) {
+                maxSegs += (l.length >= 3) ? (l.length - 1) * SUBDIVISIONS + 2 : (l.length - 1);
+            }
+        }
         items.push({ props: f.properties || {}, lines });
     }
 
@@ -529,12 +617,16 @@ function prepareStep(featureCollection) {
         const outline = hasOutline ? packColor(props.outlineColor, props.outlineOpacity ?? 0.8) : 0;
         const name = props.name;
 
-        for (const line of lines) {
+        for (const rawLine of lines) {
+            if (rawLine.length < 2) continue;
+
+            const line = smoothMercatorLine(rawLine, SUBDIVISIONS, 0.32);
             const len = line.length;
             if (len < 2) continue;
-            let prev = lonLatToMerc(line[0][0], line[0][1]);
+
+            let prev = line[0];
             for (let i = 1; i < len; i++) {
-                const cur = lonLatToMerc(line[i][0], line[i][1]);
+                const cur = line[i];
                 if (Math.abs(cur[0] - prev[0]) < 0.5) {   // skip segments that wrap across the dateline
                     const o = n * 7;
                     f32[o] = prev[0]; f32[o + 1] = prev[1];
@@ -547,20 +639,19 @@ function prepareStep(featureCollection) {
                 prev = cur;
             }
 
-            // One label per reasonably long line, at its midpoint, rotated along the line
-            if (name !== undefined && name !== null && len >= 6) {
+            // One label per reasonably long line, positioned along smooth tangent
+            if (name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
                 const mid = len >> 1;
-                const a = lonLatToMerc(line[mid][0], line[mid][1]);
-                const b = lonLatToMerc(line[mid + 1][0], line[mid + 1][1]);
-                if (Math.abs(b[0] - a[0]) < 0.5) {
+                const a = line[mid];
+                const b = line[mid + 1];
+                if (b && Math.abs(b[0] - a[0]) < 0.5) {
                     let angle = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
                     if (angle > 90) angle -= 180;
                     else if (angle < -90) angle += 180;
-                    let lon = line[mid][0];
-                    if (lon > 180) lon -= 360;
+                    const [lon, lat] = mercToLonLat(a[0], a[1]);
                     labelFeatures.push({
                         type: 'Feature',
-                        geometry: { type: 'Point', coordinates: [lon, line[mid][1]] },
+                        geometry: { type: 'Point', coordinates: [lon, lat] },
                         properties: {
                             name: String(name),
                             angle,
@@ -646,7 +737,6 @@ function applyStep(stepNum, masterData, rawStep, force) {
 
     const data = getStepData(stepNum, masterData, rawStep);
 
-    // No contour data for this step: clear the old contours rather than leave a wrong frame up
     if (!data) {
         setActiveData(null);
         setLabels(EMPTY_GEOJSON);
@@ -655,13 +745,12 @@ function applyStep(stepNum, masterData, rawStep, force) {
     }
 
     if (displayedStep !== stepNum || force) {
-        setActiveData(data);          // lines swap on the very next frame
-        setLabels(data.labels);       // tiny point set, cheap
+        setActiveData(data);
+        setLabels(data.labels);
     }
     displayedStep = stepNum;
 }
 
-// At most one apply per frame, always for the newest requested step
 function scheduleApply(stepNum, rawStep, force) {
     pendingApply = { stepNum, rawStep, force: !!(force || pendingApply?.force) };
     if (applyQueued) return;
@@ -674,7 +763,6 @@ function scheduleApply(stepNum, rawStep, force) {
     });
 }
 
-// Fills stepCache slowly, nearest steps first. Pure JS, no GPU memory.
 function startPreload(masterData, aroundStep) {
     const run = ++preloadRun;
     preloadStartedFor = masterData;
@@ -697,7 +785,6 @@ function startPreload(masterData, aroundStep) {
 export function initVectorContours(map) {
     mapInstance = map;
 
-    // Re-theme when crossing the 4 mb / 2 mb isobar threshold (zoom 5) on prate
     if (!map._contoursZoomBound) {
         map._contoursZoomBound = true;
         map._contoursLowZoom = map.getZoom() < 5.0;
@@ -715,9 +802,6 @@ export function initVectorContours(map) {
     }
 }
 
-/**
- * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & removes the GPU layer, label layer and source
- */
 export function clearVectorContours() {
     activeMasterContours = null;
     activeContourBinary = null;
@@ -749,9 +833,6 @@ function getMasterKeyComponents() {
     return { model, param, targetDate, runCycle, key: `${model}_${param}_${targetDate}_${runCycle}` };
 }
 
-/**
- * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
- */
 async function loadMasterContourFile() {
     const { model, param, targetDate, runCycle, key } = getMasterKeyComponents();
 
@@ -940,10 +1021,6 @@ function binaryStepToGeoJson(step, masterData) {
     };
 }
 
-/**
- * 🌟 Step switcher: lines swap by uploading one cached buffer (coalesced to once per frame).
- * Never blocks the weather map.
- */
 export async function updateVectorContours(step, forceUpdate = false) {
     if (!mapInstance) return;
 
@@ -962,9 +1039,6 @@ export async function updateVectorContours(step, forceUpdate = false) {
     if (preloadStartedFor !== masterData) startPreload(masterData, stepNum);
 }
 
-/**
- * 🌟 BACKGROUND CONTOUR PRELOADER
- */
 export async function preloadAllContours() {
     const masterData = await loadMasterContourFile();
     if (masterData?.steps && preloadStartedFor !== masterData) startPreload(masterData, currentVisibleStep);
