@@ -67,28 +67,47 @@ function themeContourFeatures(featureCollection) {
         return featureCollection;
     }
 
-    // 2. Surface Precipitation Rate (MSLP Isobars)
+    // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
     if (activeParamId === 'prate') {
         const isDark = stateManager.currentTheme === 'dark';
         const mslpColor = isDark ? '#ffffff' : '#000000';
         const zoom = mapInstance ? mapInstance.getZoom() : 5;
 
-        // When zoomed out (< 5.0), show only 4 mb intervals; when zoomed in, show all 2 mb intervals
+        // When zoomed out (< 5.0), show only 4 mb MSLP intervals; keep all thickness lines
         if (zoom < 5.0) {
             featureCollection.features = featureCollection.features.filter(f => {
                 const val = parseFloat(f?.properties?.name);
+                const isThickness = f?.properties?.unit === 'dam' || (val >= 400 && val <= 700);
+                if (isThickness) return true;
                 return isNaN(val) || Math.round(val) % 4 === 0;
             });
         }
 
         for (const feature of featureCollection.features) {
             if (!feature || !feature.properties) continue;
-            feature.properties.color = mslpColor;
-            feature.properties.stroke = mslpColor;
-            feature.properties.labelColor = mslpColor;
-            feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-            feature.properties.width = 1.5;
-            feature.properties.opacity = 0.9;
+            const val = parseFloat(feature.properties.name);
+            const isThickness = feature.properties.unit === 'dam' || (val >= 400 && val <= 700);
+
+            if (isThickness) {
+                // Red for above 540 dam, Blue for 540 dam and below
+                const thickColor = val > 540 ? '#dc2626' : '#2563eb';
+                feature.properties.color = thickColor;
+                feature.properties.stroke = thickColor;
+                feature.properties.labelColor = thickColor;
+                feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
+                feature.properties.width = (val === 540) ? 2.0 : 1.4;
+                feature.properties.opacity = 0.9;
+                feature.properties.dotted = true; // Dotted line
+            } else {
+                // MSLP Isobars (solid line)
+                feature.properties.color = mslpColor;
+                feature.properties.stroke = mslpColor;
+                feature.properties.labelColor = mslpColor;
+                feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
+                feature.properties.width = 1.5;
+                feature.properties.opacity = 0.9;
+                feature.properties.dotted = false;
+            }
         }
         return featureCollection;
     }
@@ -573,6 +592,55 @@ function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
     return smoothed;
 }
 
+/**
+ * 🌟 Walks a polyline and emits dashed/dotted segments (drawn length + gap length)
+ */
+function emitDashedSegments(line, dashLen, gapLen, onSegment) {
+    let isDrawing = true;
+    let remainingInPhase = dashLen;
+
+    let p0 = line[0];
+    for (let i = 1; i < line.length; i++) {
+        const p1 = line[i];
+        const segDx = p1[0] - p0[0];
+        const segDy = p1[1] - p0[1];
+
+        if (Math.abs(segDx) > 0.4) {
+            p0 = p1;
+            isDrawing = true;
+            remainingInPhase = dashLen;
+            continue;
+        }
+
+        const segLen = Math.hypot(segDx, segDy);
+        if (segLen < 1e-7) continue;
+
+        let curT = 0;
+        while (curT < 1.0) {
+            const distAvail = (1.0 - curT) * segLen;
+            if (distAvail <= remainingInPhase) {
+                if (isDrawing) {
+                    const startPt = [p0[0] + curT * segDx, p0[1] + curT * segDy];
+                    onSegment(startPt, p1);
+                }
+                remainingInPhase -= distAvail;
+                curT = 1.0;
+            } else {
+                const tNext = curT + (remainingInPhase / segLen);
+                const endPt = [p0[0] + tNext * segDx, p0[1] + tNext * segDy];
+                if (isDrawing) {
+                    const startPt = [p0[0] + curT * segDx, p0[1] + curT * segDy];
+                    onSegment(startPt, endPt);
+                }
+                isDrawing = !isDrawing;
+                remainingInPhase = isDrawing ? dashLen : gapLen;
+                curT = tNext;
+            }
+        }
+        p0 = p1;
+    }
+}
+
 function packColor(str, alpha, fallback = '#ffffff') {
     const s = String(str || fallback).trim();
     let r = 255, g = 255, b = 255;
@@ -604,7 +672,7 @@ function prepareStep(featureCollection) {
         if (!lines) continue;
         for (const l of lines) {
             if (l.length > 1) {
-                maxSegs += (l.length >= 3) ? (l.length - 1) * SUBDIVISIONS + 2 : (l.length - 1);
+                maxSegs += (l.length >= 3) ? (l.length - 1) * (SUBDIVISIONS + 1) + 4 : (l.length - 1);
             }
         }
         items.push({ props: f.properties || {}, lines });
@@ -630,21 +698,39 @@ function prepareStep(featureCollection) {
             const len = line.length;
             if (len < 2) continue;
 
-            let prev = line[0];
-            for (let i = 1; i < len; i++) {
-                const cur = line[i];
-                if (Math.abs(cur[0] - prev[0]) < 0.5) {   // skip segments that wrap across the dateline
+            if (props.dotted) {
+                // Dotted lines: short segments with alternating gaps
+                emitDashedSegments(line, 0.0006, 0.0005, (pA, pB) => {
+                    if (n * 7 + 6 >= f32.length) return;
                     const o = n * 7;
-                    f32[o]     = prev[0]; 
-                    f32[o + 1] = prev[1];
-                    f32[o + 2] = cur[0];  
-                    f32[o + 3] = cur[1];
+                    f32[o]     = pA[0]; 
+                    f32[o + 1] = pA[1];
+                    f32[o + 2] = pB[0];  
+                    f32[o + 3] = pB[1];
                     f32[o + 4] = width;
                     u32[o + 5] = color;
                     u32[o + 6] = outline;
                     n++;
+                });
+            } else {
+                // Solid lines (MSLP isobars, etc.)
+                let prev = line[0];
+                for (let i = 1; i < len; i++) {
+                    const cur = line[i];
+                    if (Math.abs(cur[0] - prev[0]) < 0.5) {   // skip segments that wrap across the dateline
+                        if (n * 7 + 6 >= f32.length) break;
+                        const o = n * 7;
+                        f32[o]     = prev[0]; 
+                        f32[o + 1] = prev[1];
+                        f32[o + 2] = cur[0];  
+                        f32[o + 3] = cur[1];
+                        f32[o + 4] = width;
+                        u32[o + 5] = color;
+                        u32[o + 6] = outline;
+                        n++;
+                    }
+                    prev = cur;
                 }
-                prev = cur;
             }
 
             // One label per reasonably long line, positioned along smooth tangent
