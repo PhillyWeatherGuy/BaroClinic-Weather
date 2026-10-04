@@ -6,6 +6,7 @@ let activeMasterContours = null;
 let activeMasterKey = null;
 let fetchPromise = null;
 let activeContourBinary = null;
+let modelsConfig = null;
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -13,15 +14,72 @@ const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
-function getPvaContourThemeColor() {
-    return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
+// 🌟 Fetch models.json immediately so it is cached in memory
+async function loadModelsConfig() {
+    if (!modelsConfig) {
+        try {
+            const resp = await fetch('./config/models.json');
+            if (resp.ok) {
+                modelsConfig = await resp.json();
+            }
+        } catch (e) {
+            console.warn("Could not load config/models.json:", e);
+        }
+    }
+    return modelsConfig;
 }
 
-function getPvaContourGlowColor() {
-    return stateManager.currentTheme === 'dark' ? '#00c8ff' : '#007c91';
+// 🌟 Synchronous, fail-safe getter: reads models.json directly with built-in fallbacks
+function getContourConfig(paramId) {
+    const id = (paramId || stateManager.activeParam || '2t').toLowerCase();
+    
+    // 1. Read directly from models.json if loaded
+    if (modelsConfig?.parameters?.[id]?.contours) {
+        return modelsConfig.parameters[id].contours;
+    }
+    if (stateManager.paramConfig?.id === id && stateManager.paramConfig?.contours) {
+        return stateManager.paramConfig.contours;
+    }
+
+    // 2. Safe initial fallback matching models.json (prevents any startup race condition)
+    if (id === '2t') {
+        return {
+            source_param: "2t",
+            color_light: "#4169E1",
+            color_dark: "#4169E1",
+            width: 2.0,
+            opacity: 0.95,
+            unit_label: "temperature",
+            special_lines: [{ target: 273.15, color: "#4169E1", width: 2.0 }]
+        };
+    }
+    if (id === 'pva') {
+        return {
+            source_param: "z500",
+            color_light: "#000000",
+            color_dark: "#ffffff",
+            width: 1.6,
+            opacity: 0.9,
+            glow: true,
+            glow_dark: "#00c8ff",
+            glow_light: "#007c91",
+            special_lines: [{ target: 540, color: "#4169E1", width: 2.4 }]
+        };
+    }
+    if (id === 'prate') {
+        return {
+            source_param: "prate",
+            color_light: "#000000",
+            color_dark: "#ffffff",
+            width: 1.6,
+            opacity: 0.9,
+            zoom_filter: { coarse_interval: 4, min_zoom: 4.5 }
+        };
+    }
+    return null;
 }
 
-function pvaZoomWidthExpression(baseWidth, isGlow = false) {
+function contourZoomWidthExpression(baseWidth, isGlow = false) {
     const expression = ['interpolate', ['linear'], ['zoom']];
     const zoomStops = [[2, 0.9, 2.4], [5, 1.0, 2.6], [8, 1.4, 3.2], [11, 1.8, 4.0], [14, 2.1, 4.8]];
 
@@ -35,44 +93,83 @@ function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     return expression;
 }
 
+/**
+ * 🌟 Purely Config-Driven Styler: plots whatever is in config/models.json
+ */
 function themeContourFeatures(featureCollection) {
     if (!featureCollection || !Array.isArray(featureCollection.features)) {
         return featureCollection;
     }
 
     const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    if (activeParamId === '2t') {
-        const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
-        for (const feature of featureCollection.features) {
-            const name = String(feature?.properties?.name || '');
-            if (feature?.properties && (Number(name) === 273.15 || /freez|273\.15/i.test(name))) {
+    const cfg = getContourConfig(activeParamId);
+    if (!cfg) {
+        return EMPTY_GEOJSON;
+    }
+
+    const isDarkTheme = (stateManager.currentTheme === 'dark');
+    const baseColor = isDarkTheme ? (cfg.color_dark || '#ffffff') : (cfg.color_light || '#000000');
+    const hasGlow = Boolean(cfg.glow);
+    const glowColor = hasGlow ? (isDarkTheme ? (cfg.glow_dark || '#00c8ff') : (cfg.glow_light || '#007c91')) : null;
+    const coarseInterval = cfg.zoom_filter?.coarse_interval;
+
+    for (const feature of featureCollection.features) {
+        if (!feature || !feature.properties) continue;
+
+        const originalName = String(feature.properties.name || '');
+        const numVal = parseFloat(originalName);
+
+        // 1. Dynamic unit formatting for temperature
+        if (cfg.unit_label === 'temperature') {
+            const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
+            if (numVal === 273.15 || /freez|273\.15/i.test(originalName)) {
                 feature.properties.name = freezingLabel;
             }
         }
-        return featureCollection;
-    }
 
-    if (activeParamId !== 'pva') {
-        return featureCollection;
-    }
+        // 2. Zoom interval filtering (e.g. for MSLP isobars, hide non-4 mb lines when zoomed out)
+        const isIntermediate = Boolean(coarseInterval && !isNaN(numVal) && (Math.round(numVal) % coarseInterval !== 0));
+        feature.properties.isIntermediate = isIntermediate;
 
-    const contourColor = getPvaContourThemeColor();
-    const glowColor = getPvaContourGlowColor();
-    const isDarkTheme = stateManager.currentTheme === 'dark';
-    for (const feature of featureCollection.features) {
-        if (!feature || !feature.properties) continue;
-        const is540Line = Number(feature.properties.name) === 540;
-        const featureColor = is540Line ? '#4169E1' : contourColor;
-        feature.properties.color = featureColor;
-        feature.properties.stroke = featureColor;
-        feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
-        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
-        feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
-        feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
-        feature.properties.labelHaloColor = contourColor;
-        if (is540Line) {
-            feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
+        // 3. Styling from config
+        let strokeColor = baseColor;
+        let strokeWidth = cfg.width || 1.6;
+        let strokeOpacity = cfg.opacity || 0.95;
+        let isSpecial = false;
+
+        // 4. Special target lines from config (e.g. 540 in blue, 273.15 in blue)
+        if (cfg.special_lines && Array.isArray(cfg.special_lines)) {
+            for (const special of cfg.special_lines) {
+                const matches = (!isNaN(numVal) && Math.abs(numVal - special.target) < 0.1) ||
+                                (special.target === 273.15 && /freez|273\.15/i.test(originalName));
+                if (matches) {
+                    if (special.color) strokeColor = special.color;
+                    if (special.width) strokeWidth = special.width;
+                    if (special.opacity) strokeOpacity = special.opacity;
+                    isSpecial = true;
+                    break;
+                }
+            }
         }
+
+        feature.properties.color = strokeColor;
+        feature.properties.stroke = strokeColor;
+        feature.properties.width = strokeWidth;
+        feature.properties.opacity = strokeOpacity;
+
+        // 5. Casing / Glow
+        if (hasGlow) {
+            feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
+            feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
+            feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
+        } else {
+            delete feature.properties.outlineColor;
+        }
+
+        feature.properties.labelColor = isSpecial
+            ? strokeColor
+            : (baseColor === '#ffffff' ? '#000000' : '#ffffff');
+        feature.properties.labelHaloColor = baseColor;
     }
 
     return featureCollection;
@@ -87,6 +184,7 @@ export function initVectorContours(map) {
             data: EMPTY_GEOJSON
         });
 
+        // Casing / Glow Layer
         map.addLayer({
             id: CASING_LAYER_ID,
             type: 'line',
@@ -98,13 +196,13 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['get', 'outlineColor'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
+                'line-width': contourZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
                 'line-opacity': ['coalesce', ['get', 'outlineOpacity'], 0.8],
                 'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
             }
         });
 
-        // 1. Smooth Vector Line Layer
+        // 1. Smooth Vector Line Layer (with Zoom-dependent 2mb/4mb isobar fade)
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
@@ -115,12 +213,21 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
-                'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
+                'line-width': contourZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
+                'line-opacity': [
+                    'case',
+                    ['==', ['get', 'isIntermediate'], true],
+                    [
+                        'interpolate', ['linear'], ['zoom'],
+                        4.0, 0.0,
+                        5.5, ['coalesce', ['get', 'opacity'], 0.85]
+                    ],
+                    ['coalesce', ['get', 'opacity'], 0.95]
+                ]
             }
         });
 
-        // 2. Inline Contour Labels ("32°F Freezing Line", "540", etc.)
+        // 2. Inline Contour Labels (with Zoom-dependent 2mb/4mb isobar fade)
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
@@ -129,7 +236,6 @@ export function initVectorContours(map) {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
                 'text-size': ['case', ['has', 'labelColor'], 14, 11],
-                // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
                 'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
                 'text-padding': 12
@@ -137,15 +243,22 @@ export function initVectorContours(map) {
             paint: {
                 'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                 'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
+                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
+                'text-opacity': [
+                    'case',
+                    ['==', ['get', 'isIntermediate'], true],
+                    [
+                        'interpolate', ['linear'], ['zoom'],
+                        4.2, 0.0,
+                        5.5, 1.0
+                    ],
+                    1.0
+                ]
             }
         });
     }
 }
 
-/**
- * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & clears vector layer on parameter/model switch
- */
 export function clearVectorContours() {
     activeMasterContours = null;
     activeContourBinary = null;
@@ -159,17 +272,23 @@ export function clearVectorContours() {
 }
 
 /**
- * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
+ * 🌟 Helper to fetch the Master Contour JSON file driven by models.json
  */
 async function loadMasterContourFile() {
     const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
-    
-    // 🌟 Use clean parameter ID (e.g. '2t', 'pva') instead of long display names
     const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
 
-    const currentKey = `${model}_${param}_${targetDate}_${runCycle}`;
+    // 🌟 Read source_param directly from config (z500 for pva, prate for prate, 2t for 2t)
+    await loadModelsConfig();
+    const cfg = getContourConfig(param);
+    if (!cfg) {
+        return null;
+    }
+
+    const contourParam = (cfg.source_param || param).toLowerCase();
+    const currentKey = `${model}_${contourParam}_${targetDate}_${runCycle}`;
 
     if (activeMasterKey === currentKey && activeMasterContours) {
         return activeMasterContours;
@@ -182,17 +301,12 @@ async function loadMasterContourFile() {
     activeMasterKey = currentKey;
 
     const urlsToTry = [];
-    if (param === 'pva') {
-        if (targetDate && runCycle) {
-            urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
-        }
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
-    }
     if (targetDate && runCycle) {
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
     }
-    urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?v=${Date.now()}`);
-    if (param === '2t' || param.includes('temp')) {
+    urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_contours.json?v=${Date.now()}`);
+
+    if (contourParam === '2t' || contourParam.includes('temp')) {
         urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?v=${Date.now()}`);
     }
 
@@ -357,7 +471,7 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 Instant 0.00ms Vector Contour Renderer from Master RAM Object
+ * 🌟 Instant Vector Contour Renderer driven by models.json
  */
 export async function updateVectorContours(step) {
     if (!mapInstance) return;
@@ -366,10 +480,18 @@ export async function updateVectorContours(step) {
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
 
+    await loadModelsConfig();
+    const activeId = (stateManager.paramConfig?.id || stateManager.activeParam || '2t').toLowerCase();
+    const cfg = getContourConfig(activeId);
+
+    if (!cfg) {
+        source.setData(EMPTY_GEOJSON);
+        return;
+    }
+
     const masterData = await loadMasterContourFile();
 
     if (masterData && masterData.steps) {
-        // 🌟 Support all common step key formats ("0", "000", "F000", 0)
         const stepData = masterData.steps[String(stepNum)] ||
                          masterData.steps[String(stepNum).padStart(3, '0')] ||
                          masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
@@ -386,9 +508,6 @@ export async function updateVectorContours(step) {
     source.setData(EMPTY_GEOJSON);
 }
 
-/**
- * 🌟 BACKGROUND CONTOUR PRELOADER
- */
 export async function preloadAllContours() {
     await loadMasterContourFile();
 }
