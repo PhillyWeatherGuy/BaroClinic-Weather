@@ -8,16 +8,17 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 
-let displayedStep = null; // the step whose contours are on screen (opacity 1)
-let preloadRun = 0; // bumped to cancel an in-progress background preload
-const PRELOAD_INTERVAL_MS = 50; // one step built every 50 ms so the main thread never hitches
+// ONE source + ONE set of layers. Switching steps = setData() on that source.
+// MapLibre keeps drawing the old tiles until the new ones are ready, so the contours lag but never go blank.
+let displayedStep = null;
+let pendingApply = null;
+let applyQueued = false;
 
-const LINE_OPACITY_EXPR = ['coalesce', ['get', 'opacity'], 0.95];
-const CASING_OPACITY_EXPR = ['coalesce', ['get', 'outlineOpacity'], 0.8];
-const NO_FADE = { duration: 0, delay: 0 };
-
-// 🌟 Track which steps have their own dedicated GPU layers
-const loadedSteps = new Set();
+// Decoded + themed GeoJSON per step (plain JS memory, no GPU cost), filled slowly in the background
+const stepCache = new Map();
+let preloadRun = 0;
+let preloadStartedFor = null;
+const PRELOAD_INTERVAL_MS = 30;
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -119,126 +120,114 @@ function themeContourFeatures(featureCollection) {
     return featureCollection;
 }
 
-// 🌟 Shows/hides a step by OPACITY (never visibility:none, which would make MapLibre drop its tiles)
-function setStepShown(stepNum, shown) {
-    if (!mapInstance || !loadedSteps.has(stepNum)) return;
+// 🌟 Creates the single source + layers (once)
+function ensureLayers(initialData) {
+    if (!mapInstance || mapInstance.getSource(SOURCE_ID)) return;
 
-    const casingId = `${CASING_LAYER_ID}-${stepNum}`;
-    const lineId = `${LINE_LAYER_ID}-${stepNum}`;
-    const labelId = `${LABEL_LAYER_ID}-${stepNum}`;
+    mapInstance.addSource(SOURCE_ID, { type: 'geojson', data: initialData || EMPTY_GEOJSON });
 
-    if (mapInstance.getLayer(casingId)) mapInstance.setPaintProperty(casingId, 'line-opacity', shown ? CASING_OPACITY_EXPR : 0);
-    if (mapInstance.getLayer(lineId)) mapInstance.setPaintProperty(lineId, 'line-opacity', shown ? LINE_OPACITY_EXPR : 0);
-    if (mapInstance.getLayer(labelId)) mapInstance.setPaintProperty(labelId, 'text-opacity', shown ? 1 : 0);
+    mapInstance.addLayer({
+        id: CASING_LAYER_ID,
+        type: 'line',
+        source: SOURCE_ID,
+        filter: ['has', 'outlineColor'],
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+            'line-color': ['get', 'outlineColor'],
+            'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
+            'line-opacity': ['coalesce', ['get', 'outlineOpacity'], 0.8],
+            'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
+        }
+    });
+
+    mapInstance.addLayer({
+        id: LINE_LAYER_ID,
+        type: 'line',
+        source: SOURCE_ID,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+            'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
+            'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
+            'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
+        }
+    });
+
+    mapInstance.addLayer({
+        id: LABEL_LAYER_ID,
+        type: 'symbol',
+        source: SOURCE_ID,
+        layout: {
+            'symbol-placement': 'line',
+            'text-field': ['get', 'name'],
+            'text-size': ['case', ['has', 'labelColor'], 14, 11],
+            'text-font': ['Noto Sans Bold'],
+            'text-max-angle': 45,
+            'text-padding': 12
+        },
+        paint: {
+            'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
+            'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
+            'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
+        }
+    });
 }
 
-function removeStep(stepNum) {
-    if (mapInstance) {
-        try {
-            if (mapInstance.getLayer(`${CASING_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${CASING_LAYER_ID}-${stepNum}`);
-            if (mapInstance.getLayer(`${LINE_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LINE_LAYER_ID}-${stepNum}`);
-            if (mapInstance.getLayer(`${LABEL_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LABEL_LAYER_ID}-${stepNum}`);
-            if (mapInstance.getSource(`${SOURCE_ID}-${stepNum}`)) mapInstance.removeSource(`${SOURCE_ID}-${stepNum}`);
-        } catch (e) {}
-    }
-    loadedSteps.delete(stepNum);
-    if (displayedStep === stepNum) displayedStep = null;
-}
+// Decoded + themed GeoJSON for one step (cached)
+function getStepGeoJson(stepNum, masterData, rawStep = stepNum) {
+    if (stepCache.has(stepNum)) return stepCache.get(stepNum);
 
-// 🌟 Creates dedicated GPU layers for a specific step
-function createOrUpdateStepLayers(stepNum, geoJson) {
-    if (!mapInstance) return;
-    
-    const srcId = `${SOURCE_ID}-${stepNum}`;
-    const casingId = `${CASING_LAYER_ID}-${stepNum}`;
-    const lineId = `${LINE_LAYER_ID}-${stepNum}`;
-    const labelId = `${LABEL_LAYER_ID}-${stepNum}`;
-
-    if (!mapInstance.getSource(srcId)) {
-        mapInstance.addSource(srcId, { type: 'geojson', data: geoJson });
-
-        mapInstance.addLayer({
-            id: casingId,
-            type: 'line',
-            source: srcId,
-            filter: ['has', 'outlineColor'],
-            layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
-            paint: {
-                'line-color': ['get', 'outlineColor'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
-                'line-opacity': 0,
-                'line-opacity-transition': NO_FADE,
-                'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
-            }
-        });
-
-        mapInstance.addLayer({
-            id: lineId,
-            type: 'line',
-            source: srcId,
-            layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
-            paint: {
-                'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
-                'line-opacity': 0,
-                'line-opacity-transition': NO_FADE
-            }
-        });
-
-        mapInstance.addLayer({
-            id: labelId,
-            type: 'symbol',
-            source: srcId,
-            layout: {
-                'symbol-placement': 'line',
-                'text-field': ['get', 'name'],
-                'text-size': ['case', ['has', 'labelColor'], 14, 11],
-                'text-font': ['Noto Sans Bold'],
-                'text-max-angle': 45,
-                'text-padding': 12,
-                'visibility': 'visible'
-            },
-            paint: {
-                'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
-                'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
-                'text-opacity': 0,
-                'text-opacity-transition': NO_FADE
-            }
-        });
-
-        loadedSteps.add(stepNum);
-    } else {
-        // If updating a step (e.g. after zooming on prate), update data and make visible
-        mapInstance.getSource(srcId).setData(geoJson);
-    }
-}
-
-// Builds (or updates) the layers for one step. Returns false if there is no data for it.
-function buildStepLayers(stepNum, masterData, rawStep = stepNum) {
     const stepData = masterData.steps[String(stepNum)] ||
                      masterData.steps[String(stepNum).padStart(3, '0')] ||
                      masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
                      masterData.steps[stepNum] ||
                      masterData.steps[rawStep];
-    if (!stepData) return false;
+    if (!stepData) return null;
 
-    const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-    const themedStepData = themeContourFeatures(decodedStepData);
-    createOrUpdateStepLayers(stepNum, themedStepData);
-    return true;
+    const decoded = binaryStepToGeoJson(stepNum, masterData) ||
+                    { ...stepData, features: (stepData.features || []).slice() };
+    const themed = themeContourFeatures(decoded);
+    stepCache.set(stepNum, themed);
+    return themed;
 }
 
-// Swap: new step on, old step off, in the same tick
-function showStep(stepNum) {
-    setStepShown(stepNum, true);
-    if (displayedStep !== null && displayedStep !== stepNum) setStepShown(displayedStep, false);
+function applyStep(stepNum, masterData, rawStep, force) {
+    if (!mapInstance) return;
+    const data = getStepGeoJson(stepNum, masterData, rawStep);
+
+    // No contour data for this step: clear the old contours rather than leave a wrong frame up
+    if (!data) {
+        const src = mapInstance.getSource(SOURCE_ID);
+        if (src && displayedStep !== null) src.setData(EMPTY_GEOJSON);
+        displayedStep = null;
+        return;
+    }
+
+    const src = mapInstance.getSource(SOURCE_ID);
+    if (!src) {
+        ensureLayers(data);
+    } else if (displayedStep !== stepNum || force) {
+        src.setData(data);
+    }
     displayedStep = stepNum;
 }
 
-// Builds every step slowly in the background (nearest to aroundStep first) and keeps them until clearVectorContours()
-function preloadAllSteps(masterData, aroundStep) {
+// At most one setData per frame, always for the newest requested step
+function scheduleApply(stepNum, rawStep, force) {
+    pendingApply = { stepNum, rawStep, force: !!(force || pendingApply?.force) };
+    if (applyQueued) return;
+    applyQueued = true;
+    requestAnimationFrame(() => {
+        applyQueued = false;
+        const p = pendingApply;
+        pendingApply = null;
+        if (p && activeMasterContours?.steps) applyStep(p.stepNum, activeMasterContours, p.rawStep, p.force);
+    });
+}
+
+// Fills stepCache slowly, nearest steps first. Pure JS, so no tiles / GPU memory.
+function startPreload(masterData, aroundStep) {
     const run = ++preloadRun;
+    preloadStartedFor = masterData;
     const nums = Object.keys(masterData?.steps || {})
         .map(k => parseInt(String(k).replace(/\D/g, ''), 10))
         .filter(n => !isNaN(n))
@@ -247,9 +236,9 @@ function preloadAllSteps(masterData, aroundStep) {
 
     const next = () => {
         if (run !== preloadRun || !mapInstance || activeMasterContours !== masterData) return;
-        while (idx < nums.length && loadedSteps.has(nums[idx])) idx++;
+        while (idx < nums.length && stepCache.has(nums[idx])) idx++;
         if (idx >= nums.length) return;
-        buildStepLayers(nums[idx++], masterData);
+        getStepGeoJson(nums[idx++], masterData);
         setTimeout(next, PRELOAD_INTERVAL_MS);
     };
     setTimeout(next, 0);
@@ -258,14 +247,19 @@ function preloadAllSteps(masterData, aroundStep) {
 export function initVectorContours(map) {
     mapInstance = map;
 
-    // Refresh 2 mb vs 4 mb filtering when zooming on prate
+    // Re-theme when crossing the 4 mb / 2 mb isobar threshold (zoom 5) on prate
     if (!map._contoursZoomBound) {
         map._contoursZoomBound = true;
+        map._contoursLowZoom = map.getZoom() < 5.0;
         map.on('zoomend', () => {
+            const lowZoom = map.getZoom() < 5.0;
+            if (lowZoom === map._contoursLowZoom) return;
+            map._contoursLowZoom = lowZoom;
+
             const activeParam = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
             if (activeParam === 'prate' && stateManager.currentStepIndex !== undefined) {
                 const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
-                // Passing true forces it to re-run the JS zoom filter for the current frame
+                // Passing true clears the cache and re-runs the JS zoom filter for the current frame
                 if (step !== undefined) updateVectorContours(step, true);
             }
         });
@@ -273,18 +267,28 @@ export function initVectorContours(map) {
 }
 
 /**
- * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & completely removes all dynamically created layers
+ * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & removes the source + layers
  */
 export function clearVectorContours() {
     activeMasterContours = null;
     activeContourBinary = null;
     activeMasterKey = null;
     fetchPromise = null;
-    preloadRun++; // cancel any background preload
 
-    [...loadedSteps].forEach(removeStep);
+    preloadRun++;
+    preloadStartedFor = null;
+    pendingApply = null;
+    stepCache.clear();
 
-    loadedSteps.clear();
+    if (mapInstance) {
+        try {
+            if (mapInstance.getLayer(CASING_LAYER_ID)) mapInstance.removeLayer(CASING_LAYER_ID);
+            if (mapInstance.getLayer(LINE_LAYER_ID)) mapInstance.removeLayer(LINE_LAYER_ID);
+            if (mapInstance.getLayer(LABEL_LAYER_ID)) mapInstance.removeLayer(LABEL_LAYER_ID);
+            if (mapInstance.getSource(SOURCE_ID)) mapInstance.removeSource(SOURCE_ID);
+        } catch (e) {}
+    }
+
     displayedStep = null;
     currentVisibleStep = 0;
 }
@@ -489,8 +493,8 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 Step switcher: built steps swap instantly by opacity. If the requested step isn't built yet,
- * the old contours stay up until it is. The weather map never waits on this.
+ * 🌟 Step switcher: one setData on the single source (coalesced to once per frame).
+ * Never blocks the weather map; only the contour layer catches up.
  */
 export async function updateVectorContours(step, forceUpdate = false) {
     if (!mapInstance) return;
@@ -498,34 +502,16 @@ export async function updateVectorContours(step, forceUpdate = false) {
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     currentVisibleStep = stepNum;
 
-    // FAST PATH: already built, swap instantly
-    if (!forceUpdate && loadedSteps.has(stepNum)) {
-        showStep(stepNum);
-        return;
-    }
-
-    // SLOW PATH: build this step now, then fill in the rest in the background
     const masterData = await loadMasterContourFile();
     if (!masterData?.steps || currentVisibleStep !== stepNum) return;
 
-    // Settings like the prate zoom filter changed: drop the other steps so they rebuild with the new settings
     if (forceUpdate) {
-        for (const n of [...loadedSteps]) {
-            if (n !== stepNum) removeStep(n);
-        }
+        stepCache.clear();
+        preloadStartedFor = null;
     }
 
-    if (!buildStepLayers(stepNum, masterData, step)) {
-        // No contour data for this step: clear the old contours rather than leave a wrong frame up
-        if (displayedStep !== null) {
-            setStepShown(displayedStep, false);
-            displayedStep = null;
-        }
-        return;
-    }
-
-    showStep(stepNum);
-    preloadAllSteps(masterData, stepNum);
+    scheduleApply(stepNum, step, forceUpdate);
+    if (preloadStartedFor !== masterData) startPreload(masterData, stepNum);
 }
 
 /**
@@ -533,5 +519,5 @@ export async function updateVectorContours(step, forceUpdate = false) {
  */
 export async function preloadAllContours() {
     const masterData = await loadMasterContourFile();
-    if (masterData?.steps) preloadAllSteps(masterData, currentVisibleStep);
+    if (masterData?.steps && preloadStartedFor !== masterData) startPreload(masterData, currentVisibleStep);
 }
