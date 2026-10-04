@@ -104,6 +104,39 @@ function themeContourFeatures(featureCollection) {
     return featureCollection;
 }
 
+/**
+ * 🌟 Renders single step on demand and saves to RAM cache
+ */
+function renderStep(stepNum) {
+    if (!mapInstance) return;
+    const source = mapInstance.getSource(SOURCE_ID);
+    if (!source || !activeMasterContours) return;
+
+    // 1. FAST PATH: Already in memory from a previous scrub or background pre-warm
+    if (stepCache.has(stepNum)) {
+        source.setData(stepCache.get(stepNum));
+        return;
+    }
+
+    // 2. FIRST-TIME PATH: Decodes only this single step, then caches it in RAM
+    const masterData = activeMasterContours;
+    if (masterData && masterData.steps) {
+        const stepData = masterData.steps[String(stepNum)] ||
+                         masterData.steps[String(stepNum).padStart(3, '0')] ||
+                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
+                         masterData.steps[stepNum];
+
+        if (stepData) {
+            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
+            const themedStepData = themeContourFeatures(decodedStepData);
+            stepCache.set(stepNum, themedStepData); // Keep in memory!
+            source.setData(themedStepData);
+            return;
+        }
+    }
+    source.setData(EMPTY_GEOJSON);
+}
+
 export function initVectorContours(map) {
     mapInstance = map;
 
@@ -262,6 +295,12 @@ async function loadMasterContourFile() {
                             }
                         }
 
+                        // 🌟 Renders ONLY the initial frame immediately without waiting for other steps
+                        if (mapInstance) {
+                            initVectorContours(mapInstance);
+                            renderStep(currentVisibleStep);
+                        }
+
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
                         return activeMasterContours;
                     }
@@ -406,52 +445,10 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 Renders only the requested step (pulls from RAM cache if visited before, or decodes on-demand)
- */
-function renderSingleStep(stepNum, masterData, source) {
-    const isDark = stateManager.currentTheme === 'dark';
-    const units = stateManager.currentUnits;
-    const cacheKey = `${activeMasterKey}_${stepNum}_${isDark ? 'dark' : 'light'}_${units}`;
-
-    // 1. FAST PATH: Already in memory from a previous scrub or background pre-warm
-    if (stepCache.has(cacheKey)) {
-        source.setData(stepCache.get(cacheKey));
-        return;
-    }
-
-    // 2. ON-DEMAND PATH: Decodes and themes only this single step, then caches it in RAM
-    if (masterData && masterData.steps) {
-        const stepData = masterData.steps[String(stepNum)] ||
-                         masterData.steps[String(stepNum).padStart(3, '0')] ||
-                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
-                         masterData.steps[stepNum];
-
-        if (stepData) {
-            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-            const themedStepData = themeContourFeatures(decodedStepData);
-            stepCache.set(cacheKey, themedStepData);
-            source.setData(themedStepData);
-            return;
-        }
-    }
-    source.setData(EMPTY_GEOJSON);
-}
-
-/**
- * 🌟 Instant Step Renderer: loads on-demand first time, 0.0ms from memory on return
+ * 🌟 On-demand step renderer: decodes first time, instant from memory cache on return
  */
 export async function updateVectorContours(step) {
-    if (!mapInstance || stateManager.activeMode !== 'modelViewer') {
-        clearVectorContours();
-        return;
-    }
-
-    const param = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    const hasContours = (param === '2t' || param === 'prate' || param === 'pva');
-    if (!hasContours) {
-        clearVectorContours();
-        return;
-    }
+    if (!mapInstance) return;
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     currentVisibleStep = stepNum;
@@ -460,21 +457,18 @@ export async function updateVectorContours(step) {
         initVectorContours(mapInstance);
     }
 
-    const source = mapInstance.getSource(SOURCE_ID);
-    if (!source) return;
-
     const { key } = getMasterKeyComponents();
 
-    // If master file is already in RAM, render/cache this step immediately
+    // If master data is already in RAM, render or pull from cache immediately
     if (activeMasterContours && activeMasterKey === key) {
-        renderSingleStep(stepNum, activeMasterContours, source);
+        renderStep(stepNum);
         return;
     }
 
     // Initial load: fetch file and render ONLY this current frame
     const masterData = await loadMasterContourFile();
     if (masterData) {
-        renderSingleStep(currentVisibleStep, masterData, source);
+        renderStep(currentVisibleStep);
     }
 }
 
@@ -482,10 +476,6 @@ export async function updateVectorContours(step) {
  * 🌟 Progressive Background Pre-warmer: warms up remaining steps in idle slices without blocking UI
  */
 export async function preloadAllContours() {
-    if (stateManager.activeMode !== 'modelViewer') return;
-    const param = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    if (param !== '2t' && param !== 'prate' && param !== 'pva') return;
-
     const masterData = await loadMasterContourFile();
     if (!masterData || !masterData.steps || !activeContourBinary) return;
 
@@ -495,17 +485,14 @@ export async function preloadAllContours() {
     function warmNextSlice() {
         if (stateManager.activeMode !== 'modelViewer') return;
         const limit = Math.min(idx + 5, steps.length);
-        const isDark = stateManager.currentTheme === 'dark';
-        const units = stateManager.currentUnits;
 
         for (; idx < limit; idx++) {
             const stepNum = parseInt(steps[idx], 10);
             if (isNaN(stepNum)) continue;
-            const cacheKey = `${activeMasterKey}_${stepNum}_${isDark ? 'dark' : 'light'}_${units}`;
-            if (!stepCache.has(cacheKey)) {
+            if (!stepCache.has(stepNum)) {
                 const decoded = binaryStepToGeoJson(stepNum, masterData);
                 if (decoded) {
-                    stepCache.set(cacheKey, themeContourFeatures(decoded));
+                    stepCache.set(stepNum, themeContourFeatures(decoded));
                 }
             }
         }
