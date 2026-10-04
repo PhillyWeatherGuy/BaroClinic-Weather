@@ -127,14 +127,14 @@ function themeContourFeatures(featureCollection) {
 const INSTANCE_STRIDE = 28;
 const WIDTH_STOPS = [[2, 0.9, 2.4], [5, 1.0, 2.6], [8, 1.4, 3.2], [11, 1.8, 4.0], [14, 2.1, 4.8]]; // [zoom, scale, glow]
 
-const VERT_SRC = `#version 300 es
+// Shared vertex shader body. PROJECT(p) turns a mercator (0..1) position into clip space.
+const VERT_BODY = `
 layout(location=0) in vec2 a_corner;
 layout(location=1) in vec2 a_p0;
 layout(location=2) in vec2 a_p1;
 layout(location=3) in float a_width;
 layout(location=4) in vec4 a_color;
 layout(location=5) in vec4 a_outline;
-uniform mat4 u_matrix;
 uniform vec2 u_viewport;
 uniform float u_offsetX;
 uniform float u_pass;
@@ -143,8 +143,8 @@ uniform float u_glow;
 uniform float u_dpr;
 out vec4 v_color;
 void main() {
-    vec4 c0 = u_matrix * vec4(a_p0.x + u_offsetX, a_p0.y, 0.0, 1.0);
-    vec4 c1 = u_matrix * vec4(a_p1.x + u_offsetX, a_p1.y, 0.0, 1.0);
+    vec4 c0 = PROJECT(vec2(a_p0.x + u_offsetX, a_p0.y));
+    vec4 c1 = PROJECT(vec2(a_p1.x + u_offsetX, a_p1.y));
     vec2 hv = u_viewport * 0.5;
     vec2 s0 = c0.xy / c0.w * hv;
     vec2 s1 = c1.xy / c1.w * hv;
@@ -167,9 +167,25 @@ void main() {
     vec2 nrm = vec2(-dir.y, dir.x);
     vec2 pos = mix(s0, s1, a_corner.x) + dir * (a_corner.x - 0.5) * w + nrm * a_corner.y * w * 0.5;
     float wv = mix(c0.w, c1.w, a_corner.x);
-    gl_Position = vec4(pos / hv * wv, 0.0, wv);
+    float zv = USE_PROJ_Z == 1 ? mix(c0.z, c1.z, a_corner.x) : 0.0;
+    gl_Position = vec4(pos / hv * wv, zv, wv);
     v_color = col;
 }`;
+
+// Flat map: our own matrix (the one that worked)
+const MERCATOR_VERT = `#version 300 es
+uniform mat4 u_matrix;
+#define PROJECT(p) (u_matrix * vec4((p), 0.0, 1.0))
+#define USE_PROJ_Z 0
+` + VERT_BODY;
+
+// Globe: MapLibre injects its own projection code (projectTile) through args.shaderData
+function makeGlobeVert(sd, preludeFirst) {
+    const inject = preludeFirst
+        ? `${sd.vertexShaderPrelude}\n${sd.define}`
+        : `${sd.define}\n${sd.vertexShaderPrelude}`;
+    return `#version 300 es\n${inject}\n#define PROJECT(p) projectTile(p)\n#define USE_PROJ_Z 1\n` + VERT_BODY;
+}
 
 const FRAG_SRC = `#version 300 es
 precision mediump float;
@@ -189,7 +205,8 @@ function logOnce(key, ...args) {
 const gpu = {
     map: null, gl: null, ready: false,
     program: null, vao: null, cornerBuf: null, instBuf: null, u: {},
-    pending: null, pendingCount: 0, dirty: false, count: 0
+    pending: null, pendingCount: 0, dirty: false, count: 0,
+    globePrograms: new Map(), dbg: {}
 };
 
 function compileShader(gl, type, src) {
@@ -204,8 +221,8 @@ function compileShader(gl, type, src) {
     return sh;
 }
 
-function buildProgram(gl) {
-    const vs = compileShader(gl, gl.VERTEX_SHADER, VERT_SRC);
+function buildProgram(gl, vertSrc = MERCATOR_VERT) {
+    const vs = compileShader(gl, gl.VERTEX_SHADER, vertSrc);
     const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
     if (!vs || !fs) return null;
     const prog = gl.createProgram();
@@ -220,6 +237,36 @@ function buildProgram(gl) {
         return null;
     }
     return prog;
+}
+
+function getGlobeProgram(gl, sd) {
+    const key = sd.variantName || 'default';
+    if (gpu.globePrograms.has(key)) return gpu.globePrograms.get(key);
+
+    let prog = buildProgram(gl, makeGlobeVert(sd, true));
+    if (!prog) prog = buildProgram(gl, makeGlobeVert(sd, false));   // some versions want define first
+
+    let entry = null;
+    if (prog) {
+        const L = (n) => gl.getUniformLocation(prog, n);
+        entry = {
+            program: prog,
+            u: {
+                viewport: L('u_viewport'), offsetX: L('u_offsetX'), pass: L('u_pass'),
+                scale: L('u_scale'), glow: L('u_glow'), dpr: L('u_dpr'),
+                pMatrix: L('u_projection_matrix'),
+                pTile: L('u_projection_tile_mercator_coords'),
+                pClip: L('u_projection_clipping_plane'),
+                pTrans: L('u_projection_transition'),
+                pFallback: L('u_projection_fallback_matrix')
+            }
+        };
+        logOnce('globe-program', 'compiled globe shader variant:', key);
+    } else {
+        logOnce('globe-program-failed', 'could not compile the globe shader variant:', key);
+    }
+    gpu.globePrograms.set(key, entry);
+    return entry;
 }
 
 function zoomStops(zoom) {
@@ -303,43 +350,55 @@ const gpuLayer = {
         }
         if (!gpu.count) { logOnce('no-segments', 'render ran but there is nothing to draw'); return; }
 
-        // Works with both the old (matrix) and new (args object) custom-layer render signatures.
-        // Only draws in mercator; hidden while a globe projection is active.
-        const pd = arg && arg.defaultProjectionData;
-        if (pd && pd.projectionTransition > 0) { logOnce('globe-skip', 'projectionTransition =', pd.projectionTransition); return; }
-        // MapLibre versions disagree on which matrix maps mercator (0..1) coordinates to clip space,
-        // so test each candidate: the right one puts the map center near the middle of the screen.
-        const candidates = [];
-        if (pd && pd.fallbackMatrix) candidates.push(['fallbackMatrix', pd.fallbackMatrix]);
-        if (pd && pd.mainMatrix) candidates.push(['mainMatrix', pd.mainMatrix]);
-        if (arg && arg.modelViewProjectionMatrix) candidates.push(['modelViewProjectionMatrix', arg.modelViewProjectionMatrix]);
-        if (arg && arg.length === 16) candidates.push(['matrix arg', arg]);
-
-        const cc = gpu.map.getCenter();
-        const cm = lonLatToMerc(cc.lng, cc.lat);
-        const probe = [];
-        let m = null;
-        let matrixName = null;
-        let bestDist = Infinity;
-        for (const [name, mat] of candidates) {
-            const wv = mat[3] * cm[0] + mat[7] * cm[1] + mat[15];
-            const px = (mat[0] * cm[0] + mat[4] * cm[1] + mat[12]) / wv;
-            const py = (mat[1] * cm[0] + mat[5] * cm[1] + mat[13]) / wv;
-            probe.push({ name, centerNDC: [+px.toFixed(3), +py.toFixed(3)] });
-            const dist = Math.hypot(px, py);
-            if (isFinite(dist) && dist < bestDist) {
-                bestDist = dist;
-                m = mat;
-                matrixName = name;
-            }
-        }
-        if (!m) { logOnce('no-matrix', 'render args keys:', arg ? Object.keys(arg) : arg); return; }
-
         const map = gpu.map;
+        const pd = arg && arg.defaultProjectionData;
+        const sd = arg && arg.shaderData;
+        // projectionTransition > 0 means MapLibre is (partly) in globe projection
+        const globe = !!(pd && sd && pd.projectionTransition > 0);
+
         const zs = zoomStops(map.getZoom());
         const canvas = gl.canvas;
         const dpr = canvas && canvas.clientWidth ? canvas.width / canvas.clientWidth : (window.devicePixelRatio || 1);
         const wc = Math.floor((map.getCenter().lng + 180) / 360);
+
+        let program, U, offsets, m = null, matrixName = null, probe = null;
+
+        if (globe) {
+            const gp = getGlobeProgram(gl, sd);
+            if (!gp) return;
+            program = gp.program;
+            U = gp.u;
+            offsets = [wc];                 // a sphere has no world copies
+        } else {
+            // MapLibre versions disagree on which matrix maps mercator (0..1) coordinates to clip space,
+            // so test each candidate: the right one puts the map center near the middle of the screen.
+            const candidates = [];
+            if (pd && pd.fallbackMatrix) candidates.push(['fallbackMatrix', pd.fallbackMatrix]);
+            if (pd && pd.mainMatrix) candidates.push(['mainMatrix', pd.mainMatrix]);
+            if (arg && arg.modelViewProjectionMatrix) candidates.push(['modelViewProjectionMatrix', arg.modelViewProjectionMatrix]);
+            if (arg && arg.length === 16) candidates.push(['matrix arg', arg]);
+
+            const cc = map.getCenter();
+            const cm = lonLatToMerc(cc.lng, cc.lat);
+            probe = [];
+            let bestDist = Infinity;
+            for (const [name, mat] of candidates) {
+                const wv = mat[3] * cm[0] + mat[7] * cm[1] + mat[15];
+                const px = (mat[0] * cm[0] + mat[4] * cm[1] + mat[12]) / wv;
+                const py = (mat[1] * cm[0] + mat[5] * cm[1] + mat[13]) / wv;
+                probe.push({ name, centerNDC: [+px.toFixed(3), +py.toFixed(3)] });
+                const dist = Math.hypot(px, py);
+                if (isFinite(dist) && dist < bestDist) {
+                    bestDist = dist;
+                    m = mat;
+                    matrixName = name;
+                }
+            }
+            if (!m) { logOnce('no-matrix', 'render args keys:', arg ? Object.keys(arg) : arg); return; }
+            program = gpu.program;
+            U = gpu.u;
+            offsets = [wc - 1, wc, wc + 1]; // world copies so it still draws when zoomed far out
+        }
 
         gl.disable(gl.DEPTH_TEST);
         gl.disable(gl.STENCIL_TEST);
@@ -349,41 +408,53 @@ const gpuLayer = {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-        gl.useProgram(gpu.program);
-        gl.uniformMatrix4fv(gpu.u.matrix, false, new Float32Array(m));
-        gl.uniform2f(gpu.u.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.uniform1f(gpu.u.scale, zs.scale);
-        gl.uniform1f(gpu.u.glow, zs.glow);
-        gl.uniform1f(gpu.u.dpr, dpr);
+        gl.useProgram(program);
+        if (globe) {
+            gl.uniformMatrix4fv(U.pMatrix, false, new Float32Array(pd.mainMatrix));
+            gl.uniform4f(U.pTile, ...pd.tileMercatorCoords);
+            gl.uniform4f(U.pClip, ...pd.clippingPlane);
+            gl.uniform1f(U.pTrans, pd.projectionTransition);
+            gl.uniformMatrix4fv(U.pFallback, false, new Float32Array(pd.fallbackMatrix));
+        } else {
+            gl.uniformMatrix4fv(U.matrix, false, new Float32Array(m));
+        }
+        gl.uniform2f(U.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.uniform1f(U.scale, zs.scale);
+        gl.uniform1f(U.glow, zs.glow);
+        gl.uniform1f(U.dpr, dpr);
 
         gl.bindVertexArray(gpu.vao);
         for (let pass = 1; pass >= 0; pass--) {       // casing first, then the line on top
-            gl.uniform1f(gpu.u.pass, pass);
-            for (let w = wc - 1; w <= wc + 1; w++) {  // world copies so it still draws when zoomed far out
-                gl.uniform1f(gpu.u.offsetX, w);
+            gl.uniform1f(U.pass, pass);
+            for (const w of offsets) {
+                gl.uniform1f(U.offsetX, w);
                 gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, gpu.count);
             }
         }
         gl.bindVertexArray(null);
 
-        if (gpu.debugFrames === undefined) gpu.debugFrames = 0;
-        if (gpu.debugFrames < 5) {
-            gpu.debugFrames++;
+        const dk = globe ? 'globe' : 'flat';
+        gpu.dbg[dk] = (gpu.dbg[dk] || 0) + 1;
+        if (gpu.dbg[dk] <= 5) {
             const err = gl.getError();
-            logOnce('draw-info', {
+            logOnce('draw-info-' + dk, {
+                mode: dk,
                 matrixUsed: matrixName, matrixProbe: probe,
-                argKeys: arg && !arg.length ? Object.keys(arg) : 'matrix',
+                variant: sd && sd.variantName,
+                projectionTransition: pd && pd.projectionTransition,
                 zoom: map.getZoom(), dpr, worldIndex: wc,
                 viewport: [gl.drawingBufferWidth, gl.drawingBufferHeight],
                 segments: gpu.count, glError: err
             });
-            if (err) logOnce('gl-error-' + err, 'WebGL error code', err);
+            if (err) logOnce('gl-error-' + dk + '-' + err, 'WebGL error code', err);
         }
     },
 
     onRemove(map, gl) {
         try {
             if (gpu.program) gl.deleteProgram(gpu.program);
+            for (const e of gpu.globePrograms.values()) if (e && e.program) gl.deleteProgram(e.program);
+            gpu.globePrograms.clear();
             if (gpu.cornerBuf) gl.deleteBuffer(gpu.cornerBuf);
             if (gpu.instBuf) gl.deleteBuffer(gpu.instBuf);
             if (gpu.vao) gl.deleteVertexArray(gpu.vao);
