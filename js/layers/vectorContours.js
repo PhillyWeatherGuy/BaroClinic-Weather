@@ -8,13 +8,10 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 
-let displayedStep = null; // the step whose contours are actually on screen (opacity 1)
-const readySteps = new Set(); // steps whose source has finished tiling and can be swapped in with no gap
+let displayedStep = null; // the step whose contours are on screen (opacity 1)
+let preloadRun = 0; // bumped to cancel an in-progress background preload
+const PRELOAD_INTERVAL_MS = 50; // one step built every 50 ms so the main thread never hitches
 
-// Steps kept built around the current one. They stay "visible" at opacity 0 so MapLibre keeps their tiles loaded.
-const KEEP_AHEAD = 3;
-const KEEP_BEHIND = 2;
-const READY_TIMEOUT_MS = 3000;
 const LINE_OPACITY_EXPR = ['coalesce', ['get', 'opacity'], 0.95];
 const CASING_OPACITY_EXPR = ['coalesce', ['get', 'outlineOpacity'], 0.8];
 const NO_FADE = { duration: 0, delay: 0 };
@@ -145,7 +142,6 @@ function removeStep(stepNum) {
         } catch (e) {}
     }
     loadedSteps.delete(stepNum);
-    readySteps.delete(stepNum);
     if (displayedStep === stepNum) displayedStep = null;
 }
 
@@ -233,79 +229,30 @@ function buildStepLayers(stepNum, masterData, rawStep = stepNum) {
     return true;
 }
 
-// Steps to keep built around stepNum, nearest first (ahead before behind)
-function getWindowSteps(masterData, stepNum) {
-    const nums = Object.keys(masterData?.steps || {})
-        .map(k => parseInt(String(k).replace(/\D/g, ''), 10))
-        .filter(n => !isNaN(n))
-        .sort((a, b) => a - b);
-    const i = nums.indexOf(stepNum);
-    if (i === -1) return [];
-    const out = [];
-    for (let d = 1; d <= Math.max(KEEP_AHEAD, KEEP_BEHIND); d++) {
-        if (d <= KEEP_AHEAD && nums[i + d] !== undefined) out.push(nums[i + d]);
-        if (d <= KEEP_BEHIND && nums[i - d] !== undefined) out.push(nums[i - d]);
-    }
-    return out;
-}
-
-// Resolves once the step's source has finished tiling (or after a timeout so we never hang)
-function waitForStepReady(stepNum) {
-    return new Promise(resolve => {
-        const map = mapInstance;
-        const srcId = `${SOURCE_ID}-${stepNum}`;
-        const t0 = performance.now();
-        let done = false;
-
-        const finish = (ok) => {
-            if (done) return;
-            done = true;
-            map.off('render', check);
-            resolve(ok);
-        };
-        function check() {
-            if (!loadedSteps.has(stepNum) || !map.getSource(srcId)) return finish(false);
-            let loaded = false;
-            try { loaded = map.isSourceLoaded(srcId); } catch (e) {}
-            if (loaded || performance.now() - t0 > READY_TIMEOUT_MS) finish(true);
-        }
-
-        // 'render' (not 'sourcedata'): by the time it fires, the source cache has already requested its tiles,
-        // so isSourceLoaded can't report a false "loaded" before tiling has started.
-        map.on('render', check);
-        map.triggerRepaint();
-        setTimeout(check, READY_TIMEOUT_MS + 50);
-    });
-}
-
-// Swap in a ready step: new one on and old one off in the same tick, so there is never an empty frame
+// Swap: new step on, old step off, in the same tick
 function showStep(stepNum) {
     setStepShown(stepNum, true);
     if (displayedStep !== null && displayedStep !== stepNum) setStepShown(displayedStep, false);
     displayedStep = stepNum;
 }
 
-// Drop built steps that are outside the window around stepNum (keeps memory bounded)
-function evictOutsideWindow(masterData, stepNum) {
-    const keep = new Set(getWindowSteps(masterData, stepNum));
-    keep.add(stepNum);
-    if (displayedStep !== null) keep.add(displayedStep);
-    for (const n of [...loadedSteps]) {
-        if (!keep.has(n)) removeStep(n);
-    }
-}
+// Builds every step slowly in the background (nearest to aroundStep first) and keeps them until clearVectorContours()
+function preloadAllSteps(masterData, aroundStep) {
+    const run = ++preloadRun;
+    const nums = Object.keys(masterData?.steps || {})
+        .map(k => parseInt(String(k).replace(/\D/g, ''), 10))
+        .filter(n => !isNaN(n))
+        .sort((a, b) => Math.abs(a - aroundStep) - Math.abs(b - aroundStep));
+    let idx = 0;
 
-// Builds the steps around stepNum in the background (staggered so the main thread isn't hit all at once)
-function preloadNeighbors(masterData, stepNum) {
-    getWindowSteps(masterData, stepNum).forEach((n, idx) => {
-        if (loadedSteps.has(n)) return;
-        setTimeout(async () => {
-            if (!mapInstance || loadedSteps.has(n) || activeMasterContours !== masterData) return;
-            if (!buildStepLayers(n, masterData)) return;
-            await waitForStepReady(n);
-            if (loadedSteps.has(n)) readySteps.add(n);
-        }, idx * 40);
-    });
+    const next = () => {
+        if (run !== preloadRun || !mapInstance || activeMasterContours !== masterData) return;
+        while (idx < nums.length && loadedSteps.has(nums[idx])) idx++;
+        if (idx >= nums.length) return;
+        buildStepLayers(nums[idx++], masterData);
+        setTimeout(next, PRELOAD_INTERVAL_MS);
+    };
+    setTimeout(next, 0);
 }
 
 export function initVectorContours(map) {
@@ -333,11 +280,11 @@ export function clearVectorContours() {
     activeContourBinary = null;
     activeMasterKey = null;
     fetchPromise = null;
+    preloadRun++; // cancel any background preload
 
     [...loadedSteps].forEach(removeStep);
 
     loadedSteps.clear();
-    readySteps.clear();
     displayedStep = null;
     currentVisibleStep = 0;
 }
@@ -542,58 +489,49 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 Step switcher: the old step stays on screen until the new step is fully tiled, then they swap in one tick.
- * Never blocks the weather map; only the contour layer waits.
+ * 🌟 Step switcher: built steps swap instantly by opacity. If the requested step isn't built yet,
+ * the old contours stay up until it is. The weather map never waits on this.
  */
 export async function updateVectorContours(step, forceUpdate = false) {
     if (!mapInstance) return;
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
-
-    // Latest requested step; anything older that finishes later is discarded
     currentVisibleStep = stepNum;
 
-    const alreadyBuilt = !forceUpdate && loadedSteps.has(stepNum);
-    let masterData = activeMasterContours;
+    // FAST PATH: already built, swap instantly
+    if (!forceUpdate && loadedSteps.has(stepNum)) {
+        showStep(stepNum);
+        return;
+    }
 
-    if (!alreadyBuilt || !masterData?.steps) {
-        masterData = await loadMasterContourFile();
-        if (!masterData?.steps) return;
-        if (currentVisibleStep !== stepNum) return; // user already moved on while loading
+    // SLOW PATH: build this step now, then fill in the rest in the background
+    const masterData = await loadMasterContourFile();
+    if (!masterData?.steps || currentVisibleStep !== stepNum) return;
 
-        if (forceUpdate) {
-            // Settings like the prate zoom filter changed: rebuild everything except what's on screen
-            for (const n of [...loadedSteps]) {
-                if (n !== stepNum && n !== displayedStep) removeStep(n);
-            }
-            readySteps.delete(stepNum);
-        }
-
-        if (!buildStepLayers(stepNum, masterData, step)) {
-            // No contour data for this step: clear the old contours rather than leave a wrong frame up
-            if (displayedStep !== null) {
-                setStepShown(displayedStep, false);
-                displayedStep = null;
-            }
-            return;
+    // Settings like the prate zoom filter changed: drop the other steps so they rebuild with the new settings
+    if (forceUpdate) {
+        for (const n of [...loadedSteps]) {
+            if (n !== stepNum) removeStep(n);
         }
     }
 
-    if (!readySteps.has(stepNum)) {
-        await waitForStepReady(stepNum);
-        if (!loadedSteps.has(stepNum)) return; // evicted or cleared while waiting
-        readySteps.add(stepNum);
+    if (!buildStepLayers(stepNum, masterData, step)) {
+        // No contour data for this step: clear the old contours rather than leave a wrong frame up
+        if (displayedStep !== null) {
+            setStepShown(displayedStep, false);
+            displayedStep = null;
+        }
+        return;
     }
-    if (currentVisibleStep !== stepNum) return; // superseded while tiling
 
     showStep(stepNum);
-    evictOutsideWindow(masterData, stepNum);
-    preloadNeighbors(masterData, stepNum);
+    preloadAllSteps(masterData, stepNum);
 }
 
 /**
  * 🌟 BACKGROUND CONTOUR PRELOADER
  */
 export async function preloadAllContours() {
-    await loadMasterContourFile();
+    const masterData = await loadMasterContourFile();
+    if (masterData?.steps) preloadAllSteps(masterData, currentVisibleStep);
 }
