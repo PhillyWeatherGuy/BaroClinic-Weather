@@ -38,6 +38,7 @@ import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.
 
 let customShaderLayer = null;
 let renderDebounceId = null;
+let activeRenderId = 0;
 let polarMapLoaded = false;
 
 // 🌟 Dedicated Atmosphere Canvas (Placed BEHIND MapLibre canvas for draw-order occlusion)
@@ -120,12 +121,11 @@ function updateAtmosphereHalo(matrix) {
     const r = circle.r;
 
     // 🌟 Thicker, multi-layered atmospheric rim glow drawn BEHIND the planet
-    // Because it is behind the globe, the opaque Earth naturally blocks the center at all zooms!
     const outerR = r * 1.22;
     const grad = haloCtx.createRadialGradient(cx, cy, r * 0.96, cx, cy, outerR);
     grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
-    grad.addColorStop(0.18, 'rgba(224, 242, 254, 0.98)'); // Intense electric rim at the horizon
-    grad.addColorStop(0.35, 'rgba(56, 189, 248, 0.85)'); // Thick radiant blue layer
+    grad.addColorStop(0.18, 'rgba(224, 242, 254, 0.98)');
+    grad.addColorStop(0.35, 'rgba(56, 189, 248, 0.85)');
     grad.addColorStop(0.60, 'rgba(14, 165, 233, 0.45)');
     grad.addColorStop(0.85, 'rgba(2, 132, 199, 0.15)');
     grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');
@@ -147,7 +147,6 @@ function initAtmosphereHaloCanvas() {
     haloCanvas.style.height = '100%';
     haloCanvas.style.pointerEvents = 'none';
     
-    // 🌟 Placed BEHIND the MapLibre canvas so Earth naturally occludes the center across ALL zoom levels
     haloCanvas.style.zIndex = '0';
     haloCanvas.style.display = 'none';
 
@@ -216,7 +215,6 @@ export function updateBasemapStyle(styleUrl) {
         loaded = true;
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
-        // 🌟 Re-apply active projection so switching styles/themes doesn't snap back to Mercator
         if (typeof map.setProjection === 'function') {
             map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
         }
@@ -486,7 +484,6 @@ export function initLayer(shaderType = null) {
         }
     }
 
-    // 🌟 Capture camera matrix on every frame to update the atmosphere halo in exact lockstep
     const originalRender = customShaderLayer.render.bind(customShaderLayer);
     customShaderLayer.render = (gl, matrixOrArgs) => {
         originalRender(gl, matrixOrArgs);
@@ -508,6 +505,7 @@ export function initLayer(shaderType = null) {
 async function renderFrame(globalIdx) {
     if (!stateManager.manifest || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
     
+    const renderId = ++activeRenderId;
     const frameInfo = stateManager.globalSteps[globalIdx];
     if (!frameInfo) return;
 
@@ -517,6 +515,9 @@ async function renderFrame(globalIdx) {
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
+            // Drop stale response if the user already moved past this frame
+            if (renderId !== activeRenderId) return;
+
             if (customShaderLayer) {
                 customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             }
@@ -527,6 +528,8 @@ async function renderFrame(globalIdx) {
     } else if (customShaderLayer && !customShaderLayer.chunkTextures[`${chunkIdx}_${frameIdx}`]) {
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
     }
+
+    if (renderId !== activeRenderId) return;
 
     const chunkVolume = stateManager.loadedChunkBitmaps[chunkIdx];
     const currentFrameImg = (chunkVolume && chunkVolume.frames && chunkVolume.frames[frameIdx])
@@ -546,15 +549,20 @@ async function renderFrame(globalIdx) {
     const activeView = stateManager.activeView || '2d';
 
     if (activeView === '2d' || activeView === '3d') {
+        // 🌟 Dispatch contour lines FIRST so geometry queues before the raster repaints
+        try { initVectorContours(map); } catch (e) {}
+        await updateVectorContours(frameInfo.step);
+
+        if (renderId !== activeRenderId) return;
+
+        // 🌟 Now swap the shader texture so both render in exact lockstep
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
         }
+
         try {
             updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
         } catch (e) {}
-
-        try { initVectorContours(map); } catch (e) {}
-        updateVectorContours(frameInfo.step);
     } else if (activeView === 'polar' && polarMapLoaded) {
         updatePolarFrame(stateManager.activeFrameState);
     }
