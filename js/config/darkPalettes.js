@@ -85,12 +85,14 @@ const DARK_ASNOW_LEVELS = [
 
 // ❄️ Dark Mode Total Snowfall (10:1) Radar Glow Colors
 const SNOW_RADAR_GLOW = [
-  "#536b85", "#6082a3", "#6d99c1", "#79b1e0",
-  "#3778f5", "#148cfc", "#00a0f8", "#0ab1f6", "#04c2f8", "#04d3fa", "#02e4fd", "#39f3fc",
-  "#d52fc7", "#dd41c8", "#e551c9", "#ec5fcb", "#f46dcd",
-  "#fa7acf", "#fe89d1", "#ff9ad2", "#ffabd5", "#febad9",
-  "#6bd8de", "#79dde4", "#86e1eb", "#92e6f1", "#9eebf7", "#aaf0fd", "#bef3ff", "#d3f6ff",
-  "#d6d1fe", "#dcd6fe", "#e1dcff", "#e7e1ff", "#ece6ff", "#f0ecff", "#f5f1fe", "#f9f7fe"
+  "#455a74", "#435d7f", "#415f8a", "#3f6295",
+  "#3d64a0", "#3c67ab", "#3b69b6", "#3a6bc2", "#3a6ccd", "#426ed3", "#4b6fd8", "#5371de",
+  "#5b73e3", "#6274e8", "#6a76ed", "#7277f2", "#7a78f7", "#827afb", "#8a7bfe", "#937dfe",
+  "#9d7ffe", "#a681ff", "#af83fe", "#b884ff", "#c086fe",
+  "#c987ff", "#d289ff", "#db8aff", "#e48bff", "#ec8dff",
+  "#f191fc", "#f696f9", "#fb9af6", "#ff9ff3", "#ffa8ee", "#ffb0e9", "#ffb7e7", "#ffbee5",
+  "#ffc4e4", "#ffcae3", "#ffd1e3", "#ffd7e4", "#fedde5", "#fee2e8", "#fee8eb", "#ffedee"
+];
 ];
 
 // 💧 Dark Mode PWAT Levels (Inches)
