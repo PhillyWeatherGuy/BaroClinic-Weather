@@ -6,7 +6,11 @@ let activeMasterContours = null;
 let activeMasterKey = null;
 let fetchPromise = null;
 let activeContourBinary = null;
-let currentVisibleStep = 0;
+let latestRequestId = 0;
+let modelsConfigCache = null;
+
+// 🌟 In-memory cache for ready-to-render GeoJSON per step (0.0ms instant scrubbing)
+const stepGeoJsonCache = new Map();
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -14,12 +18,40 @@ const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
-function getPvaContourThemeColor() {
-    return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
+/**
+ * 🌟 Direct, fresh fetch of config/models.json
+ */
+async function getModelsConfig() {
+    if (modelsConfigCache) return modelsConfigCache;
+    try {
+        const resp = await fetch(`./config/models.json?v=${Date.now()}`, { cache: 'no-store' });
+        if (resp.ok) {
+            modelsConfigCache = await resp.json();
+        }
+    } catch (e) {
+        console.warn("Could not load config/models.json:", e);
+    }
+    return modelsConfigCache;
 }
 
-function getPvaContourGlowColor() {
-    return stateManager.currentTheme === 'dark' ? '#00c8ff' : '#007c91';
+async function getContourConfig(paramId) {
+    const id = (paramId || stateManager.paramConfig?.id || stateManager.activeParam || '2t').toLowerCase();
+    if (stateManager.paramConfig?.id === id && stateManager.paramConfig?.contours) {
+        return stateManager.paramConfig.contours;
+    }
+    const data = await getModelsConfig();
+    return data?.parameters?.[id]?.contours || stateManager.paramConfig?.contours || null;
+}
+
+/**
+ * 🌟 Reliably matches the active theme to what is shown on screen
+ */
+function isDarkThemeActive() {
+    const themeBtn = typeof document !== 'undefined' ? document.getElementById('btn-theme-toggle') : null;
+    if (themeBtn) {
+        return !themeBtn.classList.contains('light-mode');
+    }
+    return stateManager.currentTheme === 'dark';
 }
 
 function pvaZoomWidthExpression(baseWidth, isGlow = false) {
@@ -36,116 +68,86 @@ function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     return expression;
 }
 
-function themeContourFeatures(featureCollection) {
+/**
+ * 🌟 Purely Config-Driven Styler: plots whatever design rules exist in config/models.json
+ */
+function themeContourFeatures(featureCollection, cfg) {
     if (!featureCollection || !Array.isArray(featureCollection.features)) {
         return featureCollection;
     }
+    if (!cfg) {
+        return EMPTY_GEOJSON;
+    }
 
-    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    
-    // 1. 2m Temperature (Freezing Line)
-    if (activeParamId === '2t') {
-        const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
-        for (const feature of featureCollection.features) {
-            const name = String(feature?.properties?.name || '');
-            if (feature?.properties && (Number(name) === 273.15 || /freez|273\.15/i.test(name))) {
+    const isDark = isDarkThemeActive();
+    const baseColor = isDark ? (cfg.color_dark || '#ffffff') : (cfg.color_light || '#000000');
+    const hasGlow = Boolean(cfg.glow);
+    const glowColor = hasGlow ? (isDark ? (cfg.glow_dark || '#00c8ff') : (cfg.glow_light || '#ffffff')) : null;
+    const coarseInterval = cfg.zoom_filter?.coarse_interval;
+
+    for (const feature of featureCollection.features) {
+        if (!feature || !feature.properties) continue;
+
+        // Clone properties to avoid mutating the master cache
+        feature.properties = { ...feature.properties };
+
+        const originalName = String(feature.properties.name || '');
+        const rawLevel = parseFloat(originalName);
+
+        // 1. Dynamic unit formatting from models.json (e.g. 273.15 -> 32°F / 0°C)
+        if (cfg.unit_label === 'temperature') {
+            const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
+            if (rawLevel === 273.15 || /freez|273\.15/i.test(originalName)) {
                 feature.properties.name = freezingLabel;
             }
         }
-        return featureCollection;
-    }
 
-    // 2. Surface Precipitation Rate (MSLP Isobars)
-    if (activeParamId === 'prate') {
-        const isDark = stateManager.currentTheme === 'dark';
-        const mslpColor = isDark ? '#ffffff' : '#000000';
+        // 2. Zoom interval filtering (e.g. for MSLP isobars, tag 2 mb intermediate lines)
+        const isIntermediate = Boolean(coarseInterval && !isNaN(rawLevel) && (Math.round(rawLevel) % coarseInterval !== 0));
+        feature.properties.isIntermediate = isIntermediate;
 
-        for (const feature of featureCollection.features) {
-            if (!feature || !feature.properties) continue;
-            const val = Number(feature.properties.name);
-            const isIntermediate = !isNaN(val) && (Math.round(val) % 4 !== 0);
+        // 3. Styling from models.json
+        let featureColor = baseColor;
+        let featureWidth = cfg.width || 1.6;
+        let featureOpacity = cfg.opacity || 0.95;
+        let isSpecial = false;
 
-            feature.properties.isIntermediate = isIntermediate;
-            feature.properties.color = mslpColor;
-            feature.properties.stroke = mslpColor;
-            feature.properties.labelColor = mslpColor;
-            feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-            feature.properties.width = 1.5;
-            feature.properties.opacity = 0.9;
+        // 4. Special target lines from models.json (e.g. 540 in blue, 273.15 in blue)
+        if (cfg.special_lines && Array.isArray(cfg.special_lines)) {
+            for (const special of cfg.special_lines) {
+                const matches = (!isNaN(rawLevel) && Math.abs(rawLevel - special.target) < 0.1) ||
+                                (special.target === 273.15 && /freez|273\.15|0°C|32°F/i.test(originalName));
+                if (matches) {
+                    if (special.color) featureColor = special.color;
+                    if (special.width) featureWidth = special.width;
+                    if (special.opacity) featureOpacity = special.opacity;
+                    isSpecial = true;
+                    break;
+                }
+            }
         }
-        return featureCollection;
-    }
 
-    // 3. 500mb PVA / Vorticity Heights
-    if (activeParamId !== 'pva') {
-        return featureCollection;
-    }
-
-    const contourColor = getPvaContourThemeColor();
-    const glowColor = getPvaContourGlowColor();
-    const isDarkTheme = stateManager.currentTheme === 'dark';
-    for (const feature of featureCollection.features) {
-        if (!feature || !feature.properties) continue;
-        const is540Line = Number(feature.properties.name) === 540;
-        const featureColor = is540Line ? '#4169E1' : contourColor;
         feature.properties.color = featureColor;
         feature.properties.stroke = featureColor;
-        feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
-        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
-        feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
-        feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
-        feature.properties.labelHaloColor = contourColor;
-        if (is540Line) {
-            feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
+        feature.properties.width = featureWidth;
+        feature.properties.opacity = featureOpacity;
+
+        // 5. Casing & Glow
+        if (hasGlow) {
+            feature.properties.outlineColor = isDark ? glowColor : (cfg.glow_light || '#ffffff');
+            feature.properties.outlineOpacity = isDark ? 0.8 : 0.95;
+            feature.properties.outlineBlur = isDark ? 2.0 : 0;
+        } else {
+            delete feature.properties.outlineColor;
         }
+
+        feature.properties.labelColor = isSpecial
+            ? featureColor
+            : (baseColor === '#ffffff' ? '#000000' : '#ffffff');
+        feature.properties.labelHaloColor = baseColor;
     }
 
     return featureCollection;
-}
-
-/**
- * 🌟 Builds a single combined FeatureCollection with all steps stamped with `properties.step`
- */
-function buildAllStepsGeoJson(masterData) {
-    if (!masterData || !masterData.steps) return EMPTY_GEOJSON;
-
-    const allFeatures = [];
-    for (const stepKey in masterData.steps) {
-        const stepNum = parseInt(stepKey, 10);
-        if (isNaN(stepNum)) continue;
-
-        const stepData = masterData.steps[stepKey];
-        const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-        if (!decodedStepData || !decodedStepData.features) continue;
-
-        const themedStepData = themeContourFeatures(decodedStepData);
-        for (const feature of themedStepData.features) {
-            feature.properties.step = stepNum;
-            allFeatures.push(feature);
-        }
-    }
-
-    return {
-        type: 'FeatureCollection',
-        features: allFeatures
-    };
-}
-
-function applyGpuStepFilter(stepNum) {
-    if (!mapInstance) return;
-
-    const stepFilter = ['==', ['get', 'step'], stepNum];
-    const casingFilter = ['all', ['has', 'outlineColor'], stepFilter];
-
-    if (mapInstance.getLayer(LINE_LAYER_ID)) {
-        mapInstance.setFilter(LINE_LAYER_ID, stepFilter);
-    }
-    if (mapInstance.getLayer(LABEL_LAYER_ID)) {
-        mapInstance.setFilter(LABEL_LAYER_ID, stepFilter);
-    }
-    if (mapInstance.getLayer(CASING_LAYER_ID)) {
-        mapInstance.setFilter(CASING_LAYER_ID, casingFilter);
-    }
 }
 
 export function initVectorContours(map) {
@@ -162,7 +164,7 @@ export function initVectorContours(map) {
             id: CASING_LAYER_ID,
             type: 'line',
             source: SOURCE_ID,
-            filter: ['all', ['has', 'outlineColor'], ['==', ['get', 'step'], currentVisibleStep]],
+            filter: ['has', 'outlineColor'],
             layout: {
                 'line-join': 'round',
                 'line-cap': 'round'
@@ -175,12 +177,11 @@ export function initVectorContours(map) {
             }
         });
 
-        // 1. Smooth Vector Line Layer (Filtered by step, 4mb/2mb zoom hierarchy in shader)
+        // 1. Smooth Vector Line Layer (with Zoom-dependent 2mb/4mb isobar fade)
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
             source: SOURCE_ID,
-            filter: ['==', ['get', 'step'], currentVisibleStep],
             layout: {
                 'line-join': 'round',
                 'line-cap': 'round'
@@ -201,12 +202,11 @@ export function initVectorContours(map) {
             }
         });
 
-        // 2. Inline Contour Labels (Filtered by step, 4mb/2mb zoom hierarchy in shader)
+        // 2. Inline Contour Labels (with Zoom-dependent 2mb/4mb isobar fade)
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
             source: SOURCE_ID,
-            filter: ['==', ['get', 'step'], currentVisibleStep],
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
@@ -242,6 +242,7 @@ export function clearVectorContours() {
     activeContourBinary = null;
     activeMasterKey = null;
     fetchPromise = null;
+    stepGeoJsonCache.clear();
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
     if (source) {
@@ -249,40 +250,45 @@ export function clearVectorContours() {
     }
 }
 
-/**
- * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
- */
-async function loadMasterContourFile() {
+function getMasterKeyComponents() {
     const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
+    return { model, param, targetDate, runCycle, key: `${model}_${param}_${targetDate}_${runCycle}` };
+}
 
-    const currentKey = `${model}_${param}_${targetDate}_${runCycle}`;
+/**
+ * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
+ */
+async function loadMasterContourFile() {
+    const { model, param, targetDate, runCycle, key } = getMasterKeyComponents();
 
-    if (activeMasterKey === currentKey && activeMasterContours) {
+    const cfg = await getContourConfig(param);
+    const sourceParam = (cfg?.source_param || (param === 'pva' ? 'z500' : param)).toLowerCase();
+    const activeKey = `${model}_${sourceParam}_${targetDate}_${runCycle}`;
+
+    if (activeMasterKey === activeKey && activeMasterContours) {
         return activeMasterContours;
     }
 
-    if (fetchPromise && activeMasterKey === currentKey) {
+    if (fetchPromise && activeMasterKey === activeKey) {
         return await fetchPromise;
     }
 
-    activeMasterKey = currentKey;
+    activeMasterKey = activeKey;
 
     const urlsToTry = [];
-    if (param === 'pva') {
-        if (targetDate && runCycle) {
-            urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
-        }
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
-    }
     if (targetDate && runCycle) {
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${sourceParam}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
     }
-    urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?v=${Date.now()}`);
-    if (param === '2t' || param.includes('temp')) {
+    urlsToTry.push(`${stateManager.BASE_URL}${model}_${sourceParam}_contours.json?v=${Date.now()}`);
+
+    if (sourceParam === '2t' || sourceParam.includes('temp')) {
         urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?v=${Date.now()}`);
+    }
+    if (param === 'pva') {
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
     }
 
     fetchPromise = (async () => {
@@ -302,18 +308,6 @@ async function loadMasterContourFile() {
                                 );
                             }
                         }
-                        
-                        // 🌟 Upload ALL steps to the GeoJSON source ONCE
-                        if (mapInstance) {
-                            initVectorContours(mapInstance);
-                            const source = mapInstance.getSource(SOURCE_ID);
-                            if (source) {
-                                const allStepsGeoJson = buildAllStepsGeoJson(activeMasterContours);
-                                source.setData(allStepsGeoJson);
-                                applyGpuStepFilter(currentVisibleStep);
-                            }
-                        }
-
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
                         return activeMasterContours;
                     }
@@ -458,18 +452,75 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 Instant 0.00ms GPU Step Switcher: changes the layer filter on the GPU with no setData lag
+ * 🌟 Synchronous, Zero-Delay Step Renderer (pulls pre-built GeoJSON from RAM in 0.0ms)
  */
-export function updateVectorContours(step) {
+function renderCachedStep(stepNum, masterData, source, cfg) {
+    const isDark = isDarkThemeActive();
+    const units = stateManager.currentUnits;
+    const zoom = mapInstance ? mapInstance.getZoom() : 5;
+    const isCoarseZoom = (zoom < 5.0);
+    const cacheKey = `${activeMasterKey}_${stepNum}_${isDark ? 'dark' : 'light'}_${units}_${isCoarseZoom ? 'c' : 'f'}`;
+
+    if (stepGeoJsonCache.has(cacheKey)) {
+        source.setData(stepGeoJsonCache.get(cacheKey));
+        return;
+    }
+
+    if (masterData && masterData.steps) {
+        const stepData = masterData.steps[String(stepNum)] ||
+                         masterData.steps[String(stepNum).padStart(3, '0')] ||
+                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
+                         masterData.steps[stepNum];
+
+        if (stepData) {
+            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
+            const themedStepData = themeContourFeatures(decodedStepData, cfg);
+            stepGeoJsonCache.set(cacheKey, themedStepData);
+            source.setData(themedStepData);
+            return;
+        }
+    }
+    source.setData(EMPTY_GEOJSON);
+}
+
+/**
+ * 🌟 Instant Vector Contour Renderer with Synchronous Fast-Path & Stale Frame Dropping
+ */
+export async function updateVectorContours(step) {
+    if (!mapInstance) return;
+    const source = mapInstance.getSource(SOURCE_ID);
+    if (!source) return;
+
+    const param = (stateManager.paramConfig?.id || stateManager.activeParam || '2t').toLowerCase();
+    const cfg = await getContourConfig(param);
+    if (!cfg) {
+        source.setData(EMPTY_GEOJSON);
+        return;
+    }
+
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
-    currentVisibleStep = stepNum;
+    const requestId = ++latestRequestId;
 
-    // Apply the filter on the GPU immediately (0.0ms)
-    applyGpuStepFilter(stepNum);
+    const sourceParam = (cfg.source_param || param).toLowerCase();
+    const { model, targetDate, runCycle } = getMasterKeyComponents();
+    const expectedKey = `${model}_${sourceParam}_${targetDate}_${runCycle}`;
 
-    // If master contours haven't been fetched yet, start background download
-    if (!activeMasterContours && !fetchPromise) {
-        loadMasterContourFile();
+    // 🌟 FAST-PATH: If already loaded in RAM, render completely synchronously in 0.0ms (no await delay)
+    if (activeMasterContours && activeMasterKey === expectedKey) {
+        renderCachedStep(stepNum, activeMasterContours, source, cfg);
+        return;
+    }
+
+    // SLOW-PATH: Initial fetch / background load
+    const masterData = await loadMasterContourFile();
+
+    // Drop stale request if a newer scrub frame was requested while loading
+    if (requestId !== latestRequestId) return;
+
+    if (masterData) {
+        renderCachedStep(stepNum, masterData, source, cfg);
+    } else {
+        source.setData(EMPTY_GEOJSON);
     }
 }
 
