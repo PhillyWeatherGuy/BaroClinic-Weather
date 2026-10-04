@@ -307,10 +307,32 @@ const gpuLayer = {
         // Only draws in mercator; hidden while a globe projection is active.
         const pd = arg && arg.defaultProjectionData;
         if (pd && pd.projectionTransition > 0) { logOnce('globe-skip', 'projectionTransition =', pd.projectionTransition); return; }
+        // MapLibre versions disagree on which matrix maps mercator (0..1) coordinates to clip space,
+        // so test each candidate: the right one puts the map center near the middle of the screen.
+        const candidates = [];
+        if (pd && pd.fallbackMatrix) candidates.push(['fallbackMatrix', pd.fallbackMatrix]);
+        if (pd && pd.mainMatrix) candidates.push(['mainMatrix', pd.mainMatrix]);
+        if (arg && arg.modelViewProjectionMatrix) candidates.push(['modelViewProjectionMatrix', arg.modelViewProjectionMatrix]);
+        if (arg && arg.length === 16) candidates.push(['matrix arg', arg]);
+
+        const cc = gpu.map.getCenter();
+        const cm = lonLatToMerc(cc.lng, cc.lat);
+        const probe = [];
         let m = null;
-        if (arg && arg.modelViewProjectionMatrix) m = arg.modelViewProjectionMatrix;
-        else if (pd && pd.fallbackMatrix) m = pd.fallbackMatrix;
-        else if (arg && arg.length === 16) m = arg;
+        let matrixName = null;
+        let bestDist = Infinity;
+        for (const [name, mat] of candidates) {
+            const wv = mat[3] * cm[0] + mat[7] * cm[1] + mat[15];
+            const px = (mat[0] * cm[0] + mat[4] * cm[1] + mat[12]) / wv;
+            const py = (mat[1] * cm[0] + mat[5] * cm[1] + mat[13]) / wv;
+            probe.push({ name, centerNDC: [+px.toFixed(3), +py.toFixed(3)] });
+            const dist = Math.hypot(px, py);
+            if (isFinite(dist) && dist < bestDist) {
+                bestDist = dist;
+                m = mat;
+                matrixName = name;
+            }
+        }
         if (!m) { logOnce('no-matrix', 'render args keys:', arg ? Object.keys(arg) : arg); return; }
 
         const map = gpu.map;
@@ -349,7 +371,7 @@ const gpuLayer = {
             gpu.debugFrames++;
             const err = gl.getError();
             logOnce('draw-info', {
-                matrixFrom: arg && arg.modelViewProjectionMatrix ? 'modelViewProjectionMatrix' : (pd && pd.fallbackMatrix ? 'fallbackMatrix' : 'matrix arg'),
+                matrixUsed: matrixName, matrixProbe: probe,
                 argKeys: arg && !arg.length ? Object.keys(arg) : 'matrix',
                 zoom: map.getZoom(), dpr, worldIndex: wc,
                 viewport: [gl.drawingBufferWidth, gl.drawingBufferHeight],
