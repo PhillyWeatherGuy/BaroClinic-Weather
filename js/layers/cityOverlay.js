@@ -144,8 +144,20 @@ export function formatParameterValue(decodedVal, manifest) {
 
     const unit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim();
     const normalizedUnit = unit.toLowerCase();
+    const paramId = (manifest?.id || manifest?.parameter || stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
     const isMetric = stateManager.currentUnits === 'metric';
 
+    // 1. Surface Precipitation Rate (nearest hundredth)
+    if (paramId === 'prate' || normalizedUnit.includes('in/hr') || normalizedUnit.includes('mm/hr')) {
+        if (isMetric) {
+            const mmhr = normalizedUnit.includes('in') ? decodedVal * 25.4 : decodedVal;
+            return `${mmhr.toFixed(1)} mm/hr`;
+        }
+        const inhr = normalizedUnit.includes('mm') ? decodedVal / 25.4 : decodedVal;
+        return `${inhr.toFixed(2)} in/hr`;
+    }
+
+    // 2. Temperatures
     if (unit.includes('°') || normalizedUnit.includes('fahrenheit') || normalizedUnit.includes('celsius')) {
         let celsius = decodedVal;
         if (decodedVal > 150) {
@@ -157,6 +169,7 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(temperature)}°${isMetric ? 'C' : 'F'}`;
     }
 
+    // 3. Accumulated Precipitation
     if (normalizedUnit === 'in' || normalizedUnit.includes('inch')) {
         return isMetric ? `${(decodedVal * 25.4).toFixed(1)} mm` : `${decodedVal.toFixed(2)} in`;
     }
