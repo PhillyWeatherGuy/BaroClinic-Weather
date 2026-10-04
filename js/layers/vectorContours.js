@@ -80,7 +80,7 @@ function themeContourFeatures(featureCollection, masterData) {
         const mslpColor = isDark ? '#ffffff' : '#000000';
         const zoom = mapInstance ? mapInstance.getZoom() : 5;
 
-        // 🌟 1. Find how many features are MSLP isobars (values between 850 and 1100 mb)
+        // Find how many features are MSLP isobars (values between 850 and 1100 mb)
         let mslpCount = 0;
         for (let i = 0; i < featureCollection.features.length; i++) {
             const v = parseFloat(String(featureCollection.features[i]?.properties?.name || ''));
@@ -105,10 +105,7 @@ function themeContourFeatures(featureCollection, masterData) {
             const idStr = String(props.id || '').toLowerCase();
             const nameStr = String(props.name || '').toLowerCase();
 
-            // 🌟 2. A feature is thickness if:
-            // - It comes after the MSLP isobars (i >= mslpCount)
-            // - Its value is in the thickness range (350-750 dam or 3500-7500 m)
-            // - Its unit or name mentions dam/thick
+            // Thickness Identification
             let isThickness = (mslpCount > 0 && i >= mslpCount) ||
                               unit === 'dam' || 
                               idStr.includes('thick') || 
@@ -117,11 +114,9 @@ function themeContourFeatures(featureCollection, masterData) {
                               (val >= 3500 && val <= 7500);
 
             if (isThickness) {
-                // If name was missing from metadata, deduce its decameter level
                 let thickDam = val;
                 if (isNaN(thickDam) || thickDam < 350) {
                     const thickIdx = i - mslpCount;
-                    // Standard thickness series: centered around 540 dam in 6 dam steps
                     const anchor540Idx = Math.round(thicknessCount * 0.4);
                     thickDam = 540 + (thickIdx - anchor540Idx) * 6;
                     props.name = String(thickDam);
@@ -130,7 +125,7 @@ function themeContourFeatures(featureCollection, masterData) {
                     props.name = String(Math.round(thickDam));
                 }
 
-                // 🌟 Red for > 540 dam, Blue for <= 540 dam
+                // Red for > 540 dam, Blue for <= 540 dam
                 const isCold = thickDam <= 540;
                 const thickColor = isCold ? '#2563eb' : '#dc2626';
 
@@ -138,17 +133,17 @@ function themeContourFeatures(featureCollection, masterData) {
                 props.stroke = thickColor;
                 props.labelColor = thickColor;
                 props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-                props.width = Math.abs(thickDam - 540) < 0.5 ? 2.2 : 1.4;
-                props.opacity = 0.95;
-                props.dotted = true; // Dotted line!
+                props.width = Math.abs(thickDam - 540) < 0.5 ? 1.8 : 1.2;
+                props.opacity = 0.90;
+                props.dotted = true;
             } else {
                 // MSLP Isobars (solid line)
                 props.color = mslpColor;
                 props.stroke = mslpColor;
                 props.labelColor = mslpColor;
                 props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-                props.width = 1.5;
-                props.opacity = 0.9;
+                props.width = 1.3;
+                props.opacity = 0.85;
                 props.dotted = false;
             }
         }
@@ -156,17 +151,11 @@ function themeContourFeatures(featureCollection, masterData) {
         // When zoomed out (< 5.0), decimate 2mb MSLP intervals down to 4mb; keep all thickness lines
         if (zoom < 5.0) {
             featureCollection.features = featureCollection.features.filter(f => {
-                if (f?.properties?.dotted) return true; // Keep all thickness lines
+                if (f?.properties?.dotted) return true;
                 const v = parseFloat(String(f?.properties?.name || ''));
                 return isNaN(v) || Math.round(v) % 4 === 0;
             });
         }
-
-        console.log('[Contours] Step levels loaded:', featureCollection.features.map(f => ({
-            name: f.properties.name,
-            color: f.properties.color,
-            dotted: f.properties.dotted
-        })));
 
         return featureCollection;
     }
@@ -206,7 +195,17 @@ function themeContourFeatures(featureCollection, masterData) {
 // One instance per line segment, 28 bytes:
 //   f32 p0.x p0.y p1.x p1.y (web-mercator 0..1) | f32 width (css px) | u8x4 line RGBA | u8x4 casing RGBA (alpha 0 = no casing)
 const INSTANCE_STRIDE = 28;
-const WIDTH_STOPS = [[2, 0.9, 2.4], [5, 1.0, 2.6], [8, 1.4, 3.2], [11, 1.8, 4.0], [14, 2.1, 4.8]]; // [zoom, scale, glow]
+
+// 🌟 Smooth zoom transitions: [zoom, scale, glow, alpha]
+// Thinner width scale (0.55 - 0.75) and softer opacity (0.50 - 0.75) when zoomed out
+const WIDTH_STOPS = [
+    [2,  0.55, 1.8, 0.50],
+    [4,  0.75, 2.2, 0.70],
+    [6,  1.00, 2.6, 0.90],
+    [8,  1.30, 3.2, 1.00],
+    [11, 1.70, 4.0, 1.00],
+    [14, 2.10, 4.8, 1.00]
+];
 
 // Shared vertex shader body. PROJECT(p) turns a mercator (0..1) position into clip space.
 const VERT_BODY = `
@@ -221,6 +220,7 @@ uniform float u_offsetX;
 uniform float u_pass;
 uniform float u_scale;
 uniform float u_glow;
+uniform float u_alpha;
 uniform float u_dpr;
 out vec4 v_color;
 void main() {
@@ -237,7 +237,8 @@ void main() {
         if (!outlined) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); v_color = vec4(0.0); return; }
         w = a_width * u_scale + u_glow;
         col = a_outline;
-    } else if (outlined) {
+    } else {
+        // 🌟 Apply zoom scale to all lines so they thin out when zoomed out
         w = a_width * u_scale;
     }
     w *= u_dpr;
@@ -250,7 +251,9 @@ void main() {
     float wv = mix(c0.w, c1.w, a_corner.x);
     float zv = USE_PROJ_Z == 1 ? mix(c0.z, c1.z, a_corner.x) : 0.0;
     gl_Position = vec4(pos / hv * wv, zv, wv);
-    v_color = col;
+    
+    // 🌟 Soften line opacity when zoomed out
+    v_color = vec4(col.rgb, col.a * u_alpha);
 }`;
 
 // Flat map: our own matrix
@@ -334,7 +337,7 @@ function getGlobeProgram(gl, sd) {
             program: prog,
             u: {
                 viewport: L('u_viewport'), offsetX: L('u_offsetX'), pass: L('u_pass'),
-                scale: L('u_scale'), glow: L('u_glow'), dpr: L('u_dpr'),
+                scale: L('u_scale'), glow: L('u_glow'), alpha: L('u_alpha'), dpr: L('u_dpr'),
                 pMatrix: L('u_projection_matrix'),
                 pTile: L('u_projection_tile_mercator_coords'),
                 pClip: L('u_projection_clipping_plane'),
@@ -353,17 +356,21 @@ function getGlobeProgram(gl, sd) {
 function zoomStops(zoom) {
     const first = WIDTH_STOPS[0];
     const last = WIDTH_STOPS[WIDTH_STOPS.length - 1];
-    if (zoom <= first[0]) return { scale: first[1], glow: first[2] };
-    if (zoom >= last[0]) return { scale: last[1], glow: last[2] };
+    if (zoom <= first[0]) return { scale: first[1], glow: first[2], alpha: first[3] };
+    if (zoom >= last[0]) return { scale: last[1], glow: last[2], alpha: last[3] };
     for (let i = 1; i < WIDTH_STOPS.length; i++) {
         const a = WIDTH_STOPS[i - 1];
         const b = WIDTH_STOPS[i];
         if (zoom <= b[0]) {
             const t = (zoom - a[0]) / (b[0] - a[0]);
-            return { scale: a[1] + (b[1] - a[1]) * t, glow: a[2] + (b[2] - a[2]) * t };
+            return {
+                scale: a[1] + (b[1] - a[1]) * t,
+                glow: a[2] + (b[2] - a[2]) * t,
+                alpha: a[3] + (b[3] - a[3]) * t
+            };
         }
     }
-    return { scale: last[1], glow: last[2] };
+    return { scale: last[1], glow: last[2], alpha: last[3] };
 }
 
 const gpuLayer = {
@@ -389,6 +396,7 @@ const gpuLayer = {
             pass: gl.getUniformLocation(prog, 'u_pass'),
             scale: gl.getUniformLocation(prog, 'u_scale'),
             glow: gl.getUniformLocation(prog, 'u_glow'),
+            alpha: gl.getUniformLocation(prog, 'u_alpha'),
             dpr: gl.getUniformLocation(prog, 'u_dpr')
         };
 
@@ -498,6 +506,7 @@ const gpuLayer = {
         gl.uniform2f(U.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.uniform1f(U.scale, zs.scale);
         gl.uniform1f(U.glow, zs.glow);
+        gl.uniform1f(U.alpha, zs.alpha);
         gl.uniform1f(U.dpr, dpr);
 
         gl.bindVertexArray(gpu.vao);
@@ -641,7 +650,6 @@ function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
     return smoothed;
 }
 
-// 🌟 Enlarged dash/gap pattern (~12px dash, ~8px gap) so dots/dashes are crisp and visible
 function emitDashedSegments(line, dashLen, gapLen, onSegment) {
     let isDrawing = true;
     let remainingInPhase = dashLen;
@@ -746,7 +754,6 @@ function prepareStep(featureCollection) {
             if (len < 2) continue;
 
             if (props.dotted) {
-                // High-visibility dots/dashes
                 emitDashedSegments(line, 0.0030, 0.0020, (pA, pB) => {
                     if (n * 7 + 6 >= f32.length) return;
                     const o = n * 7;
@@ -856,7 +863,14 @@ function ensureLayers() {
                 paint: {
                     'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                     'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                    'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
+                    'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
+                    // 🌟 Soften label opacity when zoomed out so they match the lines
+                    'text-opacity': [
+                        'interpolate', ['linear'], ['zoom'],
+                        2, 0.40,
+                        4, 0.70,
+                        6, 1.00
+                    ]
                 }
             });
         }
