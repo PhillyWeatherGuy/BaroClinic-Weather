@@ -43,7 +43,7 @@
     },
     "prate": {
       "id": "prate",
-      "name": "Surface Precipitation Rate",
+      "name": "Precip Type/Rate",
       "unit": "in/hr",
       "category": "Surface and Precipitation",
       "shader": "precipType",
