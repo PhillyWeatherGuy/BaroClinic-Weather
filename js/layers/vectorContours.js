@@ -6,6 +6,10 @@ let activeMasterContours = null;
 let activeMasterKey = null;
 let fetchPromise = null;
 let activeContourBinary = null;
+let latestRequestId = 0;
+
+// 🌟 In-memory cache for ready-to-render GeoJSON per step (0.0ms instant scrubbing)
+const stepGeoJsonCache = new Map();
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -116,6 +120,7 @@ export function initVectorContours(map) {
         map.on('zoomend', () => {
             const activeParam = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
             if (activeParam === 'prate' && stateManager.currentStepIndex !== undefined) {
+                stepGeoJsonCache.clear();
                 const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
                 if (step !== undefined) updateVectorContours(step);
             }
@@ -170,7 +175,6 @@ export function initVectorContours(map) {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
                 'text-size': ['case', ['has', 'labelColor'], 14, 11],
-                // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
                 'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
                 'text-padding': 12
@@ -192,6 +196,7 @@ export function clearVectorContours() {
     activeContourBinary = null;
     activeMasterKey = null;
     fetchPromise = null;
+    stepGeoJsonCache.clear();
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
     if (source) {
@@ -199,28 +204,29 @@ export function clearVectorContours() {
     }
 }
 
+function getMasterKeyComponents() {
+    const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
+    const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
+    const targetDate = stateManager.manifest?.date || stateManager.currentDate;
+    const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
+    return { model, param, targetDate, runCycle, key: `${model}_${param}_${targetDate}_${runCycle}` };
+}
+
 /**
  * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
  */
 async function loadMasterContourFile() {
-    const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
-    
-    // 🌟 Use clean parameter ID (e.g. '2t', 'pva', 'prate')
-    const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
-    const targetDate = stateManager.manifest?.date || stateManager.currentDate;
-    const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
+    const { model, param, targetDate, runCycle, key } = getMasterKeyComponents();
 
-    const currentKey = `${model}_${param}_${targetDate}_${runCycle}`;
-
-    if (activeMasterKey === currentKey && activeMasterContours) {
+    if (activeMasterKey === key && activeMasterContours) {
         return activeMasterContours;
     }
 
-    if (fetchPromise && activeMasterKey === currentKey) {
+    if (fetchPromise && activeMasterKey === key) {
         return await fetchPromise;
     }
 
-    activeMasterKey = currentKey;
+    activeMasterKey = key;
 
     const urlsToTry = [];
     if (param === 'pva') {
@@ -392,13 +398,45 @@ function binaryStepToGeoJson(step, masterData) {
         type: 'FeatureCollection',
         features: features.map((feature, index) => ({
             ...feature,
-            properties: metadata[index] || {}
+            properties: { ...(metadata[index] || {}) }
         }))
     };
 }
 
 /**
- * 🌟 Instant 0.00ms Vector Contour Renderer from Master RAM Object
+ * 🌟 Synchronous, Zero-Delay Step Renderer (pulls pre-built GeoJSON from RAM in 0.0ms)
+ */
+function renderCachedStep(stepNum, masterData, source) {
+    const isDark = stateManager.currentTheme === 'dark';
+    const units = stateManager.currentUnits;
+    const zoom = mapInstance ? mapInstance.getZoom() : 5;
+    const isCoarseZoom = (zoom < 5.0);
+    const cacheKey = `${activeMasterKey}_${stepNum}_${isDark ? 'dark' : 'light'}_${units}_${isCoarseZoom ? 'c' : 'f'}`;
+
+    if (stepGeoJsonCache.has(cacheKey)) {
+        source.setData(stepGeoJsonCache.get(cacheKey));
+        return;
+    }
+
+    if (masterData && masterData.steps) {
+        const stepData = masterData.steps[String(stepNum)] ||
+                         masterData.steps[String(stepNum).padStart(3, '0')] ||
+                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
+                         masterData.steps[stepNum];
+
+        if (stepData) {
+            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
+            const themedStepData = themeContourFeatures(decodedStepData);
+            stepGeoJsonCache.set(cacheKey, themedStepData);
+            source.setData(themedStepData);
+            return;
+        }
+    }
+    source.setData(EMPTY_GEOJSON);
+}
+
+/**
+ * 🌟 Instant Vector Contour Renderer with Synchronous Fast-Path & Stale Frame Dropping
  */
 export async function updateVectorContours(step) {
     if (!mapInstance) return;
@@ -406,25 +444,27 @@ export async function updateVectorContours(step) {
     if (!source) return;
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
+    const requestId = ++latestRequestId;
 
+    const { key } = getMasterKeyComponents();
+
+    // 🌟 FAST-PATH: If already loaded in RAM, render completely synchronously in 0.0ms (no await delay)
+    if (activeMasterContours && activeMasterKey === key) {
+        renderCachedStep(stepNum, activeMasterContours, source);
+        return;
+    }
+
+    // SLOW-PATH: Initial fetch / background load
     const masterData = await loadMasterContourFile();
 
-    if (masterData && masterData.steps) {
-        // 🌟 Support all common step key formats ("0", "000", "F000", 0)
-        const stepData = masterData.steps[String(stepNum)] ||
-                         masterData.steps[String(stepNum).padStart(3, '0')] ||
-                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
-                         masterData.steps[stepNum] ||
-                         masterData.steps[step];
+    // Drop stale request if a newer scrub frame was requested while loading
+    if (requestId !== latestRequestId) return;
 
-        if (stepData) {
-            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-            const themedStepData = themeContourFeatures(decodedStepData);
-            source.setData(themedStepData);
-            return;
-        }
+    if (masterData) {
+        renderCachedStep(stepNum, masterData, source);
+    } else {
+        source.setData(EMPTY_GEOJSON);
     }
-    source.setData(EMPTY_GEOJSON);
 }
 
 /**
