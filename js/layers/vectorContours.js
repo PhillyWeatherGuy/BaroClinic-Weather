@@ -133,8 +133,8 @@ function themeContourFeatures(featureCollection, masterData) {
                 props.stroke = thickColor;
                 props.labelColor = thickColor;
                 props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-                props.width = Math.abs(thickDam - 540) < 0.5 ? 1.8 : 1.2;
-                props.opacity = 0.90;
+                props.width = Math.abs(thickDam - 540) < 0.5 ? 2.0 : 1.4;
+                props.opacity = 0.95;
                 props.dotted = true;
             } else {
                 // MSLP Isobars (solid line)
@@ -142,8 +142,8 @@ function themeContourFeatures(featureCollection, masterData) {
                 props.stroke = mslpColor;
                 props.labelColor = mslpColor;
                 props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-                props.width = 1.3;
-                props.opacity = 0.85;
+                props.width = 1.5;
+                props.opacity = 0.9;
                 props.dotted = false;
             }
         }
@@ -196,15 +196,16 @@ function themeContourFeatures(featureCollection, masterData) {
 //   f32 p0.x p0.y p1.x p1.y (web-mercator 0..1) | f32 width (css px) | u8x4 line RGBA | u8x4 casing RGBA (alpha 0 = no casing)
 const INSTANCE_STRIDE = 28;
 
-// 🌟 Smooth zoom transitions: [zoom, scale, glow, alpha]
-// Thinner width scale (0.55 - 0.75) and softer opacity (0.50 - 0.75) when zoomed out
+// 🌟 [zoom, scale, glow, alpha]
+// Stays 100% opaque down to continental zoom (3.2), then drops off significantly when zoomed out further (<3.2)
 const WIDTH_STOPS = [
-    [2,  0.55, 1.8, 0.50],
-    [4,  0.75, 2.2, 0.70],
-    [6,  1.00, 2.6, 0.90],
-    [8,  1.30, 3.2, 1.00],
-    [11, 1.70, 4.0, 1.00],
-    [14, 2.10, 4.8, 1.00]
+    [1.5,  0.45, 1.6, 0.25],
+    [2.5,  0.60, 1.8, 0.40],
+    [3.2,  0.85, 2.2, 1.00],
+    [5.0,  1.00, 2.6, 1.00],
+    [8.0,  1.30, 3.2, 1.00],
+    [11.0, 1.70, 4.0, 1.00],
+    [14.0, 2.10, 4.8, 1.00]
 ];
 
 // Shared vertex shader body. PROJECT(p) turns a mercator (0..1) position into clip space.
@@ -238,7 +239,6 @@ void main() {
         w = a_width * u_scale + u_glow;
         col = a_outline;
     } else {
-        // 🌟 Apply zoom scale to all lines so they thin out when zoomed out
         w = a_width * u_scale;
     }
     w *= u_dpr;
@@ -252,7 +252,7 @@ void main() {
     float zv = USE_PROJ_Z == 1 ? mix(c0.z, c1.z, a_corner.x) : 0.0;
     gl_Position = vec4(pos / hv * wv, zv, wv);
     
-    // 🌟 Soften line opacity when zoomed out
+    // Zoom-dependent alpha fade for contours
     v_color = vec4(col.rgb, col.a * u_alpha);
 }`;
 
@@ -864,13 +864,8 @@ function ensureLayers() {
                     'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                     'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
                     'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
-                    // 🌟 Soften label opacity when zoomed out so they match the lines
-                    'text-opacity': [
-                        'interpolate', ['linear'], ['zoom'],
-                        2, 0.40,
-                        4, 0.70,
-                        6, 1.00
-                    ]
+                    // 🌟 Keep label values at 100% full opacity at every zoom level
+                    'text-opacity': 1.0
                 }
             });
         }
