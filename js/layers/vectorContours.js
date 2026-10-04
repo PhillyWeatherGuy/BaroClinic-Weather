@@ -41,6 +41,8 @@ function themeContourFeatures(featureCollection) {
     }
 
     const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+    
+    // 1. 2m Temperature (Freezing Line) - Untouched
     if (activeParamId === '2t') {
         const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
         for (const feature of featureCollection.features) {
@@ -52,6 +54,33 @@ function themeContourFeatures(featureCollection) {
         return featureCollection;
     }
 
+    // 2. Surface Precipitation Rate (MSLP Isobars)
+    if (activeParamId === 'prate') {
+        const isDark = stateManager.currentTheme === 'dark';
+        const mslpColor = isDark ? '#ffffff' : '#000000';
+        const zoom = mapInstance ? mapInstance.getZoom() : 5;
+
+        // When zoomed out (< 5.0), show only 4 mb intervals; when zoomed in, show all 2 mb intervals
+        if (zoom < 5.0) {
+            featureCollection.features = featureCollection.features.filter(f => {
+                const val = parseFloat(f?.properties?.name);
+                return isNaN(val) || Math.round(val) % 4 === 0;
+            });
+        }
+
+        for (const feature of featureCollection.features) {
+            if (!feature || !feature.properties) continue;
+            feature.properties.color = mslpColor;
+            feature.properties.stroke = mslpColor;
+            feature.properties.labelColor = mslpColor;
+            feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
+            feature.properties.width = 1.5;
+            feature.properties.opacity = 0.9;
+        }
+        return featureCollection;
+    }
+
+    // 3. 500mb PVA / Vorticity Heights - Untouched
     if (activeParamId !== 'pva') {
         return featureCollection;
     }
@@ -80,6 +109,18 @@ function themeContourFeatures(featureCollection) {
 
 export function initVectorContours(map) {
     mapInstance = map;
+
+    // Refresh 2 mb vs 4 mb contours when zooming on prate
+    if (!map._contoursZoomBound) {
+        map._contoursZoomBound = true;
+        map.on('zoomend', () => {
+            const activeParam = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+            if (activeParam === 'prate' && stateManager.currentStepIndex !== undefined) {
+                const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
+                if (step !== undefined) updateVectorContours(step);
+            }
+        });
+    }
 
     if (!map.getSource(SOURCE_ID)) {
         map.addSource(SOURCE_ID, {
@@ -164,7 +205,7 @@ export function clearVectorContours() {
 async function loadMasterContourFile() {
     const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
     
-    // 🌟 Use clean parameter ID (e.g. '2t', 'pva') instead of long display names
+    // 🌟 Use clean parameter ID (e.g. '2t', 'pva', 'prate')
     const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
