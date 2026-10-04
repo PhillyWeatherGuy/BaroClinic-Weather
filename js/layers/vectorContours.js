@@ -8,6 +8,12 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 
+let displayedStep = null; // the step whose layers are actually on screen
+const displayModes = new Map(); // stepNum -> 'full' | 'ghost' | 'hidden'
+const GHOST_OPACITY = 0.03; // multiplier applied to the previous/next frames (basically invisible)
+const LINE_OPACITY_EXPR = ['coalesce', ['get', 'opacity'], 0.95];
+const CASING_OPACITY_EXPR = ['coalesce', ['get', 'outlineOpacity'], 0.8];
+
 // 🌟 Track which steps have their own dedicated GPU layers
 const loadedSteps = new Set();
 
@@ -191,6 +197,93 @@ function createOrUpdateStepLayers(stepNum, geoJson) {
     }
 }
 
+// Builds (or updates) the layers for one step. Returns false if there is no data for it.
+function buildStepLayers(stepNum, masterData, rawStep = stepNum) {
+    const stepData = masterData.steps[String(stepNum)] ||
+                     masterData.steps[String(stepNum).padStart(3, '0')] ||
+                     masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
+                     masterData.steps[stepNum] ||
+                     masterData.steps[rawStep];
+    if (!stepData) return false;
+
+    const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
+    const themedStepData = themeContourFeatures(decodedStepData);
+    createOrUpdateStepLayers(stepNum, themedStepData);
+    return true;
+}
+
+function getNeighborSteps(masterData, stepNum) {
+    const nums = Object.keys(masterData?.steps || {})
+        .map(k => parseInt(String(k).replace(/\D/g, ''), 10))
+        .filter(n => !isNaN(n))
+        .sort((a, b) => a - b);
+    const i = nums.indexOf(stepNum);
+    if (i === -1) return [];
+    return [nums[i - 1], nums[i + 1]].filter(n => n !== undefined);
+}
+
+// Sets one step to 'full', 'ghost' (nearly invisible, no labels) or 'hidden'
+function setStepMode(stepNum, mode) {
+    if (!mapInstance || !loadedSteps.has(stepNum)) return;
+    if (displayModes.get(stepNum) === mode) return;
+    displayModes.set(stepNum, mode);
+
+    if (mode === 'hidden') {
+        toggleStepVisibility(stepNum, false);
+        return;
+    }
+
+    const casingId = `${CASING_LAYER_ID}-${stepNum}`;
+    const lineId = `${LINE_LAYER_ID}-${stepNum}`;
+    const labelId = `${LABEL_LAYER_ID}-${stepNum}`;
+    const ghost = mode === 'ghost';
+
+    if (mapInstance.getLayer(casingId)) {
+        mapInstance.setPaintProperty(casingId, 'line-opacity',
+            ghost ? ['*', CASING_OPACITY_EXPR, GHOST_OPACITY] : CASING_OPACITY_EXPR);
+        mapInstance.setLayoutProperty(casingId, 'visibility', 'visible');
+    }
+    if (mapInstance.getLayer(lineId)) {
+        mapInstance.setPaintProperty(lineId, 'line-opacity',
+            ghost ? ['*', LINE_OPACITY_EXPR, GHOST_OPACITY] : LINE_OPACITY_EXPR);
+        mapInstance.setLayoutProperty(lineId, 'visibility', 'visible');
+    }
+    if (mapInstance.getLayer(labelId)) {
+        mapInstance.setLayoutProperty(labelId, 'visibility', ghost ? 'none' : 'visible');
+    }
+}
+
+// Current step full, its previous/next faint, everything else hidden.
+// The new step is shown first so there is never a frame with nothing on screen.
+function applyDisplay(stepNum, masterData) {
+    const neighbors = getNeighborSteps(masterData, stepNum);
+
+    setStepMode(stepNum, 'full');
+    for (const n of neighbors) setStepMode(n, 'ghost');
+
+    for (const [n, mode] of displayModes) {
+        if (mode !== 'hidden' && n !== stepNum && !neighbors.includes(n)) {
+            setStepMode(n, 'hidden');
+        }
+    }
+    displayedStep = stepNum;
+}
+
+// Builds the previous and next steps in the background
+function preloadNeighbors(masterData, stepNum) {
+    for (const n of getNeighborSteps(masterData, stepNum)) {
+        if (loadedSteps.has(n)) continue;
+        setTimeout(() => {
+            if (!mapInstance || loadedSteps.has(n)) return;
+            if (buildStepLayers(n, masterData)) {
+                // New layers start visible; park them hidden, then re-apply for whatever is on screen now
+                setStepMode(n, 'hidden');
+                if (displayedStep !== null) applyDisplay(displayedStep, masterData);
+            }
+        }, 0);
+    }
+}
+
 export function initVectorContours(map) {
     mapInstance = map;
 
@@ -229,6 +322,8 @@ export function clearVectorContours() {
     }
     
     loadedSteps.clear();
+    displayModes.clear();
+    displayedStep = null;
     currentVisibleStep = 0;
 }
 
@@ -433,39 +528,39 @@ function binaryStepToGeoJson(step, masterData) {
 
 /**
  * 🌟 Instant 0.00ms GPU Step Switcher
+ * The previous step stays on screen until the new step's layers are ready,
+ * and the frames immediately before/after are prebuilt as near-invisible ghosts.
  */
 export async function updateVectorContours(step, forceUpdate = false) {
     if (!mapInstance) return;
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
 
-    // Hide previous step if moving to a new one
-    if (currentVisibleStep !== stepNum) {
-        toggleStepVisibility(currentVisibleStep, false);
-        currentVisibleStep = stepNum;
-    }
+    // Track the step we want; the old one stays on screen until this one is ready
+    currentVisibleStep = stepNum;
 
-    // 🌟 FAST PATH: Instantly toggle visibility of an existing layer (0.0ms scrub)
+    // 🌟 FAST PATH: layer already exists, swap instantly
     if (!forceUpdate && loadedSteps.has(stepNum)) {
-        toggleStepVisibility(stepNum, true);
+        if (activeMasterContours?.steps) {
+            applyDisplay(stepNum, activeMasterContours);
+            preloadNeighbors(activeMasterContours, stepNum);
+        }
         return;
     }
 
-    // 🌟 SLOW PATH: Decode and create dedicated layer for this step
+    // 🌟 SLOW PATH: decode and create dedicated layer for this step
     const masterData = await loadMasterContourFile();
 
     if (masterData && masterData.steps) {
-        const stepData = masterData.steps[String(stepNum)] ||
-                         masterData.steps[String(stepNum).padStart(3, '0')] ||
-                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
-                         masterData.steps[stepNum] ||
-                         masterData.steps[step];
-
-        if (stepData) {
-            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-            const themedStepData = themeContourFeatures(decodedStepData);
-            createOrUpdateStepLayers(stepNum, themedStepData);
+        if (buildStepLayers(stepNum, masterData, step)) {
+            if (currentVisibleStep === stepNum) {
+                applyDisplay(stepNum, masterData);
+            } else {
+                // User already scrubbed somewhere else; keep this one built but hidden
+                setStepMode(stepNum, 'hidden');
+            }
         }
+        if (currentVisibleStep === stepNum) preloadNeighbors(masterData, stepNum);
     }
 }
 
