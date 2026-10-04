@@ -8,8 +8,8 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 
-// 🌟 In-memory cache for ready-to-render GeoJSON per step (0.0ms instant scrubbing) 
-const stepGeoJsonCache = new Map();
+// 🌟 Track which steps have their own dedicated GPU layers
+const loadedSteps = new Set();
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -74,8 +74,6 @@ function themeContourFeatures(featureCollection) {
 
         for (const feature of featureCollection.features) {
             if (!feature || !feature.properties) continue;
-            const val = parseFloat(feature.properties.name);
-            feature.properties.isIntermediate = !isNaN(val) && (Math.round(val) % 4 !== 0);
             feature.properties.color = mslpColor;
             feature.properties.stroke = mslpColor;
             feature.properties.labelColor = mslpColor;
@@ -113,100 +111,83 @@ function themeContourFeatures(featureCollection) {
     return featureCollection;
 }
 
-/**
- * 🌟 Decodes and themes all steps into one combined FeatureCollection
- */
-function buildAllStepsGeoJson(masterData) {
-    if (!masterData || !masterData.steps) return EMPTY_GEOJSON;
+// 🌟 Instantly toggles visibility of a step's layers
+function toggleStepVisibility(stepNum, isVisible) {
+    if (!mapInstance || !loadedSteps.has(stepNum)) return;
+    const visibility = isVisible ? 'visible' : 'none';
+    
+    const casingId = `${CASING_LAYER_ID}-${stepNum}`;
+    const lineId = `${LINE_LAYER_ID}-${stepNum}`;
+    const labelId = `${LABEL_LAYER_ID}-${stepNum}`;
 
-    const allFeatures = [];
-    for (const stepKey in masterData.steps) {
-        const stepNum = parseInt(stepKey, 10);
-        if (isNaN(stepNum)) continue;
-
-        const stepData = masterData.steps[stepKey];
-        const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-        if (!decodedStepData || !decodedStepData.features) continue;
-
-        const themedStepData = themeContourFeatures(decodedStepData);
-        for (const feature of themedStepData.features) {
-            feature.properties.step = stepNum;
-            allFeatures.push(feature);
-        }
-    }
-
-    return {
-        type: 'FeatureCollection',
-        features: allFeatures
-    };
+    if (mapInstance.getLayer(casingId)) mapInstance.setLayoutProperty(casingId, 'visibility', visibility);
+    if (mapInstance.getLayer(lineId)) mapInstance.setLayoutProperty(lineId, 'visibility', visibility);
+    if (mapInstance.getLayer(labelId)) mapInstance.setLayoutProperty(labelId, 'visibility', visibility);
 }
 
-/**
- * 🌟 Instant 0.0ms GPU filter: Uses 3-frame buffering to eliminate blinking (ghosting effect)
- */
-function applyGpuStepFilter(stepNum) {
+// 🌟 Creates dedicated GPU layers for a specific step
+function createOrUpdateStepLayers(stepNum, geoJson) {
     if (!mapInstance) return;
-
-    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    const zoom = mapInstance.getZoom ? mapInstance.getZoom() : 5;
-
-    // 🌟 Identify the previous and next step numbers to keep them buffered in the GPU pipeline
-    const currentIndex = stateManager.currentStepIndex || 0;
-    const prevRaw = stateManager.globalSteps?.[currentIndex - 1]?.step;
-    const nextRaw = stateManager.globalSteps?.[currentIndex + 1]?.step;
     
-    const pStep = prevRaw !== undefined ? (typeof prevRaw === 'number' ? prevRaw : parseInt(String(prevRaw).replace(/\D/g, ''), 10)) : -1;
-    const nStep = nextRaw !== undefined ? (typeof nextRaw === 'number' ? nextRaw : parseInt(String(nextRaw).replace(/\D/g, ''), 10)) : -1;
+    const srcId = `${SOURCE_ID}-${stepNum}`;
+    const casingId = `${CASING_LAYER_ID}-${stepNum}`;
+    const lineId = `${LINE_LAYER_ID}-${stepNum}`;
+    const labelId = `${LABEL_LAYER_ID}-${stepNum}`;
 
-    let stepFilter = ['in', ['get', 'step'], stepNum, pStep, nStep];
+    if (!mapInstance.getSource(srcId)) {
+        mapInstance.addSource(srcId, { type: 'geojson', data: geoJson });
 
-    // For MSLP on prate: automatically hide 2 mb intermediate lines when zoomed out (< 5.0)
-    if (activeParamId === 'prate' && zoom < 5.0) {
-        stepFilter = ['all', ['in', ['get', 'step'], stepNum, pStep, nStep], ['!=', ['get', 'isIntermediate'], true]];
-    }
+        mapInstance.addLayer({
+            id: casingId,
+            type: 'line',
+            source: srcId,
+            filter: ['has', 'outlineColor'],
+            layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
+            paint: {
+                'line-color': ['get', 'outlineColor'],
+                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
+                'line-opacity': ['coalesce', ['get', 'outlineOpacity'], 0.8],
+                'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
+            }
+        });
 
-    const casingFilter = ['all', ['has', 'outlineColor'], stepFilter];
+        mapInstance.addLayer({
+            id: lineId,
+            type: 'line',
+            source: srcId,
+            layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
+            paint: {
+                'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
+                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
+                'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
+            }
+        });
 
-    if (mapInstance.getLayer(LINE_LAYER_ID)) {
-        mapInstance.setFilter(LINE_LAYER_ID, stepFilter);
-        
-        // 🌟 Paint the exact current frame solid, and ghost the previous/next frames (opacity 0.15)
-        mapInstance.setPaintProperty(LINE_LAYER_ID, 'line-opacity', [
-            'case',
-            ['!=', ['get', 'step'], stepNum], 0.15,
-            ['==', ['get', 'isIntermediate'], true], [
-                'interpolate', ['linear'], ['zoom'],
-                4.0, 0.0,
-                5.5, ['coalesce', ['get', 'opacity'], 0.85]
-            ],
-            ['coalesce', ['get', 'opacity'], 0.95]
-        ]);
-    }
-    
-    if (mapInstance.getLayer(LABEL_LAYER_ID)) {
-        mapInstance.setFilter(LABEL_LAYER_ID, stepFilter);
-        
-        // 🌟 Hide labels on the ghost frames so text doesn't overlap and get messy
-        mapInstance.setPaintProperty(LABEL_LAYER_ID, 'text-opacity', [
-            'case',
-            ['!=', ['get', 'step'], stepNum], 0.0,
-            ['==', ['get', 'isIntermediate'], true], [
-                'interpolate', ['linear'], ['zoom'],
-                4.2, 0.0,
-                5.5, 1.0
-            ],
-            1.0
-        ]);
-    }
-    
-    if (mapInstance.getLayer(CASING_LAYER_ID)) {
-        mapInstance.setFilter(CASING_LAYER_ID, casingFilter);
-        
-        mapInstance.setPaintProperty(CASING_LAYER_ID, 'line-opacity', [
-            'case',
-            ['!=', ['get', 'step'], stepNum], 0.05,
-            ['coalesce', ['get', 'outlineOpacity'], 0.8]
-        ]);
+        mapInstance.addLayer({
+            id: labelId,
+            type: 'symbol',
+            source: srcId,
+            layout: {
+                'symbol-placement': 'line',
+                'text-field': ['get', 'name'],
+                'text-size': ['case', ['has', 'labelColor'], 14, 11],
+                'text-font': ['Noto Sans Bold'],
+                'text-max-angle': 45,
+                'text-padding': 12,
+                'visibility': 'visible'
+            },
+            paint: {
+                'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
+                'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
+                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
+            }
+        });
+
+        loadedSteps.add(stepNum);
+    } else {
+        // If updating a step (e.g. after zooming on prate), update data and make visible
+        mapInstance.getSource(srcId).setData(geoJson);
+        toggleStepVisibility(stepNum, true);
     }
 }
 
@@ -218,124 +199,37 @@ export function initVectorContours(map) {
         map._contoursZoomBound = true;
         map.on('zoomend', () => {
             const activeParam = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-            if (activeParam === 'prate') {
-                applyGpuStepFilter(currentVisibleStep);
+            if (activeParam === 'prate' && stateManager.currentStepIndex !== undefined) {
+                const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
+                // Passing true forces it to re-run the JS zoom filter for the current frame
+                if (step !== undefined) updateVectorContours(step, true);
             }
         });
-    }
-
-    if (!map.getSource(SOURCE_ID)) {
-        map.addSource(SOURCE_ID, {
-            type: 'geojson',
-            data: EMPTY_GEOJSON
-        });
-
-        // Casing / Glow Layer
-        map.addLayer({
-            id: CASING_LAYER_ID,
-            type: 'line',
-            source: SOURCE_ID,
-            filter: ['all', ['has', 'outlineColor'], ['in', ['get', 'step'], currentVisibleStep, -1, -1]],
-            layout: {
-                'line-join': 'round',
-                'line-cap': 'round'
-            },
-            paint: {
-                'line-color': ['get', 'outlineColor'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
-                'line-opacity': [
-                    'case',
-                    ['!=', ['get', 'step'], currentVisibleStep], 0.05,
-                    ['coalesce', ['get', 'outlineOpacity'], 0.8]
-                ],
-                'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
-            }
-        });
-
-        // 1. Smooth Vector Line Layer
-        map.addLayer({
-            id: LINE_LAYER_ID,
-            type: 'line',
-            source: SOURCE_ID,
-            filter: ['in', ['get', 'step'], currentVisibleStep, -1, -1],
-            layout: {
-                'line-join': 'round',
-                'line-cap': 'round'
-            },
-            paint: {
-                'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
-                'line-opacity': [
-                    'case',
-                    ['!=', ['get', 'step'], currentVisibleStep], 0.15,
-                    ['==', ['get', 'isIntermediate'], true], [
-                        'interpolate', ['linear'], ['zoom'],
-                        4.0, 0.0,
-                        5.5, ['coalesce', ['get', 'opacity'], 0.85]
-                    ],
-                    ['coalesce', ['get', 'opacity'], 0.95]
-                ]
-            }
-        });
-
-        // 2. Inline Contour Labels
-        map.addLayer({
-            id: LABEL_LAYER_ID,
-            type: 'symbol',
-            source: SOURCE_ID,
-            filter: ['in', ['get', 'step'], currentVisibleStep, -1, -1],
-            layout: {
-                'symbol-placement': 'line',
-                'text-field': ['get', 'name'],
-                'text-size': ['case', ['has', 'labelColor'], 14, 11],
-                'text-font': ['Noto Sans Bold'],
-                'text-max-angle': 45,
-                'text-padding': 12
-            },
-            paint: {
-                'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
-                'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
-                'text-opacity': [
-                    'case',
-                    ['!=', ['get', 'step'], currentVisibleStep], 0.0,
-                    ['==', ['get', 'isIntermediate'], true], [
-                        'interpolate', ['linear'], ['zoom'],
-                        4.2, 0.0,
-                        5.5, 1.0
-                    ],
-                    1.0
-                ]
-            }
-        });
-
-        // If master contours are already in RAM, populate source immediately
-        if (activeMasterContours) {
-            const source = map.getSource(SOURCE_ID);
-            if (source) {
-                const allStepsGeoJson = buildAllStepsGeoJson(activeMasterContours);
-                source.setData(allStepsGeoJson);
-                applyGpuStepFilter(currentVisibleStep);
-            }
-        }
     }
 }
 
 /**
- * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & clears vector layer on parameter/model switch
+ * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & completely removes all dynamically created layers
  */
 export function clearVectorContours() {
     activeMasterContours = null;
     activeContourBinary = null;
     activeMasterKey = null;
     fetchPromise = null;
-    currentVisibleStep = 0;
-    stepGeoJsonCache.clear();
-    if (!mapInstance) return;
-    const source = mapInstance.getSource(SOURCE_ID);
-    if (source) {
-        source.setData(EMPTY_GEOJSON);
+
+    if (mapInstance) {
+        loadedSteps.forEach(stepNum => {
+            try {
+                if (mapInstance.getLayer(`${CASING_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${CASING_LAYER_ID}-${stepNum}`);
+                if (mapInstance.getLayer(`${LINE_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LINE_LAYER_ID}-${stepNum}`);
+                if (mapInstance.getLayer(`${LABEL_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LABEL_LAYER_ID}-${stepNum}`);
+                if (mapInstance.getSource(`${SOURCE_ID}-${stepNum}`)) mapInstance.removeSource(`${SOURCE_ID}-${stepNum}`);
+            } catch (e) {}
+        });
     }
+    
+    loadedSteps.clear();
+    currentVisibleStep = 0;
 }
 
 function getMasterKeyComponents() {
@@ -394,18 +288,6 @@ async function loadMasterContourFile() {
                                 );
                             }
                         }
-                        
-                        // 🌟 Upload ALL steps to the GeoJSON source ONCE
-                        if (mapInstance) {
-                            initVectorContours(mapInstance);
-                            const source = mapInstance.getSource(SOURCE_ID);
-                            if (source) {
-                                const allStepsGeoJson = buildAllStepsGeoJson(activeMasterContours);
-                                source.setData(allStepsGeoJson);
-                                applyGpuStepFilter(currentVisibleStep);
-                            }
-                        }
-
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
                         return activeMasterContours;
                     }
@@ -544,26 +426,46 @@ function binaryStepToGeoJson(step, masterData) {
         type: 'FeatureCollection',
         features: features.map((feature, index) => ({
             ...feature,
-            properties: { ...(metadata[index] || {}) }
+            properties: metadata[index] || {}
         }))
     };
 }
 
 /**
- * 🌟 Instant 0.0ms GPU filter: switches the visible frame without re-tiling GeoJSON
+ * 🌟 Instant 0.00ms GPU Step Switcher
  */
-export async function updateVectorContours(step) {
+export async function updateVectorContours(step, forceUpdate = false) {
     if (!mapInstance) return;
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
-    currentVisibleStep = stepNum;
 
-    // Apply the filter on the GPU immediately (0.0ms)
-    applyGpuStepFilter(stepNum);
+    // Hide previous step if moving to a new one
+    if (currentVisibleStep !== stepNum) {
+        toggleStepVisibility(currentVisibleStep, false);
+        currentVisibleStep = stepNum;
+    }
 
-    // If master contours haven't been fetched yet, start background download
-    if (!activeMasterContours && !fetchPromise) {
-        loadMasterContourFile();
+    // 🌟 FAST PATH: Instantly toggle visibility of an existing layer (0.0ms scrub)
+    if (!forceUpdate && loadedSteps.has(stepNum)) {
+        toggleStepVisibility(stepNum, true);
+        return;
+    }
+
+    // 🌟 SLOW PATH: Decode and create dedicated layer for this step
+    const masterData = await loadMasterContourFile();
+
+    if (masterData && masterData.steps) {
+        const stepData = masterData.steps[String(stepNum)] ||
+                         masterData.steps[String(stepNum).padStart(3, '0')] ||
+                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
+                         masterData.steps[stepNum] ||
+                         masterData.steps[step];
+
+        if (stepData) {
+            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
+            const themedStepData = themeContourFeatures(decodedStepData);
+            createOrUpdateStepLayers(stepNum, themedStepData);
+        }
     }
 }
 
