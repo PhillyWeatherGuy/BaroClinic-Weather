@@ -5,7 +5,7 @@
       "name": "ECMWF",
       "category": "Global",
       "resolution": "9km",
-      "supported_params": ["2t", "tp", "prate", "pwat", "pva"]
+      "supported_params": ["2t", "tp", "asnow", "prate", "pwat", "pva"]
     }
   },
   "parameters": {
@@ -35,6 +35,23 @@
       "upscale_2x": false,
       "scaling": {
         "mode": "piecewise",
+        "val_points": [0.0, 1.0, 10.0, 50.0],
+        "byte_points": [0, 100, 200, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow": {
+      "id": "asnow",
+      "name": "Total Snowfall (10:1)",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 393.701,
         "val_points": [0.0, 1.0, 10.0, 50.0],
         "byte_points": [0, 100, 200, 255]
       },
