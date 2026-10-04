@@ -179,6 +179,13 @@ void main() {
     outColor = vec4(v_color.rgb * v_color.a, v_color.a);
 }`;
 
+const _logged = new Set();
+function logOnce(key, ...args) {
+    if (_logged.has(key)) return;
+    _logged.add(key);
+    console.log('[contours]', key, ...args);
+}
+
 const gpu = {
     map: null, gl: null, ready: false,
     program: null, vao: null, cornerBuf: null, instBuf: null, u: {},
@@ -279,10 +286,12 @@ const gpuLayer = {
 
         gl.bindVertexArray(null);
         gpu.ready = true;
+        window.__contourGPU = gpu;
+        logOnce('ready', 'GPU layer initialised, WebGL2 OK');
     },
 
     render(gl, arg) {
-        if (!gpu.ready) return;
+        if (!gpu.ready) { logOnce('render-before-ready'); return; }
 
         // Upload newly selected step (a single bufferData call)
         if (gpu.dirty) {
@@ -290,18 +299,19 @@ const gpuLayer = {
             gl.bufferData(gl.ARRAY_BUFFER, gpu.pending || new Uint8Array(0), gl.DYNAMIC_DRAW);
             gpu.count = gpu.pending ? gpu.pendingCount : 0;
             gpu.dirty = false;
+            logOnce('first-upload', 'segments:', gpu.count);
         }
-        if (!gpu.count) return;
+        if (!gpu.count) { logOnce('no-segments', 'render ran but there is nothing to draw'); return; }
 
         // Works with both the old (matrix) and new (args object) custom-layer render signatures.
         // Only draws in mercator; hidden while a globe projection is active.
         const pd = arg && arg.defaultProjectionData;
-        if (pd && pd.projectionTransition > 0) return;
+        if (pd && pd.projectionTransition > 0) { logOnce('globe-skip', 'projectionTransition =', pd.projectionTransition); return; }
         let m = null;
         if (arg && arg.modelViewProjectionMatrix) m = arg.modelViewProjectionMatrix;
         else if (pd && pd.fallbackMatrix) m = pd.fallbackMatrix;
         else if (arg && arg.length === 16) m = arg;
-        if (!m) return;
+        if (!m) { logOnce('no-matrix', 'render args keys:', arg ? Object.keys(arg) : arg); return; }
 
         const map = gpu.map;
         const zs = zoomStops(map.getZoom());
@@ -311,6 +321,9 @@ const gpuLayer = {
 
         gl.disable(gl.DEPTH_TEST);
         gl.disable(gl.STENCIL_TEST);
+        gl.disable(gl.CULL_FACE);
+        gl.disable(gl.SCISSOR_TEST);
+        gl.colorMask(true, true, true, true);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -330,6 +343,20 @@ const gpuLayer = {
             }
         }
         gl.bindVertexArray(null);
+
+        if (gpu.debugFrames === undefined) gpu.debugFrames = 0;
+        if (gpu.debugFrames < 5) {
+            gpu.debugFrames++;
+            const err = gl.getError();
+            logOnce('draw-info', {
+                matrixFrom: arg && arg.modelViewProjectionMatrix ? 'modelViewProjectionMatrix' : (pd && pd.fallbackMatrix ? 'fallbackMatrix' : 'matrix arg'),
+                argKeys: arg && !arg.length ? Object.keys(arg) : 'matrix',
+                zoom: map.getZoom(), dpr, worldIndex: wc,
+                viewport: [gl.drawingBufferWidth, gl.drawingBufferHeight],
+                segments: gpu.count, glError: err
+            });
+            if (err) logOnce('gl-error-' + err, 'WebGL error code', err);
+        }
     },
 
     onRemove(map, gl) {
@@ -481,7 +508,7 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
 function ensureLayers() {
     if (!mapInstance) return false;
     try {
-        if (!mapInstance.getLayer(GPU_LAYER_ID)) mapInstance.addLayer(gpuLayer);
+        if (!mapInstance.getLayer(GPU_LAYER_ID)) { mapInstance.addLayer(gpuLayer); logOnce('layer-added', 'custom layer added to map'); }
 
         if (!mapInstance.getSource(LABEL_SOURCE_ID)) {
             mapInstance.addSource(LABEL_SOURCE_ID, { type: 'geojson', data: EMPTY_GEOJSON });
