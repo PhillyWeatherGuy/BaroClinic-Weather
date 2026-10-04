@@ -93,7 +93,6 @@ const SNOW_RADAR_GLOW = [
   "#f191fc", "#f696f9", "#fb9af6", "#ff9ff3", "#ffa8ee", "#ffb0e9", "#ffb7e7", "#ffbee5",
   "#ffc4e4", "#ffcae3", "#ffd1e3", "#ffd7e4", "#fedde5", "#fee2e8", "#fee8eb", "#ffedee"
 ];
-];
 
 // 💧 Dark Mode PWAT Levels (Inches)
 const DARK_PWAT_LEVELS = [
