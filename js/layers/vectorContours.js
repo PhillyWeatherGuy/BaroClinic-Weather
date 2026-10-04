@@ -53,10 +53,15 @@ function themeContourFeatures(featureCollection) {
         return featureCollection;
     }
 
-    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    
+    const activeParam = (
+        stateManager.paramConfig?.id ||
+        stateManager.activeParam ||
+        stateManager.manifest?.parameter ||
+        ''
+    ).toLowerCase();
+
     // 1. 2m Temperature (Freezing Line)
-    if (activeParamId === '2t') {
+    if (activeParam === '2t') {
         const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
         for (const feature of featureCollection.features) {
             const name = String(feature?.properties?.name || '');
@@ -68,7 +73,8 @@ function themeContourFeatures(featureCollection) {
     }
 
     // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
-    if (activeParamId === 'prate') {
+    const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || activeMasterContours?.parameter === 'prate';
+    if (isPrate) {
         const isDark = stateManager.currentTheme === 'dark';
         const mslpColor = isDark ? '#ffffff' : '#000000';
         const zoom = mapInstance ? mapInstance.getZoom() : 5;
@@ -76,69 +82,94 @@ function themeContourFeatures(featureCollection) {
         // When zoomed out (< 5.0), show only 4 mb MSLP intervals; keep all thickness lines
         if (zoom < 5.0) {
             featureCollection.features = featureCollection.features.filter(f => {
-                const val = parseFloat(f?.properties?.name);
-                const isThickness = f?.properties?.unit === 'dam' || (val >= 400 && val <= 700);
-                if (isThickness) return true;
-                return isNaN(val) || Math.round(val) % 4 === 0;
+                const p = f?.properties || {};
+                const rawVal = p.name ?? p.level ?? p.value ?? p.val ?? p.target;
+                const v = parseFloat(String(rawVal || '').replace(/[^0-9.-]/g, ''));
+                const isThick = p.unit === 'dam' || (v >= 350 && v <= 750) || (v >= 3500 && v <= 7500);
+                if (isThick) return true;
+                return isNaN(v) || Math.round(v) % 4 === 0;
             });
         }
 
         for (const feature of featureCollection.features) {
-            if (!feature || !feature.properties) continue;
-            const val = parseFloat(feature.properties.name);
-            const isThickness = feature.properties.unit === 'dam' || (val >= 400 && val <= 700);
+            if (!feature) continue;
+            const props = feature.properties || (feature.properties = {});
+
+            // Read level value from any possible key
+            const rawVal = props.name ?? props.level ?? props.value ?? props.val ?? props.target;
+            const val = parseFloat(String(rawVal || '').replace(/[^0-9.-]/g, ''));
+
+            const unit = String(props.unit || '').toLowerCase();
+            const idStr = String(props.id || '').toLowerCase();
+            const nameStr = String(props.name || '').toLowerCase();
+
+            // Robust Thickness Detection (handles dam, meters, units, or values 350-750)
+            let isThickness = false;
+            let thickDam = val;
+
+            if (unit === 'dam' || idStr.includes('thick') || nameStr.includes('thick')) {
+                isThickness = true;
+                thickDam = (val >= 3500) ? val / 10.0 : val;
+            } else if (!isNaN(val)) {
+                if (val >= 350 && val <= 750) {
+                    isThickness = true;
+                    thickDam = val;
+                } else if (val >= 3500 && val <= 7500) {
+                    isThickness = true;
+                    thickDam = val / 10.0;
+                }
+            }
 
             if (isThickness) {
-                // Red for above 540 dam, Blue for 540 dam and below
-                const thickColor = val > 540 ? '#dc2626' : '#2563eb';
-                feature.properties.color = thickColor;
-                feature.properties.stroke = thickColor;
-                feature.properties.labelColor = thickColor;
-                feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-                feature.properties.width = (val === 540) ? 2.0 : 1.4;
-                feature.properties.opacity = 0.9;
-                feature.properties.dotted = true; // Dotted line
+                // Red for > 540 dam, Blue for <= 540 dam
+                const isCold = thickDam <= 540;
+                const thickColor = isCold ? '#2563eb' : '#dc2626';
+
+                props.color = thickColor;
+                props.stroke = thickColor;
+                props.labelColor = thickColor;
+                props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
+                props.width = Math.abs(thickDam - 540) < 0.5 ? 2.2 : 1.4;
+                props.opacity = 0.95;
+                props.dotted = true; // Flag for dotted lines
             } else {
                 // MSLP Isobars (solid line)
-                feature.properties.color = mslpColor;
-                feature.properties.stroke = mslpColor;
-                feature.properties.labelColor = mslpColor;
-                feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-                feature.properties.width = 1.5;
-                feature.properties.opacity = 0.9;
-                feature.properties.dotted = false;
+                props.color = mslpColor;
+                props.stroke = mslpColor;
+                props.labelColor = mslpColor;
+                props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
+                props.width = 1.5;
+                props.opacity = 0.9;
+                props.dotted = false;
             }
         }
         return featureCollection;
     }
 
     // 3. 500mb PVA / Vorticity Heights
-    if (activeParamId !== 'pva') {
-        return featureCollection;
-    }
+    if (activeParam === 'pva') {
+        const contourColor = getPvaContourThemeColor();
+        const glowColor = getPvaContourGlowColor();
+        const isDarkTheme = stateManager.currentTheme === 'dark';
 
-    const contourColor = getPvaContourThemeColor();
-    const glowColor = getPvaContourGlowColor();
-    const isDarkTheme = stateManager.currentTheme === 'dark';
+        for (const feature of featureCollection.features) {
+            if (!feature || !feature.properties) continue;
+            const is540Line = Number(feature.properties.name) === 540;
+            const featureColor = is540Line ? '#4169E1' : contourColor;
 
-    for (const feature of featureCollection.features) {
-        if (!feature || !feature.properties) continue;
-        const is540Line = Number(feature.properties.name) === 540;
-        const featureColor = is540Line ? '#4169E1' : contourColor;
+            feature.properties.color = featureColor;
+            feature.properties.stroke = featureColor;
 
-        feature.properties.color = featureColor;
-        feature.properties.stroke = featureColor;
+            feature.properties.outlineColor = isDarkTheme ? glowColor : null;
+            feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0;
+            feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
 
-        // Only apply contour glow/casing in Dark Mode
-        feature.properties.outlineColor = isDarkTheme ? glowColor : null;
-        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0;
-        feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
+            feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? '#ffffff' : '#000000');
+            feature.properties.labelHaloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
 
-        feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? '#ffffff' : '#000000');
-        feature.properties.labelHaloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
-
-        if (is540Line) {
-            feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
+            if (is540Line) {
+                feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
+            }
         }
     }
 
@@ -516,9 +547,6 @@ function mercToLonLat(x, y) {
 
 /**
  * 🌟 Smooths polyline points in Mercator space using a tension-controlled Cardinal spline.
- * - Passes strictly through original data points (no coordinate drift or isobar shrinking).
- * - Closed-loop aware (seamless circular/elliptical low & high pressure centers).
- * - Dateline jump protected.
  */
 function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
     if (!rawCoords || rawCoords.length < 3) {
@@ -544,7 +572,6 @@ function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
         const p1 = ring[i];
         const p2 = ring[(i + 1) % count];
 
-        // Skip interpolation across the antimeridian dateline jump
         if (Math.abs(p2[0] - p1[0]) > 0.4) {
             smoothed.push(p1);
             continue;
@@ -593,7 +620,8 @@ function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
 }
 
 /**
- * 🌟 Walks a polyline and emits dashed/dotted segments (drawn length + gap length)
+ * 🌟 Walks a polyline and emits dashed/dotted segments.
+ * Scaled to ~10px dash and ~7px gap at typical map zoom levels.
  */
 function emitDashedSegments(line, dashLen, gapLen, onSegment) {
     let isDrawing = true;
@@ -672,7 +700,7 @@ function prepareStep(featureCollection) {
         if (!lines) continue;
         for (const l of lines) {
             if (l.length > 1) {
-                maxSegs += (l.length >= 3) ? (l.length - 1) * (SUBDIVISIONS + 1) + 4 : (l.length - 1);
+                maxSegs += (l.length >= 3) ? (l.length - 1) * (SUBDIVISIONS + 2) + 8 : (l.length - 1);
             }
         }
         items.push({ props: f.properties || {}, lines });
@@ -699,8 +727,8 @@ function prepareStep(featureCollection) {
             if (len < 2) continue;
 
             if (props.dotted) {
-                // Dotted lines: short segments with alternating gaps
-                emitDashedSegments(line, 0.0006, 0.0005, (pA, pB) => {
+                // Clearly visible dashed/dotted segments (~10px dash, ~7px gap at zoom 4-5)
+                emitDashedSegments(line, 0.0022, 0.0016, (pA, pB) => {
                     if (n * 7 + 6 >= f32.length) return;
                     const o = n * 7;
                     f32[o]     = pA[0]; 
@@ -717,7 +745,7 @@ function prepareStep(featureCollection) {
                 let prev = line[0];
                 for (let i = 1; i < len; i++) {
                     const cur = line[i];
-                    if (Math.abs(cur[0] - prev[0]) < 0.5) {   // skip segments that wrap across the dateline
+                    if (Math.abs(cur[0] - prev[0]) < 0.5) {
                         if (n * 7 + 6 >= f32.length) break;
                         const o = n * 7;
                         f32[o]     = prev[0]; 
@@ -1104,9 +1132,23 @@ function decodeContourV2(view, coordinateScale) {
     return steps;
 }
 
+// 🌟 Step-key safe resolver (handles "0", "000", "F000", 0) so metadata properties are never lost
 function binaryStepToGeoJson(step, masterData) {
-    const features = activeContourBinary?.get(String(step));
-    const metadata = masterData.steps?.[String(step)]?.features?.map(feature => feature.properties) || [];
+    if (!masterData?.steps) return null;
+    const stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
+    const stepKey = String(stepNum);
+
+    const features = activeContourBinary?.get(stepKey) || 
+                     activeContourBinary?.get(String(step)) ||
+                     activeContourBinary?.get(stepKey.padStart(3, '0'));
+
+    const stepObj = masterData.steps[stepKey] ||
+                    masterData.steps[stepKey.padStart(3, '0')] ||
+                    masterData.steps[`F${stepKey.padStart(3, '0')}`] ||
+                    masterData.steps[step] ||
+                    masterData.steps[String(step)];
+
+    const metadata = stepObj?.features?.map(feature => feature.properties) || [];
     if (!features) return null;
     return {
         type: 'FeatureCollection',
