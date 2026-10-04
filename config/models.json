@@ -119,7 +119,7 @@
         "opacity": 0.9,
         "glow": true,
         "glow_dark": "#00c8ff",
-        "glow_light": "#ffffff",
+        "glow_light": "#007c91",
         "special_lines": [
           { "target": 540, "color": "#4169E1", "width": 2.4 }
         ]
