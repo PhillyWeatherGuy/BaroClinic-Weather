@@ -55,7 +55,7 @@ function themeContourFeatures(featureCollection) {
 
     const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
     
-    // 1. 2m Temperature (Freezing Line) - Untouched
+    // 1. 2m Temperature (Freezing Line)
     if (activeParamId === '2t') {
         const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
         for (const feature of featureCollection.features) {
@@ -93,7 +93,7 @@ function themeContourFeatures(featureCollection) {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity Heights - Untouched
+    // 3. 500mb PVA / Vorticity Heights
     if (activeParamId !== 'pva') {
         return featureCollection;
     }
@@ -101,17 +101,23 @@ function themeContourFeatures(featureCollection) {
     const contourColor = getPvaContourThemeColor();
     const glowColor = getPvaContourGlowColor();
     const isDarkTheme = stateManager.currentTheme === 'dark';
+
     for (const feature of featureCollection.features) {
         if (!feature || !feature.properties) continue;
         const is540Line = Number(feature.properties.name) === 540;
         const featureColor = is540Line ? '#4169E1' : contourColor;
+
         feature.properties.color = featureColor;
         feature.properties.stroke = featureColor;
-        feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
-        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
+
+        // Only apply contour glow/casing in Dark Mode
+        feature.properties.outlineColor = isDarkTheme ? glowColor : null;
+        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0;
         feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
-        feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
-        feature.properties.labelHaloColor = contourColor;
+
+        feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? '#ffffff' : '#000000');
+        feature.properties.labelHaloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
+
         if (is540Line) {
             feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
         }
@@ -629,8 +635,10 @@ function prepareStep(featureCollection) {
                 const cur = line[i];
                 if (Math.abs(cur[0] - prev[0]) < 0.5) {   // skip segments that wrap across the dateline
                     const o = n * 7;
-                    f32[o] = prev[0]; f32[o + 1] = prev[1];
-                    f32[o + 2] = cur[0]; f32[o + 3] = cur[1];
+                    f32[o]     = prev[0]; 
+                    f32[o + 1] = prev[1];
+                    f32[o + 2] = cur[0];  
+                    f32[o + 3] = cur[1];
                     f32[o + 4] = width;
                     u32[o + 5] = color;
                     u32[o + 6] = outline;
@@ -670,7 +678,8 @@ function prepareStep(featureCollection) {
 }
 
 function getStepData(stepNum, masterData, rawStep = stepNum) {
-    if (stepCache.has(stepNum)) return stepCache.get(stepNum);
+    const cacheKey = `${stepNum}_${stateManager.currentTheme || 'light'}`;
+    if (stepCache.has(cacheKey)) return stepCache.get(cacheKey);
 
     const stepData = masterData.steps[String(stepNum)] ||
                      masterData.steps[String(stepNum).padStart(3, '0')] ||
@@ -683,7 +692,7 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
                     { ...stepData, features: (stepData.features || []).slice() };
     const themed = themeContourFeatures(decoded);
     const prepared = prepareStep(themed);
-    stepCache.set(stepNum, prepared);
+    stepCache.set(cacheKey, prepared);
     return prepared;
 }
 
@@ -774,7 +783,8 @@ function startPreload(masterData, aroundStep) {
 
     const next = () => {
         if (run !== preloadRun || !mapInstance || activeMasterContours !== masterData) return;
-        while (idx < nums.length && stepCache.has(nums[idx])) idx++;
+        const currentTheme = stateManager.currentTheme || 'light';
+        while (idx < nums.length && stepCache.has(`${nums[idx]}_${currentTheme}`)) idx++;
         if (idx >= nums.length) return;
         getStepData(nums[idx++], masterData);
         setTimeout(next, PRELOAD_INTERVAL_MS);
