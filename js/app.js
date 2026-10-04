@@ -701,6 +701,23 @@ export async function switchAppMode(targetMode) {
         }
 
     } else if (targetMode === 'modelViewer') {
+        // 🚧 MAINTENANCE: show downtime screen and skip loading
+        {
+            let ov = document.getElementById('maintenance-overlay');
+            if (!ov) {
+                ov = document.createElement('div');
+                ov.id = 'maintenance-overlay';
+                Object.assign(ov.style, {
+                    position: 'fixed', inset: '0', zIndex: '9999',
+                    background: '#000', color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: 'sans-serif', fontSize: '1.5rem', textAlign: 'center'
+                });
+                ov.textContent = 'Models down until 8:15PM EDT';
+                document.body.appendChild(ov);
+            } else { ov.style.display = 'flex'; }
+            return;
+        }
         showToast("Loading Global Models...");
         
         if (modelBtn) modelBtn.querySelector('span').textContent = 'ECMWF';
