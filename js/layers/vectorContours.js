@@ -8,9 +8,6 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 
-// 🌟 In-memory cache: stores decoded & themed GeoJSON per step for instant recall
-const stepCache = new Map();
-
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
 const LINE_LAYER_ID = 'contour-master-line-layer';
@@ -105,40 +102,75 @@ function themeContourFeatures(featureCollection) {
 }
 
 /**
- * 🌟 Renders single step on demand and saves to RAM cache
+ * 🌟 Decodes and themes all steps into one combined FeatureCollection
  */
-function renderStep(stepNum) {
-    if (!mapInstance) return;
-    const source = mapInstance.getSource(SOURCE_ID);
-    if (!source || !activeMasterContours) return;
+function buildAllStepsGeoJson(masterData) {
+    if (!masterData || !masterData.steps) return EMPTY_GEOJSON;
 
-    // 1. FAST PATH: Already in memory from a previous scrub or background pre-warm
-    if (stepCache.has(stepNum)) {
-        source.setData(stepCache.get(stepNum));
-        return;
-    }
+    const allFeatures = [];
+    for (const stepKey in masterData.steps) {
+        const stepNum = parseInt(stepKey, 10);
+        if (isNaN(stepNum)) continue;
 
-    // 2. FIRST-TIME PATH: Decodes only this single step, then caches it in RAM
-    const masterData = activeMasterContours;
-    if (masterData && masterData.steps) {
-        const stepData = masterData.steps[String(stepNum)] ||
-                         masterData.steps[String(stepNum).padStart(3, '0')] ||
-                         masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
-                         masterData.steps[stepNum];
+        const stepData = masterData.steps[stepKey];
+        const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
+        if (!decodedStepData || !decodedStepData.features) continue;
 
-        if (stepData) {
-            const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-            const themedStepData = themeContourFeatures(decodedStepData);
-            stepCache.set(stepNum, themedStepData); // Keep in memory!
-            source.setData(themedStepData);
-            return;
+        const themedStepData = themeContourFeatures(decodedStepData);
+        for (const feature of themedStepData.features) {
+            feature.properties.step = stepNum;
+            allFeatures.push(feature);
         }
     }
-    source.setData(EMPTY_GEOJSON);
+
+    return {
+        type: 'FeatureCollection',
+        features: allFeatures
+    };
+}
+
+/**
+ * 🌟 Instant 0.0ms GPU filter: switches the visible frame without re-tiling GeoJSON
+ */
+function applyGpuStepFilter(stepNum) {
+    if (!mapInstance) return;
+
+    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+    const zoom = mapInstance.getZoom ? mapInstance.getZoom() : 5;
+
+    let stepFilter = ['==', ['get', 'step'], stepNum];
+
+    // For MSLP on prate: automatically hide 2 mb intermediate lines when zoomed out (< 5.0)
+    if (activeParamId === 'prate' && zoom < 5.0) {
+        stepFilter = ['all', ['==', ['get', 'step'], stepNum], ['!=', ['get', 'isIntermediate'], true]];
+    }
+
+    const casingFilter = ['all', ['has', 'outlineColor'], stepFilter];
+
+    if (mapInstance.getLayer(LINE_LAYER_ID)) {
+        mapInstance.setFilter(LINE_LAYER_ID, stepFilter);
+    }
+    if (mapInstance.getLayer(LABEL_LAYER_ID)) {
+        mapInstance.setFilter(LABEL_LAYER_ID, stepFilter);
+    }
+    if (mapInstance.getLayer(CASING_LAYER_ID)) {
+        mapInstance.setFilter(CASING_LAYER_ID, casingFilter);
+    }
 }
 
 export function initVectorContours(map) {
     mapInstance = map;
+
+    // Refresh 2 mb vs 4 mb filtering when zooming on prate
+    if (!map._contoursZoomBound) {
+        map._contoursZoomBound = true;
+        map.on('zoomend', () => {
+            const activeParam = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+            if (activeParam === 'prate') {
+                applyGpuStepFilter(currentVisibleStep);
+            }
+        });
+    }
 
     if (!map.getSource(SOURCE_ID)) {
         map.addSource(SOURCE_ID, {
@@ -151,7 +183,7 @@ export function initVectorContours(map) {
             id: CASING_LAYER_ID,
             type: 'line',
             source: SOURCE_ID,
-            filter: ['has', 'outlineColor'],
+            filter: ['all', ['has', 'outlineColor'], ['==', ['get', 'step'], currentVisibleStep]],
             layout: {
                 'line-join': 'round',
                 'line-cap': 'round'
@@ -164,11 +196,12 @@ export function initVectorContours(map) {
             }
         });
 
-        // 1. Smooth Vector Line Layer (with GPU 4mb/2mb zoom hierarchy for prate)
+        // 1. Smooth Vector Line Layer
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
             source: SOURCE_ID,
+            filter: ['==', ['get', 'step'], currentVisibleStep],
             layout: {
                 'line-join': 'round',
                 'line-cap': 'round'
@@ -176,24 +209,16 @@ export function initVectorContours(map) {
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
                 'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
-                'line-opacity': [
-                    'case',
-                    ['==', ['get', 'isIntermediate'], true],
-                    [
-                        'interpolate', ['linear'], ['zoom'],
-                        4.0, 0.0,
-                        5.5, ['coalesce', ['get', 'opacity'], 0.85]
-                    ],
-                    ['coalesce', ['get', 'opacity'], 0.95]
-                ]
+                'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
             }
         });
 
-        // 2. Inline Contour Labels (with GPU 4mb/2mb zoom hierarchy for prate)
+        // 2. Inline Contour Labels
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
             source: SOURCE_ID,
+            filter: ['==', ['get', 'step'], currentVisibleStep],
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
@@ -205,19 +230,19 @@ export function initVectorContours(map) {
             paint: {
                 'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                 'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
-                'text-opacity': [
-                    'case',
-                    ['==', ['get', 'isIntermediate'], true],
-                    [
-                        'interpolate', ['linear'], ['zoom'],
-                        4.2, 0.0,
-                        5.5, 1.0
-                    ],
-                    1.0
-                ]
+                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
             }
         });
+
+        // If master contours are already in RAM, populate source immediately
+        if (activeMasterContours) {
+            const source = map.getSource(SOURCE_ID);
+            if (source) {
+                const allStepsGeoJson = buildAllStepsGeoJson(activeMasterContours);
+                source.setData(allStepsGeoJson);
+                applyGpuStepFilter(currentVisibleStep);
+            }
+        }
     }
 }
 
@@ -230,7 +255,6 @@ export function clearVectorContours() {
     activeMasterKey = null;
     fetchPromise = null;
     currentVisibleStep = 0;
-    stepCache.clear();
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
     if (source) {
@@ -295,10 +319,15 @@ async function loadMasterContourFile() {
                             }
                         }
 
-                        // 🌟 Renders ONLY the initial frame immediately without waiting for other steps
+                        // 🌟 Upload all steps to the GeoJSON source ONCE
                         if (mapInstance) {
                             initVectorContours(mapInstance);
-                            renderStep(currentVisibleStep);
+                            const source = mapInstance.getSource(SOURCE_ID);
+                            if (source) {
+                                const allStepsGeoJson = buildAllStepsGeoJson(activeMasterContours);
+                                source.setData(allStepsGeoJson);
+                                applyGpuStepFilter(currentVisibleStep);
+                            }
                         }
 
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
@@ -445,62 +474,24 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 On-demand step renderer: decodes first time, instant from memory cache on return
+ * 🌟 Instant 0.00ms GPU Step Switcher: changes the layer filter on the GPU with no setData lag
  */
-export async function updateVectorContours(step) {
-    if (!mapInstance) return;
-
+export function updateVectorContours(step) {
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     currentVisibleStep = stepNum;
 
-    if (!mapInstance.getSource(SOURCE_ID)) {
-        initVectorContours(mapInstance);
-    }
+    // Apply the filter on the GPU immediately (0.0ms)
+    applyGpuStepFilter(stepNum);
 
-    const { key } = getMasterKeyComponents();
-
-    // If master data is already in RAM, render or pull from cache immediately
-    if (activeMasterContours && activeMasterKey === key) {
-        renderStep(stepNum);
-        return;
-    }
-
-    // Initial load: fetch file and render ONLY this current frame
-    const masterData = await loadMasterContourFile();
-    if (masterData) {
-        renderStep(currentVisibleStep);
+    // If master contours haven't been fetched yet, start background download
+    if (!activeMasterContours && !fetchPromise) {
+        loadMasterContourFile();
     }
 }
 
 /**
- * 🌟 Progressive Background Pre-warmer: warms up remaining steps in idle slices without blocking UI
+ * 🌟 BACKGROUND CONTOUR PRELOADER
  */
 export async function preloadAllContours() {
-    const masterData = await loadMasterContourFile();
-    if (!masterData || !masterData.steps || !activeContourBinary) return;
-
-    const steps = Object.keys(masterData.steps);
-    let idx = 0;
-
-    function warmNextSlice() {
-        if (stateManager.activeMode !== 'modelViewer') return;
-        const limit = Math.min(idx + 5, steps.length);
-
-        for (; idx < limit; idx++) {
-            const stepNum = parseInt(steps[idx], 10);
-            if (isNaN(stepNum)) continue;
-            if (!stepCache.has(stepNum)) {
-                const decoded = binaryStepToGeoJson(stepNum, masterData);
-                if (decoded) {
-                    stepCache.set(stepNum, themeContourFeatures(decoded));
-                }
-            }
-        }
-
-        if (idx < steps.length) {
-            setTimeout(warmNextSlice, 25);
-        }
-    }
-
-    setTimeout(warmNextSlice, 150);
+    await loadMasterContourFile();
 }
