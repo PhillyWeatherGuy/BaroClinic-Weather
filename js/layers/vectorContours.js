@@ -6,7 +6,7 @@ let activeMasterContours = null;
 let activeMasterKey = null;
 let fetchPromise = null;
 let activeContourBinary = null;
-let modelsConfig = null;
+let modelsConfigCache = null;
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -14,72 +14,23 @@ const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
-// 🌟 Fetch models.json immediately so it is cached in memory
-async function loadModelsConfig() {
-    if (!modelsConfig) {
-        try {
-            const resp = await fetch('./config/models.json');
-            if (resp.ok) {
-                modelsConfig = await resp.json();
-            }
-        } catch (e) {
-            console.warn("Could not load config/models.json:", e);
+/**
+ * 🌟 Direct, fresh fetch of config/models.json (with cache-buster to prevent Cloudflare Pages 304 caching)
+ */
+async function getModelsConfig() {
+    if (modelsConfigCache) return modelsConfigCache;
+    try {
+        const resp = await fetch(`./config/models.json?v=${Date.now()}`, { cache: 'no-store' });
+        if (resp.ok) {
+            modelsConfigCache = await resp.json();
         }
+    } catch (e) {
+        console.warn("Could not load config/models.json:", e);
     }
-    return modelsConfig;
+    return modelsConfigCache;
 }
 
-// 🌟 Synchronous, fail-safe getter: reads models.json directly with built-in fallbacks
-function getContourConfig(paramId) {
-    const id = (paramId || stateManager.activeParam || '2t').toLowerCase();
-    
-    // 1. Read directly from models.json if loaded
-    if (modelsConfig?.parameters?.[id]?.contours) {
-        return modelsConfig.parameters[id].contours;
-    }
-    if (stateManager.paramConfig?.id === id && stateManager.paramConfig?.contours) {
-        return stateManager.paramConfig.contours;
-    }
-
-    // 2. Safe initial fallback matching models.json (prevents any startup race condition)
-    if (id === '2t') {
-        return {
-            source_param: "2t",
-            color_light: "#4169E1",
-            color_dark: "#4169E1",
-            width: 2.0,
-            opacity: 0.95,
-            unit_label: "temperature",
-            special_lines: [{ target: 273.15, color: "#4169E1", width: 2.0 }]
-        };
-    }
-    if (id === 'pva') {
-        return {
-            source_param: "z500",
-            color_light: "#000000",
-            color_dark: "#ffffff",
-            width: 1.6,
-            opacity: 0.9,
-            glow: true,
-            glow_dark: "#00c8ff",
-            glow_light: "#007c91",
-            special_lines: [{ target: 540, color: "#4169E1", width: 2.4 }]
-        };
-    }
-    if (id === 'prate') {
-        return {
-            source_param: "prate",
-            color_light: "#000000",
-            color_dark: "#ffffff",
-            width: 1.6,
-            opacity: 0.9,
-            zoom_filter: { coarse_interval: 4, min_zoom: 4.5 }
-        };
-    }
-    return null;
-}
-
-function contourZoomWidthExpression(baseWidth, isGlow = false) {
+function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     const expression = ['interpolate', ['linear'], ['zoom']];
     const zoomStops = [[2, 0.9, 2.4], [5, 1.0, 2.6], [8, 1.4, 3.2], [11, 1.8, 4.0], [14, 2.1, 4.8]];
 
@@ -94,72 +45,74 @@ function contourZoomWidthExpression(baseWidth, isGlow = false) {
 }
 
 /**
- * 🌟 Purely Config-Driven Styler: plots whatever is in config/models.json
+ * 🌟 Purely Config-Driven Styler: plots whatever design rules exist in config/models.json
  */
-function themeContourFeatures(featureCollection) {
+function themeContourFeatures(featureCollection, cfg) {
     if (!featureCollection || !Array.isArray(featureCollection.features)) {
         return featureCollection;
     }
-
-    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    const cfg = getContourConfig(activeParamId);
     if (!cfg) {
         return EMPTY_GEOJSON;
     }
 
-    const isDarkTheme = (stateManager.currentTheme === 'dark');
+    // Directly checks the UI pill button to guarantee light/dark mode matches your screen 100%
+    const themeBtn = typeof document !== 'undefined' ? document.getElementById('btn-theme-toggle') : null;
+    const isDarkTheme = themeBtn
+        ? !themeBtn.classList.contains('light-mode')
+        : (stateManager.currentTheme === 'dark');
+
     const baseColor = isDarkTheme ? (cfg.color_dark || '#ffffff') : (cfg.color_light || '#000000');
     const hasGlow = Boolean(cfg.glow);
-    const glowColor = hasGlow ? (isDarkTheme ? (cfg.glow_dark || '#00c8ff') : (cfg.glow_light || '#007c91')) : null;
+    const glowColor = hasGlow ? (isDarkTheme ? (cfg.glow_dark || '#00c8ff') : (cfg.glow_light || '#ffffff')) : null;
     const coarseInterval = cfg.zoom_filter?.coarse_interval;
 
     for (const feature of featureCollection.features) {
         if (!feature || !feature.properties) continue;
 
         const originalName = String(feature.properties.name || '');
-        const numVal = parseFloat(originalName);
+        const rawLevel = parseFloat(originalName);
 
-        // 1. Dynamic unit formatting for temperature
+        // 1. Dynamic unit formatting from models.json (e.g. 273.15 -> 32°F / 0°C)
         if (cfg.unit_label === 'temperature') {
             const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
-            if (numVal === 273.15 || /freez|273\.15/i.test(originalName)) {
+            if (rawLevel === 273.15 || /freez|273\.15/i.test(originalName)) {
                 feature.properties.name = freezingLabel;
             }
         }
 
         // 2. Zoom interval filtering (e.g. for MSLP isobars, hide non-4 mb lines when zoomed out)
-        const isIntermediate = Boolean(coarseInterval && !isNaN(numVal) && (Math.round(numVal) % coarseInterval !== 0));
+        const isIntermediate = Boolean(coarseInterval && !isNaN(rawLevel) && (Math.round(rawLevel) % coarseInterval !== 0));
         feature.properties.isIntermediate = isIntermediate;
 
-        // 3. Styling from config
-        let strokeColor = baseColor;
-        let strokeWidth = cfg.width || 1.6;
-        let strokeOpacity = cfg.opacity || 0.95;
+        // 3. Styling from models.json
+        let featureColor = baseColor;
+        let featureWidth = cfg.width || 1.6;
+        let featureOpacity = cfg.opacity || 0.95;
         let isSpecial = false;
 
-        // 4. Special target lines from config (e.g. 540 in blue, 273.15 in blue)
+        // 4. Special target lines from models.json (e.g. 540 in blue, 273.15 in blue)
         if (cfg.special_lines && Array.isArray(cfg.special_lines)) {
             for (const special of cfg.special_lines) {
-                const matches = (!isNaN(numVal) && Math.abs(numVal - special.target) < 0.1) ||
-                                (special.target === 273.15 && /freez|273\.15/i.test(originalName));
+                const matches = (!isNaN(rawLevel) && Math.abs(rawLevel - special.target) < 0.1) ||
+                                (special.target === 273.15 && /freez|273\.15|0°C|32°F/i.test(originalName));
                 if (matches) {
-                    if (special.color) strokeColor = special.color;
-                    if (special.width) strokeWidth = special.width;
-                    if (special.opacity) strokeOpacity = special.opacity;
+                    if (special.color) featureColor = special.color;
+                    if (special.width) featureWidth = special.width;
+                    if (special.opacity) featureOpacity = special.opacity;
                     isSpecial = true;
                     break;
                 }
             }
         }
 
-        feature.properties.color = strokeColor;
-        feature.properties.stroke = strokeColor;
-        feature.properties.width = strokeWidth;
-        feature.properties.opacity = strokeOpacity;
+        feature.properties.color = featureColor;
+        feature.properties.stroke = featureColor;
+        feature.properties.width = featureWidth;
+        feature.properties.opacity = featureOpacity;
 
         // 5. Casing / Glow
         if (hasGlow) {
-            feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
+            feature.properties.outlineColor = isDarkTheme ? glowColor : (cfg.glow_light || '#ffffff');
             feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
             feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
         } else {
@@ -167,7 +120,7 @@ function themeContourFeatures(featureCollection) {
         }
 
         feature.properties.labelColor = isSpecial
-            ? strokeColor
+            ? featureColor
             : (baseColor === '#ffffff' ? '#000000' : '#ffffff');
         feature.properties.labelHaloColor = baseColor;
     }
@@ -196,13 +149,13 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['get', 'outlineColor'],
-                'line-width': contourZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
+                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
                 'line-opacity': ['coalesce', ['get', 'outlineOpacity'], 0.8],
                 'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
             }
         });
 
-        // 1. Smooth Vector Line Layer (with Zoom-dependent 2mb/4mb isobar fade)
+        // 1. Smooth Vector Line Layer
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
@@ -213,7 +166,7 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': contourZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
+                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
                 'line-opacity': [
                     'case',
                     ['==', ['get', 'isIntermediate'], true],
@@ -227,7 +180,7 @@ export function initVectorContours(map) {
             }
         });
 
-        // 2. Inline Contour Labels (with Zoom-dependent 2mb/4mb isobar fade)
+        // 2. Inline Contour Labels
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
@@ -280,15 +233,12 @@ async function loadMasterContourFile() {
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
 
-    // 🌟 Read source_param directly from config (z500 for pva, prate for prate, 2t for 2t)
-    await loadModelsConfig();
-    const cfg = getContourConfig(param);
-    if (!cfg) {
-        return null;
-    }
+    const modelsData = await getModelsConfig();
+    const cfg = modelsData?.parameters?.[param]?.contours || stateManager.paramConfig?.contours || null;
 
-    const contourParam = (cfg.source_param || param).toLowerCase();
-    const currentKey = `${model}_${contourParam}_${targetDate}_${runCycle}`;
+    // Resolves source_param from config, falling back safely if config isn't populated
+    const sourceParam = (cfg?.source_param || (param === 'pva' ? 'z500' : param)).toLowerCase();
+    const currentKey = `${model}_${sourceParam}_${targetDate}_${runCycle}`;
 
     if (activeMasterKey === currentKey && activeMasterContours) {
         return activeMasterContours;
@@ -302,12 +252,15 @@ async function loadMasterContourFile() {
 
     const urlsToTry = [];
     if (targetDate && runCycle) {
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${sourceParam}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
     }
-    urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_contours.json?v=${Date.now()}`);
+    urlsToTry.push(`${stateManager.BASE_URL}${model}_${sourceParam}_contours.json?v=${Date.now()}`);
 
-    if (contourParam === '2t' || contourParam.includes('temp')) {
+    if (sourceParam === '2t' || sourceParam.includes('temp')) {
         urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?v=${Date.now()}`);
+    }
+    if (param === 'pva') {
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
     }
 
     fetchPromise = (async () => {
@@ -480,10 +433,11 @@ export async function updateVectorContours(step) {
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
 
-    await loadModelsConfig();
-    const activeId = (stateManager.paramConfig?.id || stateManager.activeParam || '2t').toLowerCase();
-    const cfg = getContourConfig(activeId);
+    const paramId = (stateManager.paramConfig?.id || stateManager.activeParam || '2t').toLowerCase();
+    const modelsData = await getModelsConfig();
+    const cfg = modelsData?.parameters?.[paramId]?.contours || stateManager.paramConfig?.contours || null;
 
+    // If models.json explicitly has no contours for this param (tp, pwat), clear the layer
     if (!cfg) {
         source.setData(EMPTY_GEOJSON);
         return;
@@ -500,7 +454,7 @@ export async function updateVectorContours(step) {
 
         if (stepData) {
             const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-            const themedStepData = themeContourFeatures(decodedStepData);
+            const themedStepData = themeContourFeatures(decodedStepData, cfg);
             source.setData(themedStepData);
             return;
         }
