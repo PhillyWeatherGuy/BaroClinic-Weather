@@ -75,6 +75,20 @@ const DARK_PRECIP_HEX = [
     '#66E0FF', '#4DDBFF', '#33D6FF', '#1AD1FF'
 ];
 
+// ❄️ Dark Mode Total Snowfall (10:1) Levels (Inches)
+const DARK_ASNOW_LEVELS = [
+    0.1, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0,
+    12.0, 15.0, 18.0, 21.0, 24.0, 28.0, 32.0, 36.0, 42.0, 48.0, 60.0
+];
+
+// ❄️ Dark Mode Total Snowfall (10:1) Radar Glow Colors
+const SNOW_RADAR_GLOW = [
+  "#364983", "#334d92", "#3052a0", "#2a56af", "#3557be", "#4658c9",
+  "#5658d2", "#6558db", "#7558e2", "#8657e7", "#9855ea", "#aa54ea",
+  "#ba55e6", "#ca57e1", "#d958db", "#e65bd6", "#f160cf", "#f66ec6",
+  "#fe85c6", "#ffa6d1", "#ffc8e0", "#ffecf3"
+];
+
 // 💧 Dark Mode PWAT Levels (Inches)
 const DARK_PWAT_LEVELS = [
     0.00, 0.05, 0.11, 0.16, 0.21, 0.26, 0.31, 0.37, 0.42, 0.47,
@@ -115,7 +129,7 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
             }
         }
         
-        let colorIdx = 0;
+        let colorIdx = -1;
         for (let k = 0; k < levels.length - 1; k++) {
             if (physicalVal >= levels[k] && physicalVal < levels[k + 1]) {
                 colorIdx = k;
@@ -125,7 +139,11 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
                 colorIdx = colors.length - 1;
             }
         }
-        palette.push(colors[colorIdx] || colors[colors.length - 1]);
+        if (colorIdx === -1) {
+            palette.push("transparent");
+        } else {
+            palette.push(colors[colorIdx] || colors[colors.length - 1]);
+        }
     }
     return palette;
 }
@@ -135,6 +153,14 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     DARK_PRECIP_HEX, 
     [0.0, 1.0, 10.0, 30.0],
     [0, 100, 200, 255], 
+    256
+);
+
+export const ASNOW_PALETTE = createNonLinearPrecipPalette(
+    DARK_ASNOW_LEVELS,
+    SNOW_RADAR_GLOW,
+    [0.0, 1.0, 10.0, 50.0],
+    [0, 100, 200, 255],
     256
 );
 
@@ -156,6 +182,9 @@ export function getPaletteForParameter(paramId) {
     const id = (paramId || '').toLowerCase();
     if (id === 'prate') {
         return PRATE_PALETTE;
+    }
+    if (id === 'asnow' || id.includes('snow') || id === 'sf') {
+        return ASNOW_PALETTE;
     }
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
