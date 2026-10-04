@@ -13,14 +13,6 @@ const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
-function getPvaContourThemeColor() {
-    return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
-}
-
-function getPvaContourGlowColor() {
-    return stateManager.currentTheme === 'dark' ? '#00c8ff' : '#007c91';
-}
-
 function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     const expression = ['interpolate', ['linear'], ['zoom']];
     const zoomStops = [[2, 0.9, 2.4], [5, 1.0, 2.6], [8, 1.4, 3.2], [11, 1.8, 4.0], [14, 2.1, 4.8]];
@@ -40,39 +32,76 @@ function themeContourFeatures(featureCollection) {
         return featureCollection;
     }
 
-    const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    if (activeParamId === '2t') {
-        const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
-        for (const feature of featureCollection.features) {
-            const name = String(feature?.properties?.name || '');
-            if (feature?.properties && (Number(name) === 273.15 || /freez|273\.15/i.test(name))) {
+    // 🌟 Read contour configuration directly from models.json
+    const cfg = stateManager.paramConfig?.contours;
+    if (!cfg) {
+        return EMPTY_GEOJSON;
+    }
+
+    const isDark = (stateManager.currentTheme === 'dark');
+    const baseColor = isDark ? (cfg.color_dark || '#ffffff') : (cfg.color_light || '#000000');
+    const hasGlow = Boolean(cfg.glow);
+    const glowColor = hasGlow ? (isDark ? (cfg.glow_dark || '#00c8ff') : (cfg.glow_light || '#ffffff')) : null;
+    const coarseInterval = cfg.zoom_filter?.coarse_interval;
+
+    for (const feature of featureCollection.features) {
+        if (!feature || !feature.properties) continue;
+
+        const nameStr = String(feature.properties.name || '');
+        const nameVal = parseFloat(nameStr);
+
+        // 1. Dynamic unit formatting for temperature
+        if (cfg.unit_label === 'temperature') {
+            const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
+            if (nameVal === 273.15 || /freez|273\.15/i.test(nameStr)) {
                 feature.properties.name = freezingLabel;
             }
         }
-        return featureCollection;
-    }
 
-    if (activeParamId !== 'pva') {
-        return featureCollection;
-    }
+        // 2. Zoom interval filtering (e.g. 4 mb vs 2 mb for MSLP)
+        const isIntermediate = Boolean(coarseInterval && !isNaN(nameVal) && (Math.round(nameVal) % coarseInterval !== 0));
+        feature.properties.isIntermediate = isIntermediate;
 
-    const contourColor = getPvaContourThemeColor();
-    const glowColor = getPvaContourGlowColor();
-    const isDarkTheme = stateManager.currentTheme === 'dark';
-    for (const feature of featureCollection.features) {
-        if (!feature || !feature.properties) continue;
-        const is540Line = Number(feature.properties.name) === 540;
-        const featureColor = is540Line ? '#4169E1' : contourColor;
-        feature.properties.color = featureColor;
-        feature.properties.stroke = featureColor;
-        feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
-        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
-        feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
-        feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
-        feature.properties.labelHaloColor = contourColor;
-        if (is540Line) {
-            feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
+        // 3. Base styles from models.json
+        let strokeColor = baseColor;
+        let strokeWidth = cfg.width || 1.6;
+        let strokeOpacity = cfg.opacity || 0.9;
+
+        // 4. Special target line overrides (e.g. 540 line in heights or 273.15 in temp)
+        if (cfg.special_lines && Array.isArray(cfg.special_lines)) {
+            for (const special of cfg.special_lines) {
+                if (!isNaN(nameVal) && Math.abs(nameVal - special.target) < 0.1) {
+                    if (special.color) strokeColor = special.color;
+                    if (special.width) strokeWidth = special.width;
+                    if (special.opacity) strokeOpacity = special.opacity;
+                    break;
+                }
+            }
         }
+
+        if (isIntermediate) {
+            strokeWidth = Math.max(1.0, strokeWidth - 0.4);
+            strokeOpacity = Math.max(0.6, strokeOpacity - 0.15);
+        }
+
+        feature.properties.color = strokeColor;
+        feature.properties.stroke = strokeColor;
+        feature.properties.width = strokeWidth;
+        feature.properties.opacity = strokeOpacity;
+
+        // 5. Casing & Glow
+        if (hasGlow && glowColor) {
+            feature.properties.outlineColor = glowColor;
+            feature.properties.outlineOpacity = isDark ? 0.8 : 0.95;
+            feature.properties.outlineBlur = isDark ? 2.0 : 0;
+        } else {
+            delete feature.properties.outlineColor;
+        }
+
+        feature.properties.labelColor = (strokeColor !== baseColor)
+            ? strokeColor
+            : (baseColor === '#ffffff' ? '#ffffff' : '#000000');
+        feature.properties.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
     }
 
     return featureCollection;
@@ -87,6 +116,7 @@ export function initVectorContours(map) {
             data: EMPTY_GEOJSON
         });
 
+        // Casing / Glow Layer
         map.addLayer({
             id: CASING_LAYER_ID,
             type: 'line',
@@ -104,7 +134,7 @@ export function initVectorContours(map) {
             }
         });
 
-        // 1. Smooth Vector Line Layer
+        // 1. Smooth Vector Line Layer (with Zoom-dependent 2mb/4mb isobar fade)
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
@@ -116,11 +146,20 @@ export function initVectorContours(map) {
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
                 'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
-                'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
+                'line-opacity': [
+                    'case',
+                    ['boolean', ['get', 'isIntermediate'], false],
+                    [
+                        'interpolate', ['linear'], ['zoom'],
+                        4.0, 0.0,
+                        5.5, ['coalesce', ['get', 'opacity'], 0.8]
+                    ],
+                    ['coalesce', ['get', 'opacity'], 0.95]
+                ]
             }
         });
 
-        // 2. Inline Contour Labels ("32°F Freezing Line", "540", etc.)
+        // 2. Inline Contour Labels (with Zoom-dependent 2mb/4mb isobar fade)
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
@@ -128,8 +167,7 @@ export function initVectorContours(map) {
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
-                'text-size': ['case', ['has', 'labelColor'], 14, 11],
-                // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
+                'text-size': ['case', ['has', 'labelColor'], 13, 11],
                 'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
                 'text-padding': 12
@@ -137,7 +175,17 @@ export function initVectorContours(map) {
             paint: {
                 'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                 'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
+                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
+                'text-opacity': [
+                    'case',
+                    ['boolean', ['get', 'isIntermediate'], false],
+                    [
+                        'interpolate', ['linear'], ['zoom'],
+                        4.2, 0.0,
+                        5.5, 1.0
+                    ],
+                    1.0
+                ]
             }
         });
     }
@@ -159,17 +207,17 @@ export function clearVectorContours() {
 }
 
 /**
- * 🌟 Helper to fetch the 1 Master Contour JSON file for the active run
+ * 🌟 Helper to fetch the Master Contour JSON file for the active run
  */
 async function loadMasterContourFile() {
     const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
-    
-    // 🌟 Use clean parameter ID (e.g. '2t', 'pva') instead of long display names
     const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
 
-    const currentKey = `${model}_${param}_${targetDate}_${runCycle}`;
+    // 🌟 Read source_param from models.json (e.g. 'z500' for pva, 'prate' for prate, '2t' for 2t)
+    const contourParam = (stateManager.paramConfig?.contours?.source_param || param).toLowerCase();
+    const currentKey = `${model}_${contourParam}_${targetDate}_${runCycle}`;
 
     if (activeMasterKey === currentKey && activeMasterContours) {
         return activeMasterContours;
@@ -182,17 +230,12 @@ async function loadMasterContourFile() {
     activeMasterKey = currentKey;
 
     const urlsToTry = [];
-    if (param === 'pva') {
-        if (targetDate && runCycle) {
-            urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
-        }
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
-    }
     if (targetDate && runCycle) {
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
     }
-    urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?v=${Date.now()}`);
-    if (param === '2t' || param.includes('temp')) {
+    urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_contours.json?v=${Date.now()}`);
+
+    if (contourParam === '2t') {
         urlsToTry.push(`${stateManager.BASE_URL}${model}_tmp2m_contours.json?v=${Date.now()}`);
     }
 
