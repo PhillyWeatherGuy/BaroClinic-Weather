@@ -6,6 +6,7 @@ let activeMasterContours = null;
 let activeMasterKey = null;
 let fetchPromise = null;
 let activeContourBinary = null;
+let modelsConfigCache = null;
 
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
@@ -13,7 +14,32 @@ const LINE_LAYER_ID = 'contour-master-line-layer';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
 
-function pvaZoomWidthExpression(baseWidth, isGlow = false) {
+/**
+ * 🌟 Direct, race-condition-free loader for config/models.json
+ */
+async function getParamContourConfig() {
+    if (stateManager.paramConfig?.contours) {
+        return stateManager.paramConfig.contours;
+    }
+    if (!modelsConfigCache) {
+        try {
+            const resp = await fetch('./config/models.json');
+            if (resp.ok) {
+                modelsConfigCache = await resp.json();
+            }
+        } catch (e) {
+            console.warn("Could not load config/models.json:", e);
+        }
+    }
+    const currentParam = stateManager.paramConfig?.id || stateManager.activeParam || '2t';
+    const paramObj = modelsConfigCache?.parameters?.[currentParam];
+    if (paramObj && !stateManager.paramConfig) {
+        stateManager.paramConfig = paramObj;
+    }
+    return paramObj?.contours || null;
+}
+
+function contourZoomWidthExpression(baseWidth, isGlow = false) {
     const expression = ['interpolate', ['linear'], ['zoom']];
     const zoomStops = [[2, 0.9, 2.4], [5, 1.0, 2.6], [8, 1.4, 3.2], [11, 1.8, 4.0], [14, 2.1, 4.8]];
 
@@ -27,15 +53,12 @@ function pvaZoomWidthExpression(baseWidth, isGlow = false) {
     return expression;
 }
 
-function themeContourFeatures(featureCollection) {
-    if (!featureCollection || !Array.isArray(featureCollection.features)) {
+/**
+ * 🌟 100% Config-Driven Styler: reads directly from models.json contours block
+ */
+function themeContourFeatures(featureCollection, cfg) {
+    if (!featureCollection || !Array.isArray(featureCollection.features) || !cfg) {
         return featureCollection;
-    }
-
-    // 🌟 Read contour configuration directly from models.json
-    const cfg = stateManager.paramConfig?.contours;
-    if (!cfg) {
-        return EMPTY_GEOJSON;
     }
 
     const isDark = (stateManager.currentTheme === 'dark');
@@ -50,7 +73,7 @@ function themeContourFeatures(featureCollection) {
         const nameStr = String(feature.properties.name || '');
         const nameVal = parseFloat(nameStr);
 
-        // 1. Dynamic unit formatting for temperature
+        // 1. Dynamic unit formatting (e.g. 32°F / 0°C for temperature)
         if (cfg.unit_label === 'temperature') {
             const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
             if (nameVal === 273.15 || /freez|273\.15/i.test(nameStr)) {
@@ -58,7 +81,7 @@ function themeContourFeatures(featureCollection) {
             }
         }
 
-        // 2. Zoom interval filtering (e.g. 4 mb vs 2 mb for MSLP)
+        // 2. Zoom interval filtering (e.g. 4 mb vs 2 mb for MSLP isobars)
         const isIntermediate = Boolean(coarseInterval && !isNaN(nameVal) && (Math.round(nameVal) % coarseInterval !== 0));
         feature.properties.isIntermediate = isIntermediate;
 
@@ -89,7 +112,7 @@ function themeContourFeatures(featureCollection) {
         feature.properties.width = strokeWidth;
         feature.properties.opacity = strokeOpacity;
 
-        // 5. Casing & Glow
+        // 5. Casing & Glow (only applied if models.json specifies "glow": true)
         if (hasGlow && glowColor) {
             feature.properties.outlineColor = glowColor;
             feature.properties.outlineOpacity = isDark ? 0.8 : 0.95;
@@ -98,6 +121,7 @@ function themeContourFeatures(featureCollection) {
             delete feature.properties.outlineColor;
         }
 
+        // Labels
         feature.properties.labelColor = (strokeColor !== baseColor)
             ? strokeColor
             : (baseColor === '#ffffff' ? '#ffffff' : '#000000');
@@ -128,13 +152,13 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['get', 'outlineColor'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
+                'line-width': contourZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
                 'line-opacity': ['coalesce', ['get', 'outlineOpacity'], 0.8],
                 'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
             }
         });
 
-        // 1. Smooth Vector Line Layer (with Zoom-dependent 2mb/4mb isobar fade)
+        // 1. Smooth Vector Line Layer
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
@@ -145,7 +169,7 @@ export function initVectorContours(map) {
             },
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
-                'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
+                'line-width': contourZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
                 'line-opacity': [
                     'case',
                     ['boolean', ['get', 'isIntermediate'], false],
@@ -159,7 +183,7 @@ export function initVectorContours(map) {
             }
         });
 
-        // 2. Inline Contour Labels (with Zoom-dependent 2mb/4mb isobar fade)
+        // 2. Inline Contour Labels
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
@@ -191,9 +215,6 @@ export function initVectorContours(map) {
     }
 }
 
-/**
- * 🌟 AIRTIGHT UNLOADER: Wipes master RAM cache & clears vector layer on parameter/model switch
- */
 export function clearVectorContours() {
     activeMasterContours = null;
     activeContourBinary = null;
@@ -207,7 +228,7 @@ export function clearVectorContours() {
 }
 
 /**
- * 🌟 Helper to fetch the Master Contour JSON file for the active run
+ * 🌟 Helper to fetch the Master Contour JSON file driven by models.json
  */
 async function loadMasterContourFile() {
     const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
@@ -215,8 +236,13 @@ async function loadMasterContourFile() {
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
 
-    // 🌟 Read source_param from models.json (e.g. 'z500' for pva, 'prate' for prate, '2t' for 2t)
-    const contourParam = (stateManager.paramConfig?.contours?.source_param || param).toLowerCase();
+    const contourCfg = await getParamContourConfig();
+    if (!contourCfg) {
+        return null;
+    }
+
+    // 🌟 Uses source_param defined in models.json (e.g. 'z500' for pva, 'prate' for prate, '2t' for 2t)
+    const contourParam = (contourCfg.source_param || param).toLowerCase();
     const currentKey = `${model}_${contourParam}_${targetDate}_${runCycle}`;
 
     if (activeMasterKey === currentKey && activeMasterContours) {
@@ -400,7 +426,7 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 Instant 0.00ms Vector Contour Renderer from Master RAM Object
+ * 🌟 Instant Vector Contour Renderer driven by models.json
  */
 export async function updateVectorContours(step) {
     if (!mapInstance) return;
@@ -409,10 +435,16 @@ export async function updateVectorContours(step) {
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
 
+    // 🌟 Read config directly from models.json
+    const contourCfg = await getParamContourConfig();
+    if (!contourCfg) {
+        source.setData(EMPTY_GEOJSON);
+        return;
+    }
+
     const masterData = await loadMasterContourFile();
 
     if (masterData && masterData.steps) {
-        // 🌟 Support all common step key formats ("0", "000", "F000", 0)
         const stepData = masterData.steps[String(stepNum)] ||
                          masterData.steps[String(stepNum).padStart(3, '0')] ||
                          masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
@@ -421,7 +453,7 @@ export async function updateVectorContours(step) {
 
         if (stepData) {
             const decodedStepData = binaryStepToGeoJson(stepNum, masterData) || stepData;
-            const themedStepData = themeContourFeatures(decodedStepData);
+            const themedStepData = themeContourFeatures(decodedStepData, contourCfg);
             source.setData(themedStepData);
             return;
         }
@@ -429,9 +461,6 @@ export async function updateVectorContours(step) {
     source.setData(EMPTY_GEOJSON);
 }
 
-/**
- * 🌟 BACKGROUND CONTOUR PRELOADER
- */
 export async function preloadAllContours() {
     await loadMasterContourFile();
 }
