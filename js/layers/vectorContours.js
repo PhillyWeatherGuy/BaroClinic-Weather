@@ -41,8 +41,6 @@ function themeContourFeatures(featureCollection) {
     }
 
     const activeParamId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    
-    // 1. 2m Temperature (Freezing Line)
     if (activeParamId === '2t') {
         const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
         for (const feature of featureCollection.features) {
@@ -54,50 +52,27 @@ function themeContourFeatures(featureCollection) {
         return featureCollection;
     }
 
-    // 2. Surface Precipitation Rate (Uniform MSLP Isobars with 4mb/2mb Zoom Hierarchy)
-    if (activeParamId === 'prate') {
-        const isDarkTheme = stateManager.currentTheme === 'dark';
-        const mslpColor = isDarkTheme ? '#ffffff' : '#000000';
-        const haloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
-
-        for (const feature of featureCollection.features) {
-            if (!feature || !feature.properties) continue;
-            const val = Number(feature.properties.name);
-            // Intermediate 2 mb lines (e.g. 1002, 1006, 1010, 1014) are not divisible by 4
-            const isIntermediate = !isNaN(val) && (Math.round(val) % 4 !== 0);
-
-            feature.properties.isIntermediate = isIntermediate;
-            feature.properties.color = mslpColor;
-            feature.properties.stroke = mslpColor;
-            feature.properties.labelColor = mslpColor;
-            feature.properties.labelHaloColor = haloColor;
-            feature.properties.width = isIntermediate ? 1.2 : 1.8;
-            feature.properties.opacity = isIntermediate ? 0.8 : 0.95;
-        }
+    if (activeParamId !== 'pva') {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity
-    if (activeParamId === 'pva') {
-        const contourColor = getPvaContourThemeColor();
-        const glowColor = getPvaContourGlowColor();
-        const isDarkTheme = stateManager.currentTheme === 'dark';
-        for (const feature of featureCollection.features) {
-            if (!feature || !feature.properties) continue;
-            const is540Line = Number(feature.properties.name) === 540;
-            const featureColor = is540Line ? '#4169E1' : contourColor;
-            feature.properties.color = featureColor;
-            feature.properties.stroke = featureColor;
-            feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
-            feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
-            feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
-            feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
-            feature.properties.labelHaloColor = contourColor;
-            if (is540Line) {
-                feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
-            }
+    const contourColor = getPvaContourThemeColor();
+    const glowColor = getPvaContourGlowColor();
+    const isDarkTheme = stateManager.currentTheme === 'dark';
+    for (const feature of featureCollection.features) {
+        if (!feature || !feature.properties) continue;
+        const is540Line = Number(feature.properties.name) === 540;
+        const featureColor = is540Line ? '#4169E1' : contourColor;
+        feature.properties.color = featureColor;
+        feature.properties.stroke = featureColor;
+        feature.properties.outlineColor = isDarkTheme ? glowColor : '#ffffff';
+        feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0.95;
+        feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
+        feature.properties.labelColor = is540Line ? featureColor : (contourColor === '#ffffff' ? '#000000' : '#ffffff');
+        feature.properties.labelHaloColor = contourColor;
+        if (is540Line) {
+            feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
         }
-        return featureCollection;
     }
 
     return featureCollection;
@@ -129,7 +104,7 @@ export function initVectorContours(map) {
             }
         });
 
-        // 1. Smooth Vector Line Layer (with Zoom-dependent 2mb/4mb isobar fade)
+        // 1. Smooth Vector Line Layer
         map.addLayer({
             id: LINE_LAYER_ID,
             type: 'line',
@@ -141,20 +116,11 @@ export function initVectorContours(map) {
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
                 'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
-                'line-opacity': [
-                    'case',
-                    ['boolean', ['get', 'isIntermediate'], false],
-                    [
-                        'interpolate', ['linear'], ['zoom'],
-                        4.0, 0.0,
-                        5.5, ['coalesce', ['get', 'opacity'], 0.8]
-                    ],
-                    ['coalesce', ['get', 'opacity'], 0.95]
-                ]
+                'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
             }
         });
 
-        // 2. Inline Contour Labels (with Zoom-dependent 2mb/4mb isobar fade)
+        // 2. Inline Contour Labels ("32°F Freezing Line", "540", etc.)
         map.addLayer({
             id: LABEL_LAYER_ID,
             type: 'symbol',
@@ -162,7 +128,8 @@ export function initVectorContours(map) {
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
-                'text-size': ['case', ['has', 'labelColor'], 13, 11],
+                'text-size': ['case', ['has', 'labelColor'], 14, 11],
+                // 🌟 Use Noto Sans Bold to avoid 404 on OpenFreeMap
                 'text-font': ['Noto Sans Bold'],
                 'text-max-angle': 45,
                 'text-padding': 12
@@ -170,17 +137,7 @@ export function initVectorContours(map) {
             paint: {
                 'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                 'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
-                'text-opacity': [
-                    'case',
-                    ['boolean', ['get', 'isIntermediate'], false],
-                    [
-                        'interpolate', ['linear'], ['zoom'],
-                        4.2, 0.0,
-                        5.5, 1.0
-                    ],
-                    1.0
-                ]
+                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
             }
         });
     }
@@ -207,7 +164,7 @@ export function clearVectorContours() {
 async function loadMasterContourFile() {
     const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
     
-    // 🌟 Use clean parameter ID (e.g. '2t', 'pva', 'prate')
+    // 🌟 Use clean parameter ID (e.g. '2t', 'pva') instead of long display names
     const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
