@@ -161,7 +161,8 @@ const fragmentShaderBody = `
                 float xCoord = fract((i.x + float(dx) + 0.5) * invTex.x + 1.0);
                 float weight = weightY * wx[dx + 2];
 
-                float code = floor(texture(ptypeTex, vec2(xCoord, yCoord)).r * 255.0 + 0.5);
+                // 🌟 P-Type code is sampled directly from the green channel
+                float code = floor(texture(ptypeTex, vec2(xCoord, yCoord)).g * 255.0 + 0.5);
 
                 if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
                     wSnow += weight;
@@ -228,9 +229,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
         id: 'weather-gpu-shader',
         type: 'custom',
         chunkTextures: {},
-        ptypeTextures: {},
         activeTex: null,
-        activePtypeTex: null,
         paletteTex: null,
         frzrPaletteTex: null,
         sleetPaletteTex: null,
@@ -247,12 +246,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                 }
             }
             this.chunkTextures = {};
-            for (const key in this.ptypeTextures) {
-                if (this.ptypeTextures[key]) this.gl.deleteTexture(this.ptypeTextures[key]);
-            }
-            this.ptypeTextures = {};
             this.activeTex = null;
-            this.activePtypeTex = null;
             for (const key of ['frzrPaletteTex', 'sleetPaletteTex', 'snowPaletteTex']) {
                 if (this[key]) this.gl.deleteTexture(this[key]);
                 this[key] = null;
@@ -351,7 +345,6 @@ export function createPrecipTypeShaderLayer(mapInstance) {
 
                 uniform sampler2D u_dataTexture;
                 uniform sampler2D u_paletteTexture;
-                uniform sampler2D u_ptypeTexture;
                 uniform sampler2D u_frzrPalette;
                 uniform sampler2D u_sleetPalette;
                 uniform sampler2D u_snowPalette;
@@ -374,7 +367,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     vec4 color = texture(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        color = sampleSmoothPtypeColor(u_ptypeTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
+                        color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
                     
                     if (color.a == 0.0) {
@@ -406,7 +399,6 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                 varying vec2 v_uv;
                 uniform sampler2D u_dataTexture;
                 uniform sampler2D u_paletteTexture;
-                uniform sampler2D u_ptypeTexture;
                 uniform sampler2D u_frzrPalette;
                 uniform sampler2D u_sleetPalette;
                 uniform sampler2D u_snowPalette;
@@ -429,7 +421,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        color = sampleSmoothPtypeColor(u_ptypeTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
+                        color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
                     
                     if (color.a == 0.0) {
@@ -462,7 +454,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
             if (!this.gl || !source) return;
             const gl = this.gl;
 
-            const uploadSingle = (img, nearest = false) => {
+            const uploadSingle = (img) => {
                 const tex = gl.createTexture();
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -472,8 +464,8 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     gl.RGBA, gl.UNSIGNED_BYTE, img
                 );
                 
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 return tex;
@@ -489,14 +481,6 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                         this.chunkTextures[key] = uploadSingle(frameBmp);
                     }
                 });
-                if (source.ptypeFrames && Array.isArray(source.ptypeFrames)) {
-                    source.ptypeFrames.forEach((frameBmp, fIdx) => {
-                        const key = `${chunkIndex}_${fIdx}`;
-                        if (!this.ptypeTextures[key] && frameBmp) {
-                            this.ptypeTextures[key] = uploadSingle(frameBmp, true);
-                        }
-                    });
-                }
             } else {
                 const key = `${chunkIndex}_0`;
                 if (!this.chunkTextures[key]) {
@@ -512,7 +496,6 @@ export function createPrecipTypeShaderLayer(mapInstance) {
             const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
             
             this.activeTex = this.chunkTextures[`${cIdx}_${fIdx}`] || this.chunkTextures[cIdx];
-            this.activePtypeTex = this.ptypeTextures[`${cIdx}_${fIdx}`] || this.ptypeTextures[cIdx] || null;
             mapInstance.triggerRepaint();
         },
 
@@ -540,18 +523,18 @@ export function createPrecipTypeShaderLayer(mapInstance) {
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
 
             gl.activeTexture(gl.TEXTURE2);
-            gl.bindTexture(gl.TEXTURE_2D, this.activePtypeTex);
-            gl.uniform1i(gl.getUniformLocation(program, 'u_ptypeTexture'), 2);
-            gl.activeTexture(gl.TEXTURE3);
             gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
-            gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 3);
-            gl.activeTexture(gl.TEXTURE4);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 2);
+
+            gl.activeTexture(gl.TEXTURE3);
             gl.bindTexture(gl.TEXTURE_2D, this.sleetPaletteTex);
-            gl.uniform1i(gl.getUniformLocation(program, 'u_sleetPalette'), 4);
-            gl.activeTexture(gl.TEXTURE5);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_sleetPalette'), 3);
+
+            gl.activeTexture(gl.TEXTURE4);
             gl.bindTexture(gl.TEXTURE_2D, this.snowPaletteTex);
-            gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 5);
-            gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), this.activePtypeTex ? 1.0 : 0.0);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
+
+            gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), 1.0);
 
             if (projData) {
                 const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
