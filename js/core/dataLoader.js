@@ -81,9 +81,9 @@ export async function fetchManifest(run = null, model = null, param = null) {
 }
 
 /**
- * 🌟 Dynamic Frame to ImageBitmap Converter (Supports 1x Native and 2x Upscale)
+ * 🌟 Dynamic Frame to ImageBitmap Converter (Supports 1x Native, 2x Upscale, and Dual Rate/Ptype Packing)
  */
-async function frameToBitmap(frameBytes, width, height, shouldUpscale = false) {
+async function frameToBitmap(frameBytes, width, height, shouldUpscale = false, ptypeBytes = null) {
     const targetW = shouldUpscale ? width * 2 : width;
     const targetH = shouldUpscale ? height * 2 : height;
     const totalPixels = width * height;
@@ -91,10 +91,19 @@ async function frameToBitmap(frameBytes, width, height, shouldUpscale = false) {
     const rgbaBuffer = new ArrayBuffer(totalPixels * 4);
     const rgba32 = new Uint32Array(rgbaBuffer);
 
-    // Fast 32-bit Little-Endian pixel packing: A(255) | B(v) | G(v) | R(v)
-    for (let i = 0; i < totalPixels; i++) {
-        const v = frameBytes[i];
-        rgba32[i] = 0xFF000000 | (v << 16) | (v << 8) | v;
+    if (ptypeBytes) {
+        // Fast 32-bit Little-Endian packing: R = Rate, G = Ptype, B = 0, A = 255
+        for (let i = 0; i < totalPixels; i++) {
+            const r = frameBytes[i];
+            const g = ptypeBytes[i];
+            rgba32[i] = 0xFF000000 | (g << 8) | r;
+        }
+    } else {
+        // Fast 32-bit Little-Endian pixel packing for standard scalar parameters: A(255) | B(v) | G(v) | R(v)
+        for (let i = 0; i < totalPixels; i++) {
+            const v = frameBytes[i];
+            rgba32[i] = 0xFF000000 | (v << 16) | (v << 8) | v;
+        }
     }
 
     const imgData = new ImageData(new Uint8ClampedArray(rgbaBuffer), width, height);
@@ -188,35 +197,37 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             stateManager.chunkPixelData[chunkIndex] = rawData;
         }
 
+        let ptypeBytes = null;
+        if (chunk.ptype_file) {
+            try {
+                const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}?t=${Date.now()}`;
+                const ptypeResp = await fetch(ptypeUrl);
+                if (ptypeResp.ok) {
+                    const ptypeBuffer = await ptypeResp.arrayBuffer();
+                    let rawPtype = new Uint8Array(ptypeBuffer);
+                    if (rawPtype[0] === 0x1f && rawPtype[1] === 0x8b) {
+                        const stream = new Response(ptypeBuffer).body.pipeThrough(new DecompressionStream('gzip'));
+                        ptypeBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+                    } else {
+                        ptypeBytes = rawPtype;
+                    }
+                }
+            } catch (e) {
+                console.warn("Could not load ptype_file:", e);
+            }
+
+            if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+                throw new Error("Load cancelled");
+            }
+        }
+
         const outFrames = [];
         for (let f = 0; f < numFrames; f++) {
             const srcStart = f * frameSize;
             const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
-            const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale);
+            const ptypeSlice = ptypeBytes ? ptypeBytes.subarray(srcStart, srcStart + frameSize) : null;
+            const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale, ptypeSlice);
             outFrames.push(bitmap);
-        }
-
-        const ptypeFrames = [];
-        if (chunk.ptype_file) {
-            const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}?t=${Date.now()}`;
-            const ptypeResp = await fetch(ptypeUrl);
-            if (ptypeResp.ok) {
-                const ptypeBuffer = await ptypeResp.arrayBuffer();
-                let ptypeBytes = new Uint8Array(ptypeBuffer);
-                if (ptypeBytes[0] === 0x1f && ptypeBytes[1] === 0x8b) {
-                    const stream = new Response(ptypeBuffer).body.pipeThrough(new DecompressionStream('gzip'));
-                    ptypeBytes = new Uint8Array(await new Response(stream).arrayBuffer());
-                }
-                for (let f = 0; f < numFrames; f++) {
-                    const srcStart = f * frameSize;
-                    ptypeFrames.push(await frameToBitmap(
-                        ptypeBytes.subarray(srcStart, srcStart + frameSize),
-                        frameW,
-                        frameH,
-                        shouldUpscale
-                    ));
-                }
-            }
         }
 
         if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
@@ -228,7 +239,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             frames: outFrames,
             width: shouldUpscale ? frameW * 2 : frameW,
             height: shouldUpscale ? frameH * 2 : frameH,
-            ptypeFrames,
             isVolume: true
         };
 
