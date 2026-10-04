@@ -8,6 +8,9 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 
+// 🌟 In-memory cache for ready-to-render GeoJSON per step (0.0ms instant scrubbing) 
+const stepGeoJsonCache = new Map();
+
 const SOURCE_ID = 'contour-master-source';
 const CASING_LAYER_ID = 'contour-master-casing-layer';
 const LINE_LAYER_ID = 'contour-master-line-layer';
@@ -71,6 +74,8 @@ function themeContourFeatures(featureCollection) {
 
         for (const feature of featureCollection.features) {
             if (!feature || !feature.properties) continue;
+            const val = parseFloat(feature.properties.name);
+            feature.properties.isIntermediate = !isNaN(val) && (Math.round(val) % 4 !== 0);
             feature.properties.color = mslpColor;
             feature.properties.stroke = mslpColor;
             feature.properties.labelColor = mslpColor;
@@ -137,7 +142,7 @@ function buildAllStepsGeoJson(masterData) {
 }
 
 /**
- * 🌟 Instant 0.0ms GPU filter: Uses your 3-frame buffer idea to eliminate blinking
+ * 🌟 Instant 0.0ms GPU filter: Uses 3-frame buffering to eliminate blinking (ghosting effect)
  */
 function applyGpuStepFilter(stepNum) {
     if (!mapInstance) return;
@@ -230,7 +235,7 @@ export function initVectorContours(map) {
             id: CASING_LAYER_ID,
             type: 'line',
             source: SOURCE_ID,
-            filter: ['has', 'outlineColor'],
+            filter: ['all', ['has', 'outlineColor'], ['in', ['get', 'step'], currentVisibleStep, -1, -1]],
             layout: {
                 'line-join': 'round',
                 'line-cap': 'round'
@@ -252,6 +257,7 @@ export function initVectorContours(map) {
             id: LINE_LAYER_ID,
             type: 'line',
             source: SOURCE_ID,
+            filter: ['in', ['get', 'step'], currentVisibleStep, -1, -1],
             layout: {
                 'line-join': 'round',
                 'line-cap': 'round'
@@ -277,6 +283,7 @@ export function initVectorContours(map) {
             id: LABEL_LAYER_ID,
             type: 'symbol',
             source: SOURCE_ID,
+            filter: ['in', ['get', 'step'], currentVisibleStep, -1, -1],
             layout: {
                 'symbol-placement': 'line',
                 'text-field': ['get', 'name'],
@@ -323,6 +330,7 @@ export function clearVectorContours() {
     activeMasterKey = null;
     fetchPromise = null;
     currentVisibleStep = 0;
+    stepGeoJsonCache.clear();
     if (!mapInstance) return;
     const source = mapInstance.getSource(SOURCE_ID);
     if (source) {
@@ -536,7 +544,7 @@ function binaryStepToGeoJson(step, masterData) {
         type: 'FeatureCollection',
         features: features.map((feature, index) => ({
             ...feature,
-            properties: metadata[index] || {}
+            properties: { ...(metadata[index] || {}) }
         }))
     };
 }
@@ -545,6 +553,8 @@ function binaryStepToGeoJson(step, masterData) {
  * 🌟 Instant 0.0ms GPU filter: switches the visible frame without re-tiling GeoJSON
  */
 export async function updateVectorContours(step) {
+    if (!mapInstance) return;
+
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     currentVisibleStep = stepNum;
 
