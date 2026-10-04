@@ -8,11 +8,16 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 
-let displayedStep = null; // the step whose layers are actually on screen
-const displayModes = new Map(); // stepNum -> 'full' | 'ghost' | 'hidden'
-const GHOST_OPACITY = 0.03; // multiplier applied to the previous/next frames (basically invisible)
+let displayedStep = null; // the step whose contours are actually on screen (opacity 1)
+const readySteps = new Set(); // steps whose source has finished tiling and can be swapped in with no gap
+
+// Steps kept built around the current one. They stay "visible" at opacity 0 so MapLibre keeps their tiles loaded.
+const KEEP_AHEAD = 3;
+const KEEP_BEHIND = 2;
+const READY_TIMEOUT_MS = 3000;
 const LINE_OPACITY_EXPR = ['coalesce', ['get', 'opacity'], 0.95];
 const CASING_OPACITY_EXPR = ['coalesce', ['get', 'outlineOpacity'], 0.8];
+const NO_FADE = { duration: 0, delay: 0 };
 
 // 🌟 Track which steps have their own dedicated GPU layers
 const loadedSteps = new Set();
@@ -117,18 +122,31 @@ function themeContourFeatures(featureCollection) {
     return featureCollection;
 }
 
-// 🌟 Instantly toggles visibility of a step's layers
-function toggleStepVisibility(stepNum, isVisible) {
+// 🌟 Shows/hides a step by OPACITY (never visibility:none, which would make MapLibre drop its tiles)
+function setStepShown(stepNum, shown) {
     if (!mapInstance || !loadedSteps.has(stepNum)) return;
-    const visibility = isVisible ? 'visible' : 'none';
-    
+
     const casingId = `${CASING_LAYER_ID}-${stepNum}`;
     const lineId = `${LINE_LAYER_ID}-${stepNum}`;
     const labelId = `${LABEL_LAYER_ID}-${stepNum}`;
 
-    if (mapInstance.getLayer(casingId)) mapInstance.setLayoutProperty(casingId, 'visibility', visibility);
-    if (mapInstance.getLayer(lineId)) mapInstance.setLayoutProperty(lineId, 'visibility', visibility);
-    if (mapInstance.getLayer(labelId)) mapInstance.setLayoutProperty(labelId, 'visibility', visibility);
+    if (mapInstance.getLayer(casingId)) mapInstance.setPaintProperty(casingId, 'line-opacity', shown ? CASING_OPACITY_EXPR : 0);
+    if (mapInstance.getLayer(lineId)) mapInstance.setPaintProperty(lineId, 'line-opacity', shown ? LINE_OPACITY_EXPR : 0);
+    if (mapInstance.getLayer(labelId)) mapInstance.setPaintProperty(labelId, 'text-opacity', shown ? 1 : 0);
+}
+
+function removeStep(stepNum) {
+    if (mapInstance) {
+        try {
+            if (mapInstance.getLayer(`${CASING_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${CASING_LAYER_ID}-${stepNum}`);
+            if (mapInstance.getLayer(`${LINE_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LINE_LAYER_ID}-${stepNum}`);
+            if (mapInstance.getLayer(`${LABEL_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LABEL_LAYER_ID}-${stepNum}`);
+            if (mapInstance.getSource(`${SOURCE_ID}-${stepNum}`)) mapInstance.removeSource(`${SOURCE_ID}-${stepNum}`);
+        } catch (e) {}
+    }
+    loadedSteps.delete(stepNum);
+    readySteps.delete(stepNum);
+    if (displayedStep === stepNum) displayedStep = null;
 }
 
 // 🌟 Creates dedicated GPU layers for a specific step
@@ -152,7 +170,8 @@ function createOrUpdateStepLayers(stepNum, geoJson) {
             paint: {
                 'line-color': ['get', 'outlineColor'],
                 'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 1.6], true),
-                'line-opacity': ['coalesce', ['get', 'outlineOpacity'], 0.8],
+                'line-opacity': 0,
+                'line-opacity-transition': NO_FADE,
                 'line-blur': ['coalesce', ['get', 'outlineBlur'], 2.0]
             }
         });
@@ -165,7 +184,8 @@ function createOrUpdateStepLayers(stepNum, geoJson) {
             paint: {
                 'line-color': ['coalesce', ['get', 'color'], ['get', 'stroke'], '#4169E1'],
                 'line-width': pvaZoomWidthExpression(['coalesce', ['get', 'width'], 2.0]),
-                'line-opacity': ['coalesce', ['get', 'opacity'], 0.95]
+                'line-opacity': 0,
+                'line-opacity-transition': NO_FADE
             }
         });
 
@@ -185,7 +205,9 @@ function createOrUpdateStepLayers(stepNum, geoJson) {
             paint: {
                 'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                 'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
-                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0]
+                'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
+                'text-opacity': 0,
+                'text-opacity-transition': NO_FADE
             }
         });
 
@@ -193,7 +215,6 @@ function createOrUpdateStepLayers(stepNum, geoJson) {
     } else {
         // If updating a step (e.g. after zooming on prate), update data and make visible
         mapInstance.getSource(srcId).setData(geoJson);
-        toggleStepVisibility(stepNum, true);
     }
 }
 
@@ -212,76 +233,79 @@ function buildStepLayers(stepNum, masterData, rawStep = stepNum) {
     return true;
 }
 
-function getNeighborSteps(masterData, stepNum) {
+// Steps to keep built around stepNum, nearest first (ahead before behind)
+function getWindowSteps(masterData, stepNum) {
     const nums = Object.keys(masterData?.steps || {})
         .map(k => parseInt(String(k).replace(/\D/g, ''), 10))
         .filter(n => !isNaN(n))
         .sort((a, b) => a - b);
     const i = nums.indexOf(stepNum);
     if (i === -1) return [];
-    return [nums[i - 1], nums[i + 1]].filter(n => n !== undefined);
+    const out = [];
+    for (let d = 1; d <= Math.max(KEEP_AHEAD, KEEP_BEHIND); d++) {
+        if (d <= KEEP_AHEAD && nums[i + d] !== undefined) out.push(nums[i + d]);
+        if (d <= KEEP_BEHIND && nums[i - d] !== undefined) out.push(nums[i - d]);
+    }
+    return out;
 }
 
-// Sets one step to 'full', 'ghost' (nearly invisible, no labels) or 'hidden'
-function setStepMode(stepNum, mode) {
-    if (!mapInstance || !loadedSteps.has(stepNum)) return;
-    if (displayModes.get(stepNum) === mode) return;
-    displayModes.set(stepNum, mode);
+// Resolves once the step's source has finished tiling (or after a timeout so we never hang)
+function waitForStepReady(stepNum) {
+    return new Promise(resolve => {
+        const map = mapInstance;
+        const srcId = `${SOURCE_ID}-${stepNum}`;
+        const t0 = performance.now();
+        let done = false;
 
-    if (mode === 'hidden') {
-        toggleStepVisibility(stepNum, false);
-        return;
-    }
-
-    const casingId = `${CASING_LAYER_ID}-${stepNum}`;
-    const lineId = `${LINE_LAYER_ID}-${stepNum}`;
-    const labelId = `${LABEL_LAYER_ID}-${stepNum}`;
-    const ghost = mode === 'ghost';
-
-    if (mapInstance.getLayer(casingId)) {
-        mapInstance.setPaintProperty(casingId, 'line-opacity',
-            ghost ? ['*', CASING_OPACITY_EXPR, GHOST_OPACITY] : CASING_OPACITY_EXPR);
-        mapInstance.setLayoutProperty(casingId, 'visibility', 'visible');
-    }
-    if (mapInstance.getLayer(lineId)) {
-        mapInstance.setPaintProperty(lineId, 'line-opacity',
-            ghost ? ['*', LINE_OPACITY_EXPR, GHOST_OPACITY] : LINE_OPACITY_EXPR);
-        mapInstance.setLayoutProperty(lineId, 'visibility', 'visible');
-    }
-    if (mapInstance.getLayer(labelId)) {
-        mapInstance.setLayoutProperty(labelId, 'visibility', ghost ? 'none' : 'visible');
-    }
-}
-
-// Current step full, its previous/next faint, everything else hidden.
-// The new step is shown first so there is never a frame with nothing on screen.
-function applyDisplay(stepNum, masterData) {
-    const neighbors = getNeighborSteps(masterData, stepNum);
-
-    setStepMode(stepNum, 'full');
-    for (const n of neighbors) setStepMode(n, 'ghost');
-
-    for (const [n, mode] of displayModes) {
-        if (mode !== 'hidden' && n !== stepNum && !neighbors.includes(n)) {
-            setStepMode(n, 'hidden');
+        const finish = (ok) => {
+            if (done) return;
+            done = true;
+            map.off('render', check);
+            resolve(ok);
+        };
+        function check() {
+            if (!loadedSteps.has(stepNum) || !map.getSource(srcId)) return finish(false);
+            let loaded = false;
+            try { loaded = map.isSourceLoaded(srcId); } catch (e) {}
+            if (loaded || performance.now() - t0 > READY_TIMEOUT_MS) finish(true);
         }
-    }
+
+        // 'render' (not 'sourcedata'): by the time it fires, the source cache has already requested its tiles,
+        // so isSourceLoaded can't report a false "loaded" before tiling has started.
+        map.on('render', check);
+        map.triggerRepaint();
+        setTimeout(check, READY_TIMEOUT_MS + 50);
+    });
+}
+
+// Swap in a ready step: new one on and old one off in the same tick, so there is never an empty frame
+function showStep(stepNum) {
+    setStepShown(stepNum, true);
+    if (displayedStep !== null && displayedStep !== stepNum) setStepShown(displayedStep, false);
     displayedStep = stepNum;
 }
 
-// Builds the previous and next steps in the background
-function preloadNeighbors(masterData, stepNum) {
-    for (const n of getNeighborSteps(masterData, stepNum)) {
-        if (loadedSteps.has(n)) continue;
-        setTimeout(() => {
-            if (!mapInstance || loadedSteps.has(n)) return;
-            if (buildStepLayers(n, masterData)) {
-                // New layers start visible; park them hidden, then re-apply for whatever is on screen now
-                setStepMode(n, 'hidden');
-                if (displayedStep !== null) applyDisplay(displayedStep, masterData);
-            }
-        }, 0);
+// Drop built steps that are outside the window around stepNum (keeps memory bounded)
+function evictOutsideWindow(masterData, stepNum) {
+    const keep = new Set(getWindowSteps(masterData, stepNum));
+    keep.add(stepNum);
+    if (displayedStep !== null) keep.add(displayedStep);
+    for (const n of [...loadedSteps]) {
+        if (!keep.has(n)) removeStep(n);
     }
+}
+
+// Builds the steps around stepNum in the background (staggered so the main thread isn't hit all at once)
+function preloadNeighbors(masterData, stepNum) {
+    getWindowSteps(masterData, stepNum).forEach((n, idx) => {
+        if (loadedSteps.has(n)) return;
+        setTimeout(async () => {
+            if (!mapInstance || loadedSteps.has(n) || activeMasterContours !== masterData) return;
+            if (!buildStepLayers(n, masterData)) return;
+            await waitForStepReady(n);
+            if (loadedSteps.has(n)) readySteps.add(n);
+        }, idx * 40);
+    });
 }
 
 export function initVectorContours(map) {
@@ -310,19 +334,10 @@ export function clearVectorContours() {
     activeMasterKey = null;
     fetchPromise = null;
 
-    if (mapInstance) {
-        loadedSteps.forEach(stepNum => {
-            try {
-                if (mapInstance.getLayer(`${CASING_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${CASING_LAYER_ID}-${stepNum}`);
-                if (mapInstance.getLayer(`${LINE_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LINE_LAYER_ID}-${stepNum}`);
-                if (mapInstance.getLayer(`${LABEL_LAYER_ID}-${stepNum}`)) mapInstance.removeLayer(`${LABEL_LAYER_ID}-${stepNum}`);
-                if (mapInstance.getSource(`${SOURCE_ID}-${stepNum}`)) mapInstance.removeSource(`${SOURCE_ID}-${stepNum}`);
-            } catch (e) {}
-        });
-    }
-    
+    [...loadedSteps].forEach(removeStep);
+
     loadedSteps.clear();
-    displayModes.clear();
+    readySteps.clear();
     displayedStep = null;
     currentVisibleStep = 0;
 }
@@ -527,41 +542,53 @@ function binaryStepToGeoJson(step, masterData) {
 }
 
 /**
- * 🌟 Instant 0.00ms GPU Step Switcher
- * The previous step stays on screen until the new step's layers are ready,
- * and the frames immediately before/after are prebuilt as near-invisible ghosts.
+ * 🌟 Step switcher: the old step stays on screen until the new step is fully tiled, then they swap in one tick.
+ * Never blocks the weather map; only the contour layer waits.
  */
 export async function updateVectorContours(step, forceUpdate = false) {
     if (!mapInstance) return;
 
     let stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
 
-    // Track the step we want; the old one stays on screen until this one is ready
+    // Latest requested step; anything older that finishes later is discarded
     currentVisibleStep = stepNum;
 
-    // 🌟 FAST PATH: layer already exists, swap instantly
-    if (!forceUpdate && loadedSteps.has(stepNum)) {
-        if (activeMasterContours?.steps) {
-            applyDisplay(stepNum, activeMasterContours);
-            preloadNeighbors(activeMasterContours, stepNum);
-        }
-        return;
-    }
+    const alreadyBuilt = !forceUpdate && loadedSteps.has(stepNum);
+    let masterData = activeMasterContours;
 
-    // 🌟 SLOW PATH: decode and create dedicated layer for this step
-    const masterData = await loadMasterContourFile();
+    if (!alreadyBuilt || !masterData?.steps) {
+        masterData = await loadMasterContourFile();
+        if (!masterData?.steps) return;
+        if (currentVisibleStep !== stepNum) return; // user already moved on while loading
 
-    if (masterData && masterData.steps) {
-        if (buildStepLayers(stepNum, masterData, step)) {
-            if (currentVisibleStep === stepNum) {
-                applyDisplay(stepNum, masterData);
-            } else {
-                // User already scrubbed somewhere else; keep this one built but hidden
-                setStepMode(stepNum, 'hidden');
+        if (forceUpdate) {
+            // Settings like the prate zoom filter changed: rebuild everything except what's on screen
+            for (const n of [...loadedSteps]) {
+                if (n !== stepNum && n !== displayedStep) removeStep(n);
             }
+            readySteps.delete(stepNum);
         }
-        if (currentVisibleStep === stepNum) preloadNeighbors(masterData, stepNum);
+
+        if (!buildStepLayers(stepNum, masterData, step)) {
+            // No contour data for this step: clear the old contours rather than leave a wrong frame up
+            if (displayedStep !== null) {
+                setStepShown(displayedStep, false);
+                displayedStep = null;
+            }
+            return;
+        }
     }
+
+    if (!readySteps.has(stepNum)) {
+        await waitForStepReady(stepNum);
+        if (!loadedSteps.has(stepNum)) return; // evicted or cleared while waiting
+        readySteps.add(stepNum);
+    }
+    if (currentVisibleStep !== stepNum) return; // superseded while tiling
+
+    showStep(stepNum);
+    evictOutsideWindow(masterData, stepNum);
+    preloadNeighbors(masterData, stepNum);
 }
 
 /**
