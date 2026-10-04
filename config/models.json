@@ -22,6 +22,17 @@
         "min_val": 216.4833,
         "max_val": 327.5944
       },
+      "contours": {
+        "source_param": "2t",
+        "color_light": "#4169E1",
+        "color_dark": "#4169E1",
+        "width": 2.0,
+        "opacity": 0.95,
+        "unit_label": "temperature",
+        "special_lines": [
+          { "target": 273.15, "color": "#4169E1", "width": 2.0 }
+        ]
+      },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
     },
@@ -56,6 +67,17 @@
         "val_points": [0.0, 0.1, 1.0, 2.5],
         "byte_points": [0, 100, 200, 255]
       },
+      "contours": {
+        "source_param": "prate",
+        "color_light": "#000000",
+        "color_dark": "#ffffff",
+        "width": 1.6,
+        "opacity": 0.9,
+        "zoom_filter": {
+          "coarse_interval": 4,
+          "min_zoom": 4.5
+        }
+      },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
     },
@@ -88,6 +110,19 @@
         "mode": "piecewise",
         "val_points": [0.0, 3.0, 80.0],
         "byte_points": [0, 30, 107]
+      },
+      "contours": {
+        "source_param": "z500",
+        "color_light": "#000000",
+        "color_dark": "#ffffff",
+        "width": 1.6,
+        "opacity": 0.9,
+        "glow": true,
+        "glow_dark": "#00c8ff",
+        "glow_light": "#ffffff",
+        "special_lines": [
+          { "target": 540, "color": "#4169E1", "width": 2.4 }
+        ]
       },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
