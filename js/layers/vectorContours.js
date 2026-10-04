@@ -80,40 +80,57 @@ function themeContourFeatures(featureCollection, masterData) {
         const mslpColor = isDark ? '#ffffff' : '#000000';
         const zoom = mapInstance ? mapInstance.getZoom() : 5;
 
-        for (const feature of featureCollection.features) {
+        // 🌟 1. Find how many features are MSLP isobars (values between 850 and 1100 mb)
+        let mslpCount = 0;
+        for (let i = 0; i < featureCollection.features.length; i++) {
+            const v = parseFloat(String(featureCollection.features[i]?.properties?.name || ''));
+            if (v >= 850 && v <= 1100) {
+                mslpCount = i + 1;
+            }
+        }
+
+        const totalFeatures = featureCollection.features.length;
+        const thicknessCount = Math.max(1, totalFeatures - mslpCount);
+
+        for (let i = 0; i < totalFeatures; i++) {
+            const feature = featureCollection.features[i];
             if (!feature) continue;
             const props = feature.properties || (feature.properties = {});
 
-            // Extract numeric value from any possible property key
+            // Extract numeric value from any possible key
             const rawVal = props.name ?? props.level ?? props.value ?? props.val ?? props.target;
-            const val = parseFloat(String(rawVal || '').replace(/[^0-9.-]/g, ''));
+            let val = parseFloat(String(rawVal || '').replace(/[^0-9.-]/g, ''));
 
             const unit = String(props.unit || '').toLowerCase();
             const idStr = String(props.id || '').toLowerCase();
             const nameStr = String(props.name || '').toLowerCase();
 
-            // 🌟 Thickness Identification:
-            // - Any value between 350 and 750 (dam)
-            // - Any value between 3500 and 7500 (meters)
-            // - Any contour tagged with "dam", "thick", etc.
-            let isThickness = false;
-            let thickDam = val;
-
-            if (unit === 'dam' || idStr.includes('thick') || nameStr.includes('thick')) {
-                isThickness = true;
-                thickDam = (val >= 3500) ? val / 10.0 : val;
-            } else if (!isNaN(val)) {
-                if (val >= 350 && val <= 750) {
-                    isThickness = true;
-                    thickDam = val;
-                } else if (val >= 3500 && val <= 7500) {
-                    isThickness = true;
-                    thickDam = val / 10.0;
-                }
-            }
+            // 🌟 2. A feature is thickness if:
+            // - It comes after the MSLP isobars (i >= mslpCount)
+            // - Its value is in the thickness range (350-750 dam or 3500-7500 m)
+            // - Its unit or name mentions dam/thick
+            let isThickness = (mslpCount > 0 && i >= mslpCount) ||
+                              unit === 'dam' || 
+                              idStr.includes('thick') || 
+                              nameStr.includes('thick') ||
+                              (val >= 350 && val <= 750) || 
+                              (val >= 3500 && val <= 7500);
 
             if (isThickness) {
-                // Red for > 540 dam, Blue for <= 540 dam
+                // If name was missing from metadata, deduce its decameter level
+                let thickDam = val;
+                if (isNaN(thickDam) || thickDam < 350) {
+                    const thickIdx = i - mslpCount;
+                    // Standard thickness series: centered around 540 dam in 6 dam steps
+                    const anchor540Idx = Math.round(thicknessCount * 0.4);
+                    thickDam = 540 + (thickIdx - anchor540Idx) * 6;
+                    props.name = String(thickDam);
+                } else if (thickDam >= 3500) {
+                    thickDam = thickDam / 10.0;
+                    props.name = String(Math.round(thickDam));
+                }
+
+                // 🌟 Red for > 540 dam, Blue for <= 540 dam
                 const isCold = thickDam <= 540;
                 const thickColor = isCold ? '#2563eb' : '#dc2626';
 
@@ -123,7 +140,7 @@ function themeContourFeatures(featureCollection, masterData) {
                 props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
                 props.width = Math.abs(thickDam - 540) < 0.5 ? 2.2 : 1.4;
                 props.opacity = 0.95;
-                props.dotted = true; // Dotted line
+                props.dotted = true; // Dotted line!
             } else {
                 // MSLP Isobars (solid line)
                 props.color = mslpColor;
@@ -145,7 +162,6 @@ function themeContourFeatures(featureCollection, masterData) {
             });
         }
 
-        // Console diagnostic to verify levels loaded in memory
         console.log('[Contours] Step levels loaded:', featureCollection.features.map(f => ({
             name: f.properties.name,
             color: f.properties.color,
