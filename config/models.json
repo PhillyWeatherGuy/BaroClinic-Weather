@@ -5,7 +5,7 @@
       "name": "ECMWF",
       "category": "Global",
       "resolution": "9km",
-      "supported_params": ["2t", "tp", "asnow", "prate", "pwat", "pva"]
+      "supported_params": ["2t", "tp", "asnow", "prate", "pwat", "pva", "z500_anom"]
     }
   },
   "parameters": {
@@ -105,6 +105,23 @@
         "mode": "piecewise",
         "val_points": [0.0, 3.0, 80.0],
         "byte_points": [0, 30, 107]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "z500_anom": {
+      "id": "z500_anom",
+      "name": "500mb Height Anomaly",
+      "unit": "m",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "z500_anom",
+      "upscale_2x": false,
+      "suppress_city_overlay": true,
+      "scaling": {
+        "mode": "linear",
+        "min_val": -350.0,
+        "max_val": 350.0
       },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
