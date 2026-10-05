@@ -131,6 +131,36 @@ const ASNOW_COLORS = [
     "#cb95f2"   // 47 - 48
 ];
 
+// 📊 500mb Height Anomaly Levels (Meters)
+const ANOM_LEVELS = [
+  -450, -441, -432, -423, -405, -396, -378, -360, -351, -333, -315, -306,
+  -288, -279, -261, -252, -243, -234, -216, -207, -198, -189, -180, -171,
+  -162, -153, -144, -135, -126, -117, -99, -90, -81, -72, -63, -54, -45,
+  -36, -27, -18,
+  18, 27, 45, 54, 63, 72, 81, 90, 99, 108, 117, 126, 135, 144, 153, 162,
+  171, 180, 189, 198, 207, 216, 234, 252, 270, 297, 324, 351, 396, 432, 450
+];
+
+// 📊 500mb Height Anomaly Colors (Diverging Blue-White-Red)
+const ANOM_COLORS = [
+  "#b1b2b2", "#a7a9a8", "#9a9b9d", "#878e8c", "#76a86e", "#5c9260",
+  "#437c4d", "#346b3f", "#427c4d", "#5c9260", "#77a86e", "#8db77b",
+  "#a4c688", "#bad995", "#cee6a3", "#ddf3ad", "#d2dfaf", "#c3cea9",
+  "#b9bea6", "#b1b3b1", "#a7a9a9", "#9e9baa", "#9892a9", "#8f86ab",
+  "#867aab", "#6b5daf", "#594faf", "#4649af", "#3f4db0", "#3558af",
+  "#346aae", "#3b79c5", "#4687d9", "#5a95e0", "#70a5e5", "#86b3e9",
+  "#9ec2ec", "#a7c6ed", "#b2cff0",
+  "#fefefe",
+  "#fdffc4", "#fdfab8", "#fdf6ac", "#fcf0a4", "#fbec9c", "#fae390",
+  "#f9de88", "#f8d680", "#f6cd78", "#f5c66e", "#f3bd66", "#f2b15c",
+  "#f1a653", "#ef994a", "#ed7d37", "#ec7231", "#eb612b", "#e85428",
+  "#df4925", "#d83f22", "#d03620", "#c42c1d", "#b9261b", "#bf2928",
+  "#c73045", "#cc3a67", "#c85c87", "#c576a9", "#c59bc0", "#c7adc7"
+];
+
+const ANOM_BELOW = "#bcbdbf";
+const ANOM_ABOVE = "#c8c8ce";
+
 // 💧 Light Mode PWAT Levels (Inches)
 const LIGHT_PWAT_LEVELS = [
     0.00, 0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45,
@@ -173,7 +203,6 @@ const LIGHT_PVA_HEX = [
 function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.0], bytePoints = [0, 100, 255], numEntries = 256) {
     const palette = [];
     for (let i = 0; i < numEntries; i++) {
-        // 🌟 Piecewise segment interpolation matching parameters.json
         let physicalVal = valPoints[0];
         for (let j = 0; j < bytePoints.length - 1; j++) {
             if (i >= bytePoints[j] && i <= bytePoints[j + 1]) {
@@ -202,6 +231,35 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
     return palette;
 }
 
+/**
+ * 🌟 Linear Diverging Palette Interpolator for Height Anomalies (-350m to +350m)
+ */
+function createAnomalyPalette(levels, colors, belowColor, aboveColor, minVal = -350.0, maxVal = 350.0, numEntries = 256) {
+    const palette = [];
+    for (let i = 0; i < numEntries; i++) {
+        const physicalVal = minVal + (i / (numEntries - 1)) * (maxVal - minVal);
+
+        if (physicalVal < levels[0]) {
+            palette.push(belowColor);
+            continue;
+        }
+        if (physicalVal >= levels[levels.length - 1]) {
+            palette.push(aboveColor);
+            continue;
+        }
+
+        let colorIdx = 0;
+        for (let k = 0; k < levels.length - 1; k++) {
+            if (physicalVal >= levels[k] && physicalVal < levels[k + 1]) {
+                colorIdx = k;
+                break;
+            }
+        }
+        palette.push(colors[colorIdx] || colors[colors.length - 1]);
+    }
+    return palette;
+}
+
 export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     LIGHT_PRECIP_LEVELS, 
     LIGHT_PRECIP_HEX, 
@@ -215,6 +273,16 @@ export const ASNOW_PALETTE = createNonLinearPrecipPalette(
     ASNOW_COLORS,
     [0.0, 1.0, 10.0, 50.0],
     [0, 100, 200, 255],
+    256
+);
+
+export const Z500_ANOM_PALETTE = createAnomalyPalette(
+    ANOM_LEVELS,
+    ANOM_COLORS,
+    ANOM_BELOW,
+    ANOM_ABOVE,
+    -350.0,
+    350.0,
     256
 );
 
@@ -281,10 +349,13 @@ export function getPaletteForParameter(paramId) {
     if (id === 'asnow' || id.includes('snow') || id === 'sf') {
         return ASNOW_PALETTE;
     }
+    if (id === 'z500_anom' || id.includes('anom')) {
+        return Z500_ANOM_PALETTE;
+    }
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
     }
-    if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
+    if (id === 'pwat' || id.includes('pwat' ) || id === 'tcwv') {
         return PWAT_PALETTE;
     }
     if (id === 'pva' || id.includes('pva') || id === 'vo' || id.includes('vort')) {
