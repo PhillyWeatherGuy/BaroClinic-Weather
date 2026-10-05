@@ -160,8 +160,8 @@ function themeContourFeatures(featureCollection, masterData) {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity Heights
-    if (activeParam === 'pva') {
+    // 3. 500mb PVA / Vorticity Heights & 500mb Anomaly Heights
+    if (activeParam === 'pva' || activeParam === 'z500_anom') {
         const contourColor = getPvaContourThemeColor();
         const glowColor = getPvaContourGlowColor();
         const isDarkTheme = stateManager.currentTheme === 'dark';
@@ -998,7 +998,7 @@ async function loadMasterContourFile() {
     activeMasterKey = key;
 
     const urlsToTry = [];
-    if (param === 'pva') {
+    if (param === 'pva' || param === 'z500_anom') {
         if (targetDate && runCycle) {
             urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
         }
@@ -1205,5 +1205,5 @@ export async function updateVectorContours(step, forceUpdate = false) {
 
 export async function preloadAllContours() {
     const masterData = await loadMasterContourFile();
-    if (masterData?.steps && preloadStartedFor !== masterData) startPreload(masterData, currentVisibleStep);
+    if (!masterData?.steps && preloadStartedFor !== masterData) startPreload(masterData, currentVisibleStep);
 }
