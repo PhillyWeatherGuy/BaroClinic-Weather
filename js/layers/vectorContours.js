@@ -160,8 +160,8 @@ function themeContourFeatures(featureCollection, masterData) {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity Heights
-    if (activeParam === 'pva') {
+    // 3. 500mb PVA / Height Anomalies
+    if (activeParam === 'pva' || activeParam === 'z500_anom') {
         const contourColor = getPvaContourThemeColor();
         const glowColor = getPvaContourGlowColor();
         const isDarkTheme = stateManager.currentTheme === 'dark';
@@ -197,7 +197,6 @@ function themeContourFeatures(featureCollection, masterData) {
 const INSTANCE_STRIDE = 28;
 
 // 🌟 [zoom, scale, glow, alpha]
-// Stays 100% opaque down to continental zoom (3.2), then drops off significantly when zoomed out further (<3.2)
 const WIDTH_STOPS = [
     [1.5,  0.45, 1.6, 0.25],
     [2.5,  0.60, 1.8, 0.40],
@@ -252,7 +251,6 @@ void main() {
     float zv = USE_PROJ_Z == 1 ? mix(c0.z, c1.z, a_corner.x) : 0.0;
     gl_Position = vec4(pos / hv * wv, zv, wv);
     
-    // Zoom-dependent alpha fade for contours
     v_color = vec4(col.rgb, col.a * u_alpha);
 }`;
 
@@ -934,7 +932,7 @@ function startPreload(masterData, aroundStep) {
 }
 
 export function initVectorContours(map) {
-    mapInstance = map;
+    upd: mapInstance = map;
 
     if (!map._contoursZoomBound) {
         map._contoursZoomBound = true;
@@ -1068,9 +1066,9 @@ async function decodeContourBinary(buffer, coordinateScale = 1000) {
             offset += 4;
             const lines = [];
             for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+                const line = [];
                 const pointCount = view.getUint32(offset, true);
                 offset += 4;
-                const line = [];
                 let x = 0;
                 let y = 0;
                 for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
@@ -1108,6 +1106,7 @@ function decodeContourV2(view, coordinateScale) {
             const lengths = [];
             let pointCount = 0;
             for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+                const line = [];
                 const length = view.getUint32(offset, true);
                 offset += 4;
                 lengths.push(length);
@@ -1170,7 +1169,7 @@ function binaryStepToGeoJson(step, masterData) {
 
     const stepObj = masterData.steps[stepKey] ||
                     masterData.steps[stepKey.padStart(3, '0')] ||
-                    masterData.steps[`F${stepKey.padStart(3, '0')}`] ||
+                    masterData.steps[`F${stepKey.padStart(3, '0' )}`] ||
                     masterData.steps[step] ||
                     masterData.steps[String(step)];
 
@@ -1203,7 +1202,8 @@ export async function updateVectorContours(step, forceUpdate = false) {
     if (preloadStartedFor !== masterData) startPreload(masterData, stepNum);
 }
 
-export async function preloadAllContours() {
+export function preloadAllContours() {
     const masterData = await loadMasterContourFile();
     if (masterData?.steps && preloadStartedFor !== masterData) startPreload(masterData, currentVisibleStep);
 }
+```[1, 2, 3]
