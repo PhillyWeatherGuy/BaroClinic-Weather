@@ -160,7 +160,7 @@ function themeContourFeatures(featureCollection, masterData) {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity Heights & 500mb Anomaly Heights
+    // 3. 500mb PVA / Vorticity Heights
     if (activeParam === 'pva' || activeParam === 'z500_anom') {
         const contourColor = getPvaContourThemeColor();
         const glowColor = getPvaContourGlowColor();
