@@ -1051,10 +1051,10 @@ function initModelRunDropdown() {
     }
 
     if (!anchorDate || isNaN(anchorDate.getTime())) {
-        const now = new Date();
-        const currentHour = now.getUTCHours();
+        const delayedNow = new Date(Date.now() - 7.5 * 3600 * 1000);
+        const currentHour = delayedNow.getUTCHours();
         const latestRunHour = Math.floor(currentHour / 6) * 6;
-        anchorDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), latestRunHour, 0));
+        anchorDate = new Date(Date.UTC(delayedNow.getUTCFullYear(), delayedNow.getUTCMonth(), delayedNow.getUTCDate(), latestRunHour, 0));
     }
 
     const runs = [];
