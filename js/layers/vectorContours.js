@@ -160,15 +160,16 @@ function themeContourFeatures(featureCollection, masterData) {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity Heights
-    if (activeParam === 'pva' || activeParam === 'z500_anom') {
+    // 3. 500mb Heights (PVA, Anomaly, or standard z500)
+    if (activeParam === 'pva' || activeParam === 'z500' || activeParam === 'z500_anom') {
         const contourColor = getPvaContourThemeColor();
         const glowColor = getPvaContourGlowColor();
         const isDarkTheme = stateManager.currentTheme === 'dark';
 
         for (const feature of featureCollection.features) {
             if (!feature || !feature.properties) continue;
-            const is540Line = Number(feature.properties.name) === 540;
+            const numVal = Number(feature.properties.name) || Number(feature.properties.level) || Number(feature.properties.value);
+            const is540Line = numVal === 540 || numVal === 5400;
             const featureColor = is540Line ? '#4169E1' : contourColor;
 
             feature.properties.color = featureColor;
@@ -998,7 +999,7 @@ async function loadMasterContourFile() {
     activeMasterKey = key;
 
     const urlsToTry = [];
-    if (param === 'pva' || param === 'z500_anom') {
+    if (param === 'pva' || param === 'z500_anom' || param === 'z500') {
         if (targetDate && runCycle) {
             urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
         }
@@ -1027,6 +1028,7 @@ async function loadMasterContourFile() {
                                     await binaryResp.arrayBuffer(),
                                     data.binary.scale || 1000
                                 );
+                                stepCache.clear();
                             }
                         }
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
