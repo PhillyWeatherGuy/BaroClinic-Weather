@@ -140,21 +140,21 @@ const DARK_ANOM_LEVELS = [
 
 // 📊 Dark Mode 500mb Height Anomaly Colors (Pink/Magenta -> Transparent -> Blue/Cyan)
 const DARK_ANOM_COLORS = [
-  "#FFE2EF", "#FFDAEA", "#FFD2E5", "#FFCAE0", "#FFC2DC", "#FFB9D7",
-  "#FFB3D2", "#FFAECE", "#FEA9CA", "#FEA4C6", "#FE9FC1", "#FD9ABD",
-  "#FC8FB4", "#F97FA5", "#F66D96", "#F25A88", "#EE457A", "#E9296C",
-  "#E32467", "#DD2464", "#D2245F", "#C32457", "#9F264E", "#972852",
-  "#922955", "#8D2C58", "#882F5C", "#83315F", "#7F3361", "#7B3564",
-  "#773867", "#723A6A", "#6D3C6D", "#6A3F6F", "#664372", "#634674",
-  "#5F4977",
+  "#E8FDFF", "#E0FCFF", "#D8FBFF", "#D0FAFF", "#C8F9FF", "#C0F8FF",
+  "#B8F7FF", "#B1F5FD", "#AAF3FD", "#A3F2FC", "#9BF1FB", "#94F0FA",
+  "#89EBF7", "#7AE3F1", "#6BDCEB", "#5AD4E5", "#47CDDF", "#35C4D9",
+  "#31B9D0", "#36AEC6", "#3AA4BC", "#3D99B1", "#3E8FA9", "#3E89A5",
+  "#3E86A3", "#3E82A0", "#3F7D9C", "#407998", "#417695", "#427292",
+  "#456F8E", "#476B8B", "#486588", "#4B5F85", "#4E5B81", "#53567F",
+  "#57517C",
   "transparent", // center bin (-18 to 18)
-  "#57517C", "#53567F", "#4E5A81", "#4C5E84", "#496387", "#47698A",
-  "#466D8D", "#437090", "#427493", "#417796", "#407A99", "#3F7E9D",
-  "#3E82A0", "#3E86A3", "#3E89A5", "#3E8EA8", "#3D96AF", "#3BA1B9",
-  "#38AAC2", "#34B4CB", "#2EBFD5", "#39C8DC", "#4DCFE1", "#5ED6E7",
-  "#6DDDEC", "#7BE4F2", "#89EBF7", "#93F0FA", "#9AF1FB", "#A1F2FC",
-  "#A8F3FD", "#AEF4FD", "#B5F6FE", "#BBF7FF", "#C3F8FF", "#CAF9FF",
-  "#D2FAFF", "#D9FBFF", "#E1FCFF", "#E8FDFF"
+  "#5F4977", "#634674", "#664372", "#694070", "#6C3D6E", "#703B6B",
+  "#753968", "#793766", "#7D3463", "#803260", "#84315E", "#892F5B",
+  "#8D2C58", "#922955", "#972852", "#9E264F", "#BB2555", "#CD245D",
+  "#D92462", "#E02466", "#E62669", "#EB3571", "#EF4C7E", "#F35F8B",
+  "#F67098", "#F980A6", "#FC8FB4", "#FD99BC", "#FE9EC0", "#FEA3C5",
+  "#FEA7C9", "#FFACCC", "#FFB1D0", "#FFB6D4", "#FFBCD9", "#FFC4DD",
+  "#FFCCE1", "#FFD3E6", "#FFDBEA", "#FFE2EF"
 ];
 
 const DARK_ANOM_BELOW = "#FD97BB";
