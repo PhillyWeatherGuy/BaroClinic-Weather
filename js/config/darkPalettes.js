@@ -128,6 +128,38 @@ const DARK_PWAT_HEX = [
     "#fff377", "#fff799", "#fffbba", "#ffffff", "#eaccff", "#cb94ff", "#ab5cff", "#8624ff", "#5e00e0", "#3c00aa"
 ];
 
+// 📊 Dark Mode 500mb Height Anomaly Levels (Meters)
+const DARK_ANOM_LEVELS = [
+  -450, -441, -432, -423, -414, -405, -378, -333, -306, -288, -279, -270,
+  -261, -243, -234, -225, -207, -198, -189, -180, -171, -162, -153, -144,
+  -135, -126, -117, -108, -99, -90, -81, -72, -63, -54, -45, -36, -27, -18,
+  18, 27, 36, 54, 63, 72, 81, 90, 99, 108, 126, 135, 144, 153, 162, 171,
+  180, 189, 198, 207, 216, 225, 234, 252, 261, 270, 279, 288, 297, 306,
+  315, 324, 333, 342, 351, 378, 414, 423, 432, 441, 450
+];
+
+// 📊 Dark Mode 500mb Height Anomaly Colors (Pink/Magenta -> Transparent -> Blue/Cyan)
+const DARK_ANOM_COLORS = [
+  "#FD97BB", "#F8789F", "#F15584", "#E8246A", "#DD2464", "#C9245A",
+  "#AF244E", "#A0254D", "#9B2750", "#982852", "#962953", "#932954",
+  "#902A56", "#8D2C58", "#8C2D59", "#892E5B", "#862F5D", "#84305E",
+  "#82315F", "#803260", "#7E3361", "#7C3463", "#7A3564", "#783766",
+  "#763867", "#733969", "#713A6A", "#6F3B6C", "#6D3C6D", "#6C3E6E",
+  "#6A3F6F", "#684171", "#664372", "#654473", "#634674", "#614876",
+  "#5F4977",
+  "transparent", // ... center bin (-18 to 18)
+  "#57517C", "#56537D", "#53567F", "#505880", "#4E5A81", "#4D5C83",
+  "#4C5E84", "#4B6085", "#4A6286", "#486588", "#47688A", "#466A8B",
+  "#466C8D", "#456E8E", "#446F8F", "#437190", "#437392", "#427493",
+  "#427695", "#417796", "#417998", "#407A99", "#407C9B", "#3F7F9E",
+  "#3F819F", "#3E82A0", "#3E84A1", "#3E86A3", "#3E88A4", "#3E89A5",
+  "#3E8BA6", "#3E8EA8", "#3E91AB", "#3D94AE", "#3C9CB4", "#37AEC5",
+  "#2BC4D9", "#55D2E4", "#74E0EF", "#90EFFA"
+];
+
+const DARK_ANOM_BELOW = "#FD97BB";
+const DARK_ANOM_ABOVE = "#90EFFA";
+
 /**
  * 🌟 WebGL Dynamic Breakpoint Step Interpolator
  * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
@@ -164,6 +196,35 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
     return palette;
 }
 
+/**
+ * 🌟 Linear Diverging Palette Interpolator for Height Anomalies (-350m to +350m)
+ */
+function createAnomalyPalette(levels, colors, belowColor, aboveColor, minVal = -350.0, maxVal = 350.0, numEntries = 256) {
+    const palette = [];
+    for (let i = 0; i < numEntries; i++) {
+        const physicalVal = minVal + (i / (numEntries - 1)) * (maxVal - minVal);
+
+        if (physicalVal < levels[0]) {
+            palette.push(belowColor);
+            continue;
+        }
+        if (physicalVal >= levels[levels.length - 1]) {
+            palette.push(aboveColor);
+            continue;
+        }
+
+        let colorIdx = 0;
+        for (let k = 0; k < levels.length - 1; k++) {
+            if (physicalVal >= levels[k] && physicalVal < levels[k + 1]) {
+                colorIdx = k;
+                break;
+            }
+        }
+        palette.push(colors[colorIdx] || colors[colors.length - 1]);
+    }
+    return palette;
+}
+
 export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     DARK_PRECIP_LEVELS, 
     DARK_PRECIP_HEX, 
@@ -177,6 +238,16 @@ export const ASNOW_PALETTE = createNonLinearPrecipPalette(
     SNOW_RADAR_GLOW,
     [0.0, 1.0, 10.0, 50.0],
     [0, 100, 200, 255],
+    256
+);
+
+export const Z500_ANOM_PALETTE = createAnomalyPalette(
+    DARK_ANOM_LEVELS,
+    DARK_ANOM_COLORS,
+    DARK_ANOM_BELOW,
+    DARK_ANOM_ABOVE,
+    -350.0,
+    350.0,
     256
 );
 
@@ -201,6 +272,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'asnow' || id.includes('snow') || id === 'sf') {
         return ASNOW_PALETTE;
+    }
+    if (id === 'z500_anom' || id.includes('anom')) {
+        return Z500_ANOM_PALETTE;
     }
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
