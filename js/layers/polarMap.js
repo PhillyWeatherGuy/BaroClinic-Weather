@@ -109,11 +109,9 @@ style.textContent = `
         flex-wrap: nowrap;
     }
     .polar-compass-btn {
-        background: rgba(11, 15, 25, 0.88);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        color: #38bdf8;
+        background: #131722;
+        border: 1px solid #232b3c;
+        color: #cbd5e1;
         width: 32px;
         height: 32px;
         border-radius: 50%;
@@ -121,7 +119,7 @@ style.textContent = `
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
         transition: all 0.2s ease;
         flex-shrink: 0;
     }
@@ -131,14 +129,12 @@ style.textContent = `
     .polar-rot-capsule {
         display: none;
         align-items: center;
-        background: rgba(11, 15, 25, 0.88);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: #131722;
+        border: 1px solid #232b3c;
         border-radius: 8px;
         padding: 4px 8px;
         gap: 6px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     }
     @media (min-width: 1024px) {
         .polar-rot-capsule {
@@ -156,11 +152,11 @@ style.textContent = `
         transition: color 0.15s ease;
     }
     .rot-nudge-btn:hover {
-        color: #38bdf8;
+        color: #60a5fa;
     }
     #polar-rot-slider {
         width: 70px;
-        accent-color: #38bdf8;
+        accent-color: #3b82f6;
         cursor: pointer;
         height: 4px;
         appearance: none;
@@ -175,21 +171,19 @@ style.textContent = `
         width: 12px;
         height: 12px;
         border-radius: 50%;
-        background: #38bdf8;
+        background: #3b82f6;
         cursor: pointer;
-        box-shadow: 0 0 6px rgba(56, 189, 248, 0.8);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     }
     .polar-pole-switcher {
         display: flex;
         align-items: center;
-        background: rgba(11, 15, 25, 0.88);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: #131722;
+        border: 1px solid #232b3c;
         border-radius: 8px;
         padding: 3px;
         gap: 3px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
         flex-shrink: 0;
     }
     .pole-btn {
@@ -209,10 +203,10 @@ style.textContent = `
         color: #ffffff;
     }
     .pole-btn.active {
-        background: rgba(56, 189, 248, 0.25);
-        color: #38bdf8;
-        border: 1px solid rgba(56, 189, 248, 0.6);
-        box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+        background: #2563eb;
+        color: #ffffff;
+        border: 1px solid #3b82f6;
+        box-shadow: none;
     }
 `;
 document.head.appendChild(style);

@@ -29,10 +29,10 @@ style.textContent = `
         line-height: 1;
         letter-spacing: -0.5px;
         color: #ffffff;
-        text-shadow: 0 0 4px #000, 0 1px 6px #000, 0 0 10px #000, 0 0 16px #000;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.8);
     }
     .city-callout-val.precip-val {
-        color: #38bdf8;
+        color: #60a5fa;
     }
     .city-callout-name {
         font-size: 13px;
@@ -40,7 +40,7 @@ style.textContent = `
         line-height: 1.1;
         letter-spacing: 0.5px;
         color: #f1f5f9;
-        text-shadow: 0 0 3px #000, 0 1px 4px #000, 0 0 10px #000;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 0.8);
         margin-top: 2px;
     }
 `;

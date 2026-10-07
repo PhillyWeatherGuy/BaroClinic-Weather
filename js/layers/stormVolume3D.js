@@ -47,9 +47,9 @@ function ensureControlStyles() {
             transition: all 0.15s ease;
         }
         .expand-btn:hover {
-            color: #38bdf8;
-            background: rgba(56, 189, 248, 0.2);
-            border-color: rgba(56, 189, 248, 0.5);
+            color: #ffffff;
+            background: #232b3c;
+            border-color: #3b82f6;
         }
         .storm-controls-bar {
             position: absolute;
@@ -59,13 +59,11 @@ function ensureControlStyles() {
             display: flex;
             align-items: center;
             gap: 12px;
-            background: rgba(11, 15, 25, 0.90);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(56, 189, 248, 0.4);
+            background: #131722;
+            border: 1px solid #232b3c;
             border-radius: 8px;
             padding: 5px 12px;
-            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.8);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
             z-index: 20;
             font-family: 'Roboto', sans-serif;
             user-select: none;
@@ -73,10 +71,10 @@ function ensureControlStyles() {
         }
         .storm-mode-pill {
             display: flex;
-            background: rgba(255, 255, 255, 0.06);
+            background: #0f131a;
             border-radius: 6px;
             padding: 2px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid #202634;
             gap: 2px;
         }
         .storm-mode-btn {
@@ -96,9 +94,9 @@ function ensureControlStyles() {
             color: #fff;
         }
         .storm-mode-btn.active {
-            background: rgba(56, 189, 248, 0.3) !important;
-            color: #38bdf8 !important;
-            box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+            background: #2563eb !important;
+            color: #ffffff !important;
+            box-shadow: none;
         }
         .storm-cutoff-group {
             display: flex;
@@ -108,14 +106,14 @@ function ensureControlStyles() {
         .storm-cutoff-label {
             font-size: 12px;
             font-weight: 700;
-            color: #38bdf8;
+            color: #93c5fd;
             letter-spacing: 0.5px;
             white-space: nowrap;
             min-width: 90px;
         }
         .storm-cutoff-range {
             width: 100px;
-            accent-color: #38bdf8;
+            accent-color: #3b82f6;
             cursor: pointer;
             height: 4px;
             appearance: none;
@@ -130,9 +128,9 @@ function ensureControlStyles() {
             width: 12px;
             height: 12px;
             border-radius: 50%;
-            background: #38bdf8;
+            background: #3b82f6;
             cursor: pointer;
-            box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
         }
     `;
     document.head.appendChild(style);

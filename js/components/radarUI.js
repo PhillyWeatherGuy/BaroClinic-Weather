@@ -84,12 +84,10 @@ function ensureArchiveStyles() {
             bottom: calc(100% + 12px);
             left: 0;
             width: 290px;
-            background: rgba(11, 15, 25, 0.96);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: #131722;
+            border: 1px solid #232b3c;
             border-radius: 8px;
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
             padding: 10px;
             z-index: 120;
             font-family: 'Roboto', sans-serif;
@@ -98,13 +96,13 @@ function ensureArchiveStyles() {
         }
         .archive-live-btn {
             width: 100%;
-            background: rgba(56, 189, 248, 0.18);
-            border: 1px solid rgba(56, 189, 248, 0.5);
-            color: #38bdf8;
+            background: #1e2636;
+            border: 1px solid #2b364c;
+            color: #60a5fa;
             font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 12px;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
             padding: 6px;
             border-radius: 8px;
             cursor: pointer;
@@ -116,7 +114,9 @@ function ensureArchiveStyles() {
             transition: all 0.2s ease;
         }
         .archive-live-btn:hover {
-            background: rgba(56, 189, 248, 0.35);
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #3b82f6;
         }
         .duration-selector-row {
             display: flex;
@@ -157,10 +157,10 @@ function ensureArchiveStyles() {
             background: rgba(255, 255, 255, 0.1);
         }
         .duration-pill-btn.active {
-            background: rgba(56, 189, 248, 0.25);
-            color: #38bdf8;
-            border-color: rgba(56, 189, 248, 0.5);
-            box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #3b82f6;
+            box-shadow: none;
         }
         .cal-header {
             display: flex;
@@ -190,9 +190,9 @@ function ensureArchiveStyles() {
             gap: 4px;
         }
         .cal-title-btn:hover {
-            color: #38bdf8;
-            background: rgba(56, 189, 248, 0.15);
-            border-color: rgba(56, 189, 248, 0.4);
+            color: #ffffff;
+            background: #232b3c;
+            border-color: #3b82f6;
         }
         .cal-nav-btn {
             background: transparent;
@@ -241,12 +241,12 @@ function ensureArchiveStyles() {
             transition: all 0.15s ease;
         }
         .cal-day-btn:hover:not(:disabled) {
-            background: rgba(56, 189, 248, 0.2);
-            color: #38bdf8;
+            background: #232b3c;
+            color: #ffffff;
         }
         .cal-day-btn.selected {
-            background: #38bdf8 !important;
-            color: #0b0f19 !important;
+            background: #2563eb !important;
+            color: #ffffff !important;
             font-weight: 700;
         }
         .cal-day-btn:disabled {
@@ -272,13 +272,13 @@ function ensureArchiveStyles() {
             transition: all 0.15s ease;
         }
         .month-chip-btn:hover:not(:disabled) {
-            background: rgba(56, 189, 248, 0.25);
-            color: #38bdf8;
-            border-color: rgba(56, 189, 248, 0.5);
+            background: #232b3c;
+            color: #ffffff;
+            border-color: #3b82f6;
         }
         .month-chip-btn.selected {
-            background: #38bdf8 !important;
-            color: #0b0f19 !important;
+            background: #2563eb !important;
+            color: #ffffff !important;
             font-weight: 700;
         }
         .month-chip-btn:disabled {
@@ -294,7 +294,7 @@ function ensureArchiveStyles() {
         .hours-back-btn {
             background: transparent;
             border: none;
-            color: #38bdf8;
+            color: #60a5fa;
             font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 12px;
@@ -321,9 +321,9 @@ function ensureArchiveStyles() {
             transition: all 0.15s ease;
         }
         .hour-chip-btn:hover {
-            background: rgba(56, 189, 248, 0.25);
-            color: #38bdf8;
-            border-color: rgba(56, 189, 248, 0.5);
+            background: #232b3c;
+            color: #ffffff;
+            border-color: #3b82f6;
         }
 
         /* 🌟 Top Bar Radar Dropdowns Styling */
@@ -331,17 +331,15 @@ function ensureArchiveStyles() {
             position: absolute;
             top: 48px;
             width: 190px;
-            background: rgba(11, 15, 25, 0.96);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: #131722;
+            border: 1px solid #232b3c;
             border-radius: 8px;
             padding: 6px;
             z-index: 100;
             display: flex;
             flex-direction: column;
             gap: 2px;
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
             font-family: 'Roboto', sans-serif;
         }
         .radar-top-item {
@@ -361,12 +359,12 @@ function ensureArchiveStyles() {
             transition: all 0.15s ease;
         }
         .radar-top-item:hover {
-            background: rgba(56, 189, 248, 0.2);
-            color: #38bdf8;
+            background: #1e2636;
+            color: #ffffff;
         }
         .radar-top-item.active {
-            background: rgba(56, 189, 248, 0.25);
-            color: #38bdf8;
+            background: #202838;
+            color: #60a5fa;
         }
         .station-hover-tooltip {
             font-family: 'Roboto', sans-serif;
@@ -755,8 +753,8 @@ function updateRadarSliderTrack() {
     const percent = total > 0 ? (current / total) * 100 : 0;
 
     slider.style.background = `linear-gradient(to right, 
-        rgba(56, 189, 248, 0.6) 0%, 
-        rgba(56, 189, 248, 0.6) ${percent}%, 
+        rgba(59, 130, 246, 0.6) 0%, 
+        rgba(59, 130, 246, 0.6) ${percent}%, 
         rgba(255, 255, 255, 0.15) ${percent}%, 
         rgba(255, 255, 255, 0.15) 100%)`;
 }
