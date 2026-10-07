@@ -20,7 +20,7 @@ style.textContent = `
         justify-content: center;
         pointer-events: none;
         user-select: none;
-        font-family: 'Rajdhani', -apple-system, sans-serif;
+        font-family: 'Roboto', -apple-system, sans-serif;
         text-transform: uppercase;
     }
     .city-callout-val {

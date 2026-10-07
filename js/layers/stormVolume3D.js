@@ -63,18 +63,18 @@ function ensureControlStyles() {
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border: 1px solid rgba(56, 189, 248, 0.4);
-            border-radius: 24px;
+            border-radius: 8px;
             padding: 5px 12px;
             box-shadow: 0 8px 28px rgba(0, 0, 0, 0.8);
             z-index: 20;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             user-select: none;
             -webkit-user-select: none;
         }
         .storm-mode-pill {
             display: flex;
             background: rgba(255, 255, 255, 0.06);
-            border-radius: 16px;
+            border-radius: 6px;
             padding: 2px;
             border: 1px solid rgba(255, 255, 255, 0.1);
             gap: 2px;
@@ -83,12 +83,12 @@ function ensureControlStyles() {
             background: transparent;
             border: none;
             color: #94a3b8;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 11px;
             letter-spacing: 0.5px;
             padding: 3px 8px;
-            border-radius: 12px;
+            border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s ease;
         }

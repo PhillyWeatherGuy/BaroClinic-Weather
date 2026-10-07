@@ -135,7 +135,7 @@ style.textContent = `
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 20px;
+        border-radius: 8px;
         padding: 4px 8px;
         gap: 6px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
@@ -186,7 +186,7 @@ style.textContent = `
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 20px;
+        border-radius: 8px;
         padding: 3px;
         gap: 3px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
@@ -196,12 +196,12 @@ style.textContent = `
         background: transparent;
         border: none;
         color: #94a3b8;
-        font-family: 'Rajdhani', sans-serif;
+        font-family: 'Roboto', sans-serif;
         font-weight: 700;
         font-size: 12px;
         letter-spacing: 0.5px;
         padding: 5px 12px;
-        border-radius: 16px;
+        border-radius: 6px;
         cursor: pointer;
         transition: all 0.2s ease;
     }

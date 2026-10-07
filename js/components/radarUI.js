@@ -88,11 +88,11 @@ function ensureArchiveStyles() {
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 14px;
+            border-radius: 8px;
             box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
             padding: 10px;
             z-index: 120;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             color: #f8fafc;
             box-sizing: border-box;
         }
@@ -101,7 +101,7 @@ function ensureArchiveStyles() {
             background: rgba(56, 189, 248, 0.18);
             border: 1px solid rgba(56, 189, 248, 0.5);
             color: #38bdf8;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 12px;
             letter-spacing: 0.5px;
@@ -144,7 +144,7 @@ function ensureArchiveStyles() {
             background: transparent;
             border: 1px solid transparent;
             color: #94a3b8;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 11px;
             padding: 2px 6px;
@@ -178,7 +178,7 @@ function ensureArchiveStyles() {
             background: transparent;
             border: 1px solid transparent;
             color: #e2e8f0;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 14px;
             cursor: pointer;
@@ -229,7 +229,7 @@ function ensureArchiveStyles() {
             background: transparent;
             border: none;
             color: #cbd5e1;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-size: 12px;
             font-weight: 600;
             aspect-ratio: 1;
@@ -263,7 +263,7 @@ function ensureArchiveStyles() {
             background: rgba(255, 255, 255, 0.06);
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: #cbd5e1;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 13px;
             padding: 8px 0;
@@ -295,7 +295,7 @@ function ensureArchiveStyles() {
             background: transparent;
             border: none;
             color: #38bdf8;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 12px;
             cursor: pointer;
@@ -312,7 +312,7 @@ function ensureArchiveStyles() {
             background: rgba(255, 255, 255, 0.06);
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: #cbd5e1;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-size: 12px;
             font-weight: 700;
             padding: 6px 0;
@@ -335,20 +335,20 @@ function ensureArchiveStyles() {
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 12px;
+            border-radius: 8px;
             padding: 6px;
             z-index: 100;
             display: flex;
             flex-direction: column;
             gap: 2px;
             box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
         }
         .radar-top-item {
             background: transparent;
             border: none;
             color: #cbd5e1;
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             font-weight: 700;
             font-size: 13px;
             text-align: left;
@@ -369,7 +369,7 @@ function ensureArchiveStyles() {
             color: #38bdf8;
         }
         .station-hover-tooltip {
-            font-family: 'Rajdhani', sans-serif;
+            font-family: 'Roboto', sans-serif;
             padding: 4px 6px;
             text-align: center;
         }
