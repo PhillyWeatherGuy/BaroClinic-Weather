@@ -23,17 +23,22 @@ style.textContent = `
         font-family: 'Roboto', -apple-system, sans-serif;
         text-transform: uppercase;
         white-space: nowrap;
+        background: rgba(13, 17, 24, 0.80);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 4px;
+        padding: 2px 6px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
     }
     .city-callout-val {
-        font-size: 13px;
-        font-weight: 700;
+        font-size: 14px;
+        font-weight: 800;
         line-height: 1.1;
         letter-spacing: -0.2px;
         color: #ffffff;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 3px rgba(0, 0, 0, 0.9);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     }
     .city-callout-val.precip-val {
-        color: #60a5fa;
+        color: #7dd3fc;
     }
     .city-callout-name {
         font-size: 10px;
@@ -41,7 +46,6 @@ style.textContent = `
         line-height: 1.1;
         letter-spacing: 0.4px;
         color: #cbd5e1;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);
         margin-top: 1px;
     }
 `;
@@ -331,10 +335,10 @@ export function updateCityPositions() {
         const pos = mapInstance.project([city.lng, city.lat]);
 
         const nameLen = (city.name || '').length;
-        // Bounding box size: width accommodates name or data value; height accommodates 2 lines + margin
-        const boxW = Math.max(50, nameLen * 6.5) + 12;
-        const boxH = 26;
-        const padX = 10; // Extra horizontal clearance buffer
+        // Bounding box size: width accommodates badge padding and name/value text; height accommodates 2 lines + badge padding
+        const boxW = Math.max(54, nameLen * 6.5) + 16;
+        const boxH = 30;
+        const padX = 8;  // Extra horizontal clearance buffer
         const padY = 6;  // Extra vertical clearance buffer
 
         const candidateBox = {
