@@ -23,29 +23,29 @@ style.textContent = `
         font-family: 'Roboto', -apple-system, sans-serif;
         text-transform: uppercase;
         white-space: nowrap;
-        background: rgba(13, 17, 24, 0.80);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 4px;
-        padding: 2px 6px;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
     }
     .city-callout-val {
-        font-size: 14px;
+        font-size: 15px;
         font-weight: 800;
         line-height: 1.1;
         letter-spacing: -0.2px;
         color: #ffffff;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        -webkit-text-stroke: 1.5px #000000;
+        paint-order: stroke fill;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
     }
     .city-callout-val.precip-val {
-        color: #7dd3fc;
+        color: #60a5fa;
     }
     .city-callout-name {
-        font-size: 10px;
-        font-weight: 600;
+        font-size: 11px;
+        font-weight: 700;
         line-height: 1.1;
-        letter-spacing: 0.4px;
-        color: #cbd5e1;
+        letter-spacing: 0.3px;
+        color: #f1f5f9;
+        -webkit-text-stroke: 1px #000000;
+        paint-order: stroke fill;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
         margin-top: 1px;
     }
 `;
@@ -335,10 +335,10 @@ export function updateCityPositions() {
         const pos = mapInstance.project([city.lng, city.lat]);
 
         const nameLen = (city.name || '').length;
-        // Bounding box size: width accommodates badge padding and name/value text; height accommodates 2 lines + badge padding
-        const boxW = Math.max(54, nameLen * 6.5) + 16;
-        const boxH = 30;
-        const padX = 8;  // Extra horizontal clearance buffer
+        // Bounding box size: width accommodates name or data value; height accommodates 2 lines + outline
+        const boxW = Math.max(52, nameLen * 6.8) + 12;
+        const boxH = 28;
+        const padX = 10; // Extra horizontal clearance buffer
         const padY = 6;  // Extra vertical clearance buffer
 
         const candidateBox = {
