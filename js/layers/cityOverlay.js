@@ -22,26 +22,27 @@ style.textContent = `
         user-select: none;
         font-family: 'Roboto', -apple-system, sans-serif;
         text-transform: uppercase;
+        white-space: nowrap;
     }
     .city-callout-val {
-        font-size: 21px;
-        font-weight: 800;
-        line-height: 1;
-        letter-spacing: -0.5px;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.1;
+        letter-spacing: -0.2px;
         color: #ffffff;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.8);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 3px rgba(0, 0, 0, 0.9);
     }
     .city-callout-val.precip-val {
         color: #60a5fa;
     }
     .city-callout-name {
-        font-size: 13px;
-        font-weight: 700;
+        font-size: 10px;
+        font-weight: 600;
         line-height: 1.1;
-        letter-spacing: 0.5px;
-        color: #f1f5f9;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 0.8);
-        margin-top: 2px;
+        letter-spacing: 0.4px;
+        color: #cbd5e1;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);
+        margin-top: 1px;
     }
 `;
 document.head.appendChild(style);
@@ -322,20 +323,38 @@ export function updateCityPositions() {
 
     visible.sort((a, b) => b.pop - a.pop);
 
-    const placedScreenPoints = [];
-    const minDistancePx = 52;
+    const placedBoxes = [];
     activeCities = [];
 
     for (let i = 0; i < visible.length; i++) {
         const city = visible[i];
         const pos = mapInstance.project([city.lng, city.lat]);
 
-        const collides = placedScreenPoints.some(pt => Math.hypot(pt.x - pos.x, pt.y - pos.y) < minDistancePx);
+        const nameLen = (city.name || '').length;
+        // Bounding box size: width accommodates name or data value; height accommodates 2 lines + margin
+        const boxW = Math.max(50, nameLen * 6.5) + 12;
+        const boxH = 26;
+        const padX = 10; // Extra horizontal clearance buffer
+        const padY = 6;  // Extra vertical clearance buffer
+
+        const candidateBox = {
+            left: pos.x - (boxW / 2) - padX,
+            right: pos.x + (boxW / 2) + padX,
+            top: pos.y - (boxH / 2) - padY,
+            bottom: pos.y + (boxH / 2) + padY
+        };
+
+        const collides = placedBoxes.some(b => !(
+            candidateBox.left >= b.right ||
+            candidateBox.right <= b.left ||
+            candidateBox.top >= b.bottom ||
+            candidateBox.bottom <= b.top
+        ));
 
         if (!collides) {
-            placedScreenPoints.push(pos);
+            placedBoxes.push(candidateBox);
             activeCities.push(city);
-            if (activeCities.length >= 40) break;
+            if (activeCities.length >= 60) break;
         }
     }
 
