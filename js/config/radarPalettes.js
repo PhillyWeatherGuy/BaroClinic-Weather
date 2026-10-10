@@ -182,13 +182,20 @@ export const VELOCITY_STOPS = [
 
 export const VELOCITY_RF_COLOR = { r: 123, g: 0, b: 200, a: 255 };
 
-export function generate256VelocityPalette(stops = VELOCITY_STOPS, rfColor = VELOCITY_RF_COLOR) {
+export function generate256VelocityPalette(stops = VELOCITY_STOPS, rfColor = VELOCITY_RF_COLOR, hw31 = null, hw32 = null) {
     const palette = [];
     palette.push({ r: 0, g: 0, b: 0, a: 0 }); // Byte 0: Transparent (Clear air)
     palette.push(rfColor); // Byte 1: Range Folded
 
     for (let i = 2; i < 256; i++) {
-        const mph = (i - 129) * 1.11847;
+        let mph;
+        if (hw31 !== null && hw32 !== null && hw32 !== 0) {
+            const mps = (i - 2) * (hw32 / 10.0) + (hw31 / 10.0);
+            mph = mps * 2.236936;
+        } else {
+            mph = (i - 129) * 1.11847;
+        }
+
         if (mph <= stops[0].val) { palette.push({ r: stops[0].r, g: stops[0].g, b: stops[0].b, a: 255 }); continue; }
         if (mph >= stops[stops.length - 1].val) { const last = stops[stops.length - 1]; palette.push({ r: last.r, g: last.g, b: last.b, a: 255 }); continue; }
 
@@ -328,10 +335,13 @@ export const CC_PALETTE_256 = generate256CCPalette();
  * 5. DYNAMIC PALETTE SELECTOR BY PRODUCT CODE
  * ============================================================================
  */
-export function getRadarPalette(productCode) {
+export function getRadarPalette(productCode, hw31 = null, hw32 = null) {
     const p = (productCode || '').toUpperCase();
 
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
+        if (hw31 !== null && hw32 !== null && hw32 !== 0) {
+            return generate256VelocityPalette(VELOCITY_STOPS, VELOCITY_RF_COLOR, hw31, hw32);
+        }
         return VELOCITY_PALETTE_256;
     }
 
