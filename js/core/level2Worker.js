@@ -20,30 +20,44 @@ const TARGET_RADIALS = 720;
 function decompressLevel2(arrayBuffer) {
     let bytes = new Uint8Array(arrayBuffer);
 
-    // 1. GZIP decompression (standard for pre-2016 archive files ending in .gz)
+    // 1. GZIP decompression (standard for NCEI historical archive files ending in .gz)
+    let wasGzip = false;
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             bytes = unzlibSync(bytes);
+            wasGzip = true;
         } catch (e) {}
     }
 
-    // 2. Locate where data starts (skipping 24-byte AR2V/ARCHIVE2 volume header)
-    let pos = 0;
-    for (let p = 0; p < Math.min(bytes.length - 4, 128); p++) {
-        // Look for 4-byte size followed immediately by BZh (0x42, 0x5a, 0x68)
-        if (p + 7 < bytes.length && bytes[p + 4] === 0x42 && bytes[p + 5] === 0x5a && bytes[p + 6] === 0x68) {
-            pos = p;
-            break;
+    // Determine the 24-byte Archive II volume header offset
+    let headerOffset = 0;
+    if (bytes.length > 24) {
+        const isAR2V = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56); // 2017+ (AR2V)
+        const isARCH = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x43 && bytes[3] === 0x48); // 1991–2016 (ARCHIVE2)
+        if (isAR2V || isARCH) {
+            headerOffset = 24;
         }
     }
-    if (pos === 0 && bytes.length > 24) {
-        pos = 24;
+
+    // 2. Check if the payload uses internal BZIP2 block compression
+    // In BZIP2 chunked files, the first block starts after the header with a 4-byte size followed by "BZh"
+    const hasBzip2 = (
+        headerOffset + 6 < bytes.length &&
+        bytes[headerOffset + 4] === 0x42 &&
+        bytes[headerOffset + 5] === 0x5a &&
+        bytes[headerOffset + 6] === 0x68
+    );
+
+    // 🌟 If the file was GZIPPED and has no BZIP2 blocks, NCEI archived it as raw uncompressed records!
+    if (!hasBzip2 && wasGzip) {
+        return (headerOffset > 0) ? bytes.subarray(headerOffset) : bytes;
     }
 
+    // 3. Scan for BZIP2 chunked blocks (standard real-time & modern LDM archives)
+    let pos = headerOffset;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-
-    // 3. Scan for BZIP2 chunked blocks (standard 2008–present)
     const decompressedChunks = [];
+
     while (pos + 4 < bytes.length) {
         let chunkSize = view.getInt32(pos, false);
         pos += 4;
@@ -80,12 +94,13 @@ function decompressLevel2(arrayBuffer) {
         return fullBuffer;
     }
 
-    // 4. Fallback: single stream BZIP2 or uncompressed raw legacy records (1991–2007)
+    // 4. Fallback: single stream BZIP2 or uncompressed raw records
     try {
         const out = seekBzip.decode(bytes);
         return new Uint8Array(out);
     } catch (e) {
-        return (pos > 0) ? bytes.subarray(pos) : bytes;
+        // Return full decompressed payload without slicing to 0 length
+        return (headerOffset > 0) ? bytes.subarray(headerOffset) : bytes;
     }
 }
 
@@ -98,7 +113,6 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
     const limit = rawBytes.length - 120;
     const isVel = (targetType === 'VEL');
 
-    // 4-letter ICAO and 3-letter FAA identifier variants
     const fullCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
     const shortCode = (stationId.length === 4 && stationId.startsWith('K') ? stationId.slice(1) : stationId).toUpperCase();
 
@@ -106,7 +120,6 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
     // PASS 1: Modern Message 31 (2008 – Present, Super-Res)
     // =========================================================
     for (let i = 0; i <= limit; i++) {
-        // Match either 4-letter ICAO (e.g. "KILN") OR 3-letter ("ILN ") OR Message Header Type 31
         let isMsg31 = false;
         let hdrPos = i;
 
@@ -116,7 +129,6 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
         ) {
             isMsg31 = true;
         } else if (i >= 12 && view.getUint8(i - 8) === 31) {
-            // Checked via 12-byte Message Header: Message Type = 31
             isMsg31 = true;
         }
 
