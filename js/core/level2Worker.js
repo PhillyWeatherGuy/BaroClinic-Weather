@@ -1,5 +1,5 @@
 // js/core/level2Worker.js
-import { unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
+import { gunzipSync, unzlibSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import seekBzip from 'https://cdn.jsdelivr.net/npm/seek-bzip@1.0.6/+esm';
 
 // Ultra-HD 9x Grid: 384 (East-West) x 96 (Altitude) x 384 (North-South) ~ 14 MB
@@ -20,44 +20,30 @@ const TARGET_RADIALS = 720;
 function decompressLevel2(arrayBuffer) {
     let bytes = new Uint8Array(arrayBuffer);
 
-    // 1. GZIP decompression (standard for NCEI historical archive files ending in .gz)
-    let wasGzip = false;
+    // 1. 🌟 GZIP decompression (Uses gunzipSync for RFC 1952 .gz archives)
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
-            bytes = unzlibSync(bytes);
-            wasGzip = true;
-        } catch (e) {}
+            bytes = gunzipSync(bytes);
+        } catch (e) {
+            console.warn("Gunzip failed:", e);
+        }
     }
 
-    // Determine the 24-byte Archive II volume header offset
-    let headerOffset = 0;
+    // 2. Identify 24-byte Archive II volume header (AR2V or ARCHIVE2)
+    let pos = 0;
     if (bytes.length > 24) {
         const isAR2V = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56); // 2017+ (AR2V)
         const isARCH = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x43 && bytes[3] === 0x48); // 1991–2016 (ARCHIVE2)
         if (isAR2V || isARCH) {
-            headerOffset = 24;
+            pos = 24;
         }
     }
 
-    // 2. Check if the payload uses internal BZIP2 block compression
-    // In BZIP2 chunked files, the first block starts after the header with a 4-byte size followed by "BZh"
-    const hasBzip2 = (
-        headerOffset + 6 < bytes.length &&
-        bytes[headerOffset + 4] === 0x42 &&
-        bytes[headerOffset + 5] === 0x5a &&
-        bytes[headerOffset + 6] === 0x68
-    );
-
-    // 🌟 If the file was GZIPPED and has no BZIP2 blocks, NCEI archived it as raw uncompressed records!
-    if (!hasBzip2 && wasGzip) {
-        return (headerOffset > 0) ? bytes.subarray(headerOffset) : bytes;
-    }
-
-    // 3. Scan for BZIP2 chunked blocks (standard real-time & modern LDM archives)
-    let pos = headerOffset;
+    const startOffset = pos;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const decompressedChunks = [];
 
+    // 3. Scan for BZIP2 chunked blocks (standard 2008+)
+    const decompressedChunks = [];
     while (pos + 4 < bytes.length) {
         let chunkSize = view.getInt32(pos, false);
         pos += 4;
@@ -94,13 +80,12 @@ function decompressLevel2(arrayBuffer) {
         return fullBuffer;
     }
 
-    // 4. Fallback: single stream BZIP2 or uncompressed raw records
+    // 4. Fallback: uncompressed raw legacy records or single-stream BZIP2
     try {
         const out = seekBzip.decode(bytes);
         return new Uint8Array(out);
     } catch (e) {
-        // Return full decompressed payload without slicing to 0 length
-        return (headerOffset > 0) ? bytes.subarray(headerOffset) : bytes;
+        return (startOffset > 0) ? bytes.subarray(startOffset) : bytes;
     }
 }
 
@@ -317,7 +302,6 @@ function sampleSweepBilinear(sweep, slantRangeMeters, azDeg) {
 
 /**
  * 🌟 High-Speed Separable 3D Gaussian/Box Filter (GR2Analyst "Smoothing" Engine)
- * Runs in ~20ms in the worker; melts discrete voxel boundaries and sweep terraces into smooth fluid
  */
 function smoothVolume3D(src, X, Y, Z) {
     const temp = new Uint8Array(X * Y * Z);
@@ -526,7 +510,7 @@ self.onmessage = async (e) => {
             return;
         }
 
-        // Standard 3D Volumetric Processing (untouched)
+        // Standard 3D Volumetric Processing
         const { voxels, tilts } = processVolume(
             decompressedBytes,
             radarLat,
