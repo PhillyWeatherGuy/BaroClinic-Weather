@@ -24,7 +24,49 @@ let activeStationId = null;
 let activeStationLat = 0;
 let activeStationLon = 0;
 let singleSiteFrames = []; // Dynamically sized (12 to 48 frames)
+
+// 🌟 Level 2 Worker Bridge for Pre-March 2020 Archives (1991–2020)
 let l2Worker = null;
+const pendingL2Requests = new Map();
+
+function getL2Worker() {
+    if (!l2Worker) {
+        l2Worker = new Worker('./js/core/level2Worker.js', { type: 'module' });
+        l2Worker.onmessage = (e) => {
+            const { id, success, sweep, error } = e.data;
+            const resolver = pendingL2Requests.get(id);
+            if (resolver) {
+                pendingL2Requests.delete(id);
+                if (success && sweep) {
+                    resolver.resolve(sweep);
+                } else {
+                    resolver.reject(new Error(error || 'Level 2 extraction failed'));
+                }
+            }
+        };
+        l2Worker.onerror = (err) => {
+            console.error('[Level 2 Worker Error]', err);
+        };
+    }
+    return l2Worker;
+}
+
+function extract2DSweepFromL2(rawBuffer, station, lat, lon, product) {
+    return new Promise((resolve, reject) => {
+        const worker = getL2Worker();
+        const id = Date.now() + Math.random();
+        pendingL2Requests.set(id, { resolve, reject });
+        worker.postMessage({
+            id,
+            mode: '2d',
+            rawBuffer,
+            station,
+            radarLat: lat,
+            radarLon: lon,
+            product
+        }, [rawBuffer]);
+    });
+}
 
 // 🌟 Live Auto-Refresh (keeps the "LIVE" slot current without a full reload/flash)
 let localRadarAutoRefreshInterval = null;
@@ -435,7 +477,7 @@ function setupHoverInspection(mapInstance) {
         }
 
         const rawByte = sampleRadarSweep(e.lngLat.lng, e.lngLat.lat, currentFrame.sweepData);
-        const formatted = formatRadarValue(rawByte, currentFrame.sweepData.product);
+        const formatted = formatRadarValue(rawByte, currentFrame.sweepData);
 
         if (!formatted) {
             if (radarCursorBadge) radarCursorBadge.style.display = 'none';
@@ -598,7 +640,6 @@ export function setRadarFrame(frameIndex, persist = true) {
     const slider = document.getElementById('timeline-slider');
     if (slider) slider.value = frameIndex.toString();
 
-    // 🌟 Dynamically get exact scanDate for Local Mode or fallback to Composite snapped date
     let frameDate = null;
     let frameLabel = '';
 
@@ -654,7 +695,6 @@ export function setRadarFrame(frameIndex, persist = true) {
 
     updateRadarSliderTrack();
 
-    // 🌟 Synchronize 3D Storm Volume with active frame
     if (stateManager.is3DVolumeActive && stateManager.selectedStormBounds) {
         sync3DVolumeWithCurrentFrame(frameIndex);
     }
@@ -839,7 +879,6 @@ function renderArchivePopover() {
     archivePopoverEl.innerHTML = '';
     const now = new Date();
 
-    // 1. Return to Live Loop Button
     const liveBtn = document.createElement('button');
     liveBtn.className = 'archive-live-btn';
     liveBtn.innerHTML = `<span>Live Radar</span>`;
@@ -871,7 +910,6 @@ function renderArchivePopover() {
             renderArchivePopover();
         };
 
-        // 🌟 Duration Selector Row [ 1h | 2h | 3h | 6h | 12h | 24h ]
         const durRow = document.createElement('div');
         durRow.className = 'duration-selector-row';
         durRow.innerHTML = `
@@ -1166,7 +1204,6 @@ function initRadarParamDropdown() {
                     b.classList.toggle('active', b.getAttribute('data-product') === selectedProd);
                 });
 
-                // Velocity, CC, and Accumulation are single-site products: switch to Local view if currently on composite
                 if (selectedProd !== 'N0B' && activeRadarViewType === 'composite') {
                     setRadarViewType('local');
                 }
@@ -1219,7 +1256,6 @@ export function setRadarViewType(type) {
         stopLocalRadarAutoRefresh();
         if (radarCursorBadge) radarCursorBadge.style.display = 'none';
 
-        // Restore composite layers visibility
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
@@ -1234,7 +1270,6 @@ export function setRadarViewType(type) {
         if (modelBtn) modelBtn.querySelector('span').textContent = activeStationId ? `Local Radar (${activeStationId})` : 'Local Radar';
         setStationLayersVisibility(true);
 
-        // Hide all composite layers
         if (radarState.frames) {
             radarState.frames.forEach((frame) => {
                 const layerId = `iem-radar-layer-${frame.index}`;
@@ -1256,7 +1291,7 @@ export function setRadarViewType(type) {
 }
 
 /**
- * 🌟 8. Fetch Real-Time or Archive Level 3 Sweep via Your Cloudflare Worker S3 Engine
+ * 🌟 8. Fetch Real-Time or Modern Level 3 (March 2020+) from S3
  */
 async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, archiveDate = null, durationHours = 1, product = null) {
     const prod = product || stateManager.activeRadarProduct || 'N0B';
@@ -1278,6 +1313,35 @@ async function fetchLevel3Frame(stationId, frameIndex = 11, totalFrames = 12, ar
         throw new Error(`Worker returned HTTP ${resp.status} for ${stationId} (${prod}) frame ${frameIndex}`);
     }
     return await resp.arrayBuffer();
+}
+
+/**
+ * 🌟 8b. Unified Fetch Router: Automatically routes pre-March 30, 2020 archives to Level 2
+ */
+async function fetchRadarSweep(stationId, lat, lon, frameIndex, totalFrames, archiveDate, dur, product) {
+    const isPre2020Archive = Boolean(archiveDate && archiveDate.getTime() < Date.UTC(2020, 2, 30));
+
+    if (isPre2020Archive) {
+        const frameDate = radarState.frames?.[frameIndex]?.date || archiveDate;
+        const yyyy = frameDate.getUTCFullYear();
+        const mm = String(frameDate.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(frameDate.getUTCDate()).padStart(2, '0');
+        const hh = String(frameDate.getUTCHours()).padStart(2, '0');
+        const mi = String(frameDate.getUTCMinutes()).padStart(2, '0');
+
+        const l2Url = `https://baroclinic-data-proxy.andrew-n-orsini.workers.dev/radar-l2?station=${stationId}&date=${yyyy}${mm}${dd}&time=${hh}${mi}`;
+        const resp = await fetch(l2Url);
+        if (!resp.ok) {
+            throw new Error(`Level 2 scan not found (${resp.status})`);
+        }
+        const buf = await resp.arrayBuffer();
+        const sweep = await extract2DSweepFromL2(buf, stationId, lat, lon, product);
+        sweep.scanDate = frameDate;
+        return sweep;
+    } else {
+        const rawBuffer = await fetchLevel3Frame(stationId, frameIndex, totalFrames, archiveDate, dur, product);
+        return await decodeLevel3(rawBuffer, { id: stationId, lat, lon, product });
+    }
 }
 
 /**
@@ -1318,8 +1382,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
 
         // 2. Load and render default frame immediately
         const defaultIndex = (radarState.mode === 'live') ? (totalFrames - 1) : 0;
-        const rawBuffer = await fetchLevel3Frame(stationId, defaultIndex, totalFrames, radarState.archiveDate, dur, currentProd);
-        const sweep = await decodeLevel3(rawBuffer, { id: stationId, lat, lon, product: currentProd });
+        const sweep = await fetchRadarSweep(stationId, lat, lon, defaultIndex, totalFrames, radarState.archiveDate, dur, currentProd);
 
         singleSiteFrames[defaultIndex] = {
             index: defaultIndex,
@@ -1351,7 +1414,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
             radarMapInstance.moveLayer(singleSiteRadarLayer.id, firstOverlayId);
         }
 
-        singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd));
+        singleSiteRadarLayer.updatePalette(getRadarPalette(currentProd, sweep.hw31, sweep.hw32));
         singleSiteRadarLayer.setSweepData(sweep);
 
         if (runLabel) runLabel.textContent = `${stationId} (${dur}h Loop)`;
@@ -1361,8 +1424,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
         // 4. Preload remaining historical frames in background from S3
         for (let i = 0; i < totalFrames; i++) {
             if (i === defaultIndex) continue;
-            fetchLevel3Frame(stationId, i, totalFrames, radarState.archiveDate, dur, currentProd)
-                .then(buf => decodeLevel3(buf, { id: stationId, lat, lon, product: currentProd }))
+            fetchRadarSweep(stationId, lat, lon, i, totalFrames, radarState.archiveDate, dur, currentProd)
                 .then(decodedSweep => {
                     singleSiteFrames[i] = {
                         index: i,
@@ -1373,7 +1435,7 @@ async function loadSingleSiteRadar(stationId, lat, lon) {
                 .catch(() => {});
         }
 
-        // 5. Auto-refresh loop
+        // 5. Auto-refresh loop (only during live viewing)
         if (radarState.mode === 'live') {
             startLocalRadarAutoRefresh();
         } else {
@@ -1611,6 +1673,12 @@ export function destroyRadarMode(mapInstance) {
         radarCursorBadge.remove();
         radarCursorBadge = null;
     }
+
+    if (l2Worker) {
+        l2Worker.terminate();
+        l2Worker = null;
+    }
+    pendingL2Requests.clear();
 
     if (singleSiteRadarLayer) {
         try {
