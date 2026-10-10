@@ -41,7 +41,7 @@ export const RADAR_STATIONS = [
     { id: "KHTX", name: "Huntsville", state: "AL", lat: 34.9306, lon: -86.0833, type: "wsr88d" },
     { id: "KGWX", name: "Columbus AFB", state: "MS", lat: 33.8967, lon: -88.3292, type: "wsr88d" },
     { id: "KDGX", name: "Jackson / Brandon", state: "MS", lat: 32.2800, lon: -89.9842, type: "wsr88d" },
-    { id: "KLIX", name: "New Orleans / Slidell", state: "LA", lat: 30.3367, lon: -89.8256, type: "wsr88d" },
+    { id: "KHDC", name: "New Orleans / Hammond", state: "LA", lat: 30.519, lon: -90.407, type: "wsr88d" },
     { id: "KLCH", name: "Lake Charles", state: "LA", lat: 30.1253, lon: -93.2158, type: "wsr88d" },
     { id: "KSHV", name: "Shreveport", state: "LA", lat: 32.4508, lon: -93.8414, type: "wsr88d" },
     { id: "KPOE", name: "Fort Polk", state: "LA", lat: 31.1556, lon: -92.9761, type: "wsr88d" },
