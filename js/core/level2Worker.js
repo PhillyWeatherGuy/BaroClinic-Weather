@@ -20,30 +20,45 @@ const TARGET_RADIALS = 720;
 function decompressLevel2(arrayBuffer) {
     let bytes = new Uint8Array(arrayBuffer);
 
-    // 1. 🌟 GZIP decompression (Uses gunzipSync for RFC 1952 .gz archives)
+    // 1. GZIP decompression (standard for NCEI historical archive files ending in .gz)
+    let wasGzip = false;
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             bytes = gunzipSync(bytes);
+            wasGzip = true;
         } catch (e) {
             console.warn("Gunzip failed:", e);
         }
     }
 
-    // 2. Identify 24-byte Archive II volume header (AR2V or ARCHIVE2)
-    let pos = 0;
+    // Determine the 24-byte Archive II volume header offset
+    let headerOffset = 0;
     if (bytes.length > 24) {
         const isAR2V = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56); // 2017+ (AR2V)
         const isARCH = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x43 && bytes[3] === 0x48); // 1991–2016 (ARCHIVE2)
         if (isAR2V || isARCH) {
-            pos = 24;
+            headerOffset = 24;
         }
     }
 
-    const startOffset = pos;
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    // 2. Check if the payload uses internal BZIP2 block compression
+    const hasBzip2 = (
+        headerOffset + 6 < bytes.length &&
+        bytes[headerOffset + 4] === 0x42 &&
+        bytes[headerOffset + 5] === 0x5a &&
+        bytes[headerOffset + 6] === 0x68
+    );
 
-    // 3. Scan for BZIP2 chunked blocks (standard 2008+)
+    // If the file was GZIPPED and has no BZIP2 blocks, NCEI archived it as raw uncompressed records!
+    if (!hasBzip2 && wasGzip) {
+        return (headerOffset > 0) ? bytes.subarray(headerOffset) : bytes;
+    }
+
+    // 3. Scan for BZIP2 chunked blocks (standard real-time & modern LDM archives)
+    let pos = headerOffset;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const decompressedChunks = [];
+
     while (pos + 4 < bytes.length) {
         let chunkSize = view.getInt32(pos, false);
         pos += 4;
@@ -80,17 +95,17 @@ function decompressLevel2(arrayBuffer) {
         return fullBuffer;
     }
 
-    // 4. Fallback: uncompressed raw legacy records or single-stream BZIP2
+    // 4. Fallback: single stream BZIP2 or uncompressed raw records
     try {
         const out = seekBzip.decode(bytes);
         return new Uint8Array(out);
     } catch (e) {
-        return (startOffset > 0) ? bytes.subarray(startOffset) : bytes;
+        return (headerOffset > 0) ? bytes.subarray(headerOffset) : bytes;
     }
 }
 
 /**
- * 🛰️ Universal Sweep Parser (Message 31 Super-Res 2008+ & Message 1 Legacy 1991–2007)
+ * 🛰️ Universal Sweep Parser (Message 31 Super-Res 2008+ & Message 1 Legacy 1991–2008)
  */
 function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
@@ -181,7 +196,7 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
     }
 
     // =========================================================
-    // PASS 2: Legacy Message 1 Fallback (1991 – 2007 Archives)
+    // PASS 2: Legacy Message 1 Fallback (1991 – 2008 Archives)
     // =========================================================
     if (sweepsByElevation.size === 0) {
         for (let pos = 0; pos <= rawBytes.length - 2432; ) {
@@ -196,27 +211,42 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
                 const azRaw = view.getUint16(msgOffset + 24, false);
                 const elRaw = view.getInt16(msgOffset + 30, false);
                 const elIndex = view.getUint16(msgOffset + 32, false);
-                const firstGateMeters = view.getUint16(msgOffset + 34, false);
-                const gateSpacingMeters = view.getUint16(msgOffset + 38, false);
-                const numGates = view.getUint16(msgOffset + 42, false);
+
+                // Correct offsets from NOAA ICD Message 1 header:
+                // Reflectivity: first_gate @ +34, gate_width @ +38, num_gates @ +42, pointer @ +52
+                // Velocity:     first_gate @ +36, gate_width @ +40, num_gates @ +44, pointer @ +54
+                const firstGateMeters = isVel 
+                    ? view.getInt16(msgOffset + 36, false) 
+                    : view.getInt16(msgOffset + 34, false);
+                const gateSpacingMeters = isVel 
+                    ? view.getUint16(msgOffset + 40, false) 
+                    : view.getUint16(msgOffset + 38, false);
+                const numGates = isVel 
+                    ? view.getUint16(msgOffset + 44, false) 
+                    : view.getUint16(msgOffset + 42, false);
+
                 const dataPtr = isVel
-                    ? (view.getUint16(msgOffset + 66, false) || view.getUint16(msgOffset + 64, false))
-                    : view.getUint16(msgOffset + 64, false);
+                    ? (view.getUint16(msgOffset + 54, false) || view.getUint16(msgOffset + 52, false))
+                    : view.getUint16(msgOffset + 52, false);
 
                 const azAngle = (azRaw * 180.0) / 32768.0;
                 const elAngle = (elRaw * 180.0) / 32768.0;
 
                 if (azAngle >= 0.0 && azAngle <= 360.0 && elAngle >= -2.0 && elAngle <= 45.0 && 
-                    numGates > 0 && numGates <= 1000 && dataPtr >= 64 && dataPtr < 2000) {
+                    numGates > 0 && numGates <= 1000 && dataPtr >= 50 && dataPtr < 2000) {
+
+                    const dopRes = view.getUint16(msgOffset + 58, false); // 1 = 0.5 m/s, 2 = 1.0 m/s
+                    const scale = isVel ? (dopRes === 2 ? 1.0 : 2.0) : 2.0;
+                    const offsetVal = isVel ? 129.0 : 66.0;
 
                     if (!sweepsByElevation.has(elIndex)) {
                         sweepsByElevation.set(elIndex, {
                             elIndex,
                             elAngle: parseFloat(elAngle.toFixed(2)),
-                            firstGateMeters: firstGateMeters || 1000,
-                            gateSpacingMeters: gateSpacingMeters || 1000,
-                            scale: 2.0,
-                            offsetVal: isVel ? 129.0 : 66.0,
+                            firstGateMeters: firstGateMeters || (isVel ? 250 : 1000),
+                            gateSpacingMeters: gateSpacingMeters || (isVel ? 250 : 1000),
+                            scale: scale,
+                            offsetVal: offsetVal,
                             numGates: numGates,
                             radials: new Array(TARGET_RADIALS),
                             filledRays: new Uint8Array(TARGET_RADIALS)
