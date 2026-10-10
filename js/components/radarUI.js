@@ -24,6 +24,7 @@ let activeStationId = null;
 let activeStationLat = 0;
 let activeStationLon = 0;
 let singleSiteFrames = []; // Dynamically sized (12 to 48 frames)
+let l2Worker = null;
 
 // 🌟 Live Auto-Refresh (keeps the "LIVE" slot current without a full reload/flash)
 let localRadarAutoRefreshInterval = null;
@@ -606,7 +607,6 @@ export function setRadarFrame(frameIndex, persist = true) {
         if (frameObj && frameObj.sweepData) {
             frameDate = frameObj.sweepData.scanDate;
             if (frameDate) {
-                // Real scan timestamp label: e.g. "18:04Z"
                 const hh = String(frameDate.getUTCHours()).padStart(2, '0');
                 const mi = String(frameDate.getUTCMinutes()).padStart(2, '0');
                 frameLabel = (frameIndex === totalFrames - 1 && radarState.mode === 'live') ? 'LIVE' : `${hh}:${mi}Z`;
@@ -698,10 +698,8 @@ export function pauseRadarPlayback() {
 function updateRadarPlayPauseUI() {
     const playIcon = document.getElementById('play-icon');
     const pauseIcon = document.getElementById('pause-icon');
-    if (playIcon && pauseIcon) {
-        playIcon.style.display = isRadarPlaying ? 'none' : 'block';
-        pauseIcon.style.display = isRadarPlaying ? 'block' : 'none';
-    }
+    if (playIcon) playIcon.style.display = isRadarPlaying ? 'none' : 'block';
+    if (pauseIcon) pauseIcon.style.display = isRadarPlaying ? 'block' : 'none';
 }
 
 /**
@@ -1436,9 +1434,7 @@ function startLocalRadarAutoRefresh() {
                     });
                 }
             }
-        } catch (err) {
-            console.warn(`[RadarUI] Auto-refresh failed for ${activeStationId}:`, err);
-        }
+        } catch (err) {}
     }, LOCAL_RADAR_REFRESH_MS);
 }
 
