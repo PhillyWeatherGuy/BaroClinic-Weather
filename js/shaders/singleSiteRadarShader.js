@@ -108,11 +108,10 @@ export function createSingleSiteRadarLayer(mapInstance) {
             if (!this.gl || !sweep || !sweep.data) return;
             const gl = this.gl;
 
+            // 🌟 Passes dynamic radar calibration so palette matches the actual scale
             if (sweep.product) {
-                const targetPal = getRadarPalette(sweep.product);
-                if (targetPal !== this.activePalette) {
-                    this.updatePalette(targetPal);
-                }
+                const targetPal = getRadarPalette(sweep.product, sweep.hw31, sweep.hw32);
+                this.updatePalette(targetPal);
             }
 
             this.centerLngLat = [sweep.lon, sweep.lat];
