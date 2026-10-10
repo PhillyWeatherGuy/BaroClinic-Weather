@@ -81,13 +81,14 @@ function decompressLevel2(arrayBuffer) {
 /**
  * 🛰️ Universal Sweep Parser (Message 31 Super-Res 2008+ & Message 1 Legacy 1991–2007)
  */
-function parseSweepsFromLevel2(rawBytes, stationId) {
+function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
     const sCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
     const c0 = sCode.charCodeAt(0), c1 = sCode.charCodeAt(1), c2 = sCode.charCodeAt(2), c3 = sCode.charCodeAt(3);
 
     const sweepsByElevation = new Map();
     const limit = rawBytes.length - 120;
+    const isVel = (targetType === 'VEL');
 
     // =========================================================
     // PASS 1: Modern Message 31 (2008 – Present, Super-Res)
@@ -101,27 +102,37 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
             const dataBlockCount = view.getUint16(hdrPos + 30, false);
 
             if (azAngle >= 0.0 && azAngle <= 360.0 && elIndex >= 1 && elIndex <= 35 && elAngle >= -2.0 && elAngle <= 45.0 && dataBlockCount >= 2 && dataBlockCount <= 16) {
-                let refOffset = -1;
+                let targetOffset = -1;
                 for (let b = 0; b < dataBlockCount; b++) {
                     const ptrPos = hdrPos + 32 + (b * 4);
                     if (ptrPos + 4 > rawBytes.length) break;
                     const ptr = view.getUint32(ptrPos, false);
                     if (ptr > 0 && hdrPos + ptr + 4 <= rawBytes.length) {
                         const blkPos = hdrPos + ptr;
-                        if ((rawBytes[blkPos] === 68 && rawBytes[blkPos + 1] === 82 && rawBytes[blkPos + 2] === 69 && rawBytes[blkPos + 3] === 70) ||
-                            (rawBytes[blkPos] === 82 && rawBytes[blkPos + 1] === 69 && rawBytes[blkPos + 2] === 70)) {
-                            refOffset = blkPos;
-                            break;
+                        if (isVel) {
+                            // Check for DVEL (68, 86, 69, 76) or VEL (86, 69, 76)
+                            if ((rawBytes[blkPos] === 68 && rawBytes[blkPos + 1] === 86 && rawBytes[blkPos + 2] === 69 && rawBytes[blkPos + 3] === 76) ||
+                                (rawBytes[blkPos] === 86 && rawBytes[blkPos + 1] === 69 && rawBytes[blkPos + 2] === 76)) {
+                                targetOffset = blkPos;
+                                break;
+                            }
+                        } else {
+                            // Check for DREF (68, 82, 69, 70) or REF (82, 69, 70)
+                            if ((rawBytes[blkPos] === 68 && rawBytes[blkPos + 1] === 82 && rawBytes[blkPos + 2] === 69 && rawBytes[blkPos + 3] === 70) ||
+                                (rawBytes[blkPos] === 82 && rawBytes[blkPos + 1] === 69 && rawBytes[blkPos + 2] === 70)) {
+                                targetOffset = blkPos;
+                                break;
+                            }
                         }
                     }
                 }
 
-                if (refOffset > 0 && refOffset + 28 <= rawBytes.length) {
-                    const numGates = view.getUint16(refOffset + 8, false);
-                    const firstGateMeters = view.getUint16(refOffset + 10, false);
-                    const gateSpacingMeters = view.getUint16(refOffset + 12, false);
-                    const scale = view.getFloat32(refOffset + 20, false) || 2.0;
-                    const offsetVal = view.getFloat32(refOffset + 24, false) || 66.0;
+                if (targetOffset > 0 && targetOffset + 28 <= rawBytes.length) {
+                    const numGates = view.getUint16(targetOffset + 8, false);
+                    const firstGateMeters = view.getUint16(targetOffset + 10, false);
+                    const gateSpacingMeters = view.getUint16(targetOffset + 12, false);
+                    const scale = view.getFloat32(targetOffset + 20, false) || 2.0;
+                    const offsetVal = view.getFloat32(targetOffset + 24, false) || (isVel ? 129.0 : 66.0);
 
                     if (!sweepsByElevation.has(elIndex)) {
                         sweepsByElevation.set(elIndex, {
@@ -139,7 +150,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
 
                     const sweep = sweepsByElevation.get(elIndex);
                     const rayIdx = Math.min(TARGET_RADIALS - 1, Math.max(0, Math.round(azAngle * 2) % TARGET_RADIALS));
-                    const gateBytes = rawBytes.subarray(refOffset + 28, refOffset + 28 + numGates);
+                    const gateBytes = rawBytes.subarray(targetOffset + 28, targetOffset + 28 + numGates);
                     sweep.radials[rayIdx] = new Uint8Array(gateBytes);
                     sweep.filledRays[rayIdx] = 1;
 
@@ -154,7 +165,6 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
     // =========================================================
     if (sweepsByElevation.size === 0) {
         for (let pos = 0; pos <= rawBytes.length - 2432; ) {
-            // Check for 12-byte CTM header + Message 1 or direct message start
             let msgOffset = -1;
             if (view.getUint16(pos + 12, false) === 1208 && view.getUint8(pos + 15) === 1) {
                 msgOffset = pos + 12;
@@ -169,14 +179,16 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
                 const firstGateMeters = view.getUint16(msgOffset + 34, false);
                 const gateSpacingMeters = view.getUint16(msgOffset + 38, false);
                 const numGates = view.getUint16(msgOffset + 42, false);
-                const refPtr = view.getUint16(msgOffset + 64, false);
+                // Byte 64 = Refl pointer, Byte 66 = Velocity pointer
+                const dataPtr = isVel
+                    ? (view.getUint16(msgOffset + 66, false) || view.getUint16(msgOffset + 64, false))
+                    : view.getUint16(msgOffset + 64, false);
 
-                // Binary Angular Measurement System (BAMS): 65536 = 360 degrees
                 const azAngle = (azRaw * 180.0) / 32768.0;
                 const elAngle = (elRaw * 180.0) / 32768.0;
 
                 if (azAngle >= 0.0 && azAngle <= 360.0 && elAngle >= -2.0 && elAngle <= 45.0 && 
-                    numGates > 0 && numGates <= 1000 && refPtr >= 64 && refPtr < 2000) {
+                    numGates > 0 && numGates <= 1000 && dataPtr >= 64 && dataPtr < 2000) {
 
                     if (!sweepsByElevation.has(elIndex)) {
                         sweepsByElevation.set(elIndex, {
@@ -185,7 +197,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
                             firstGateMeters: firstGateMeters || 1000,
                             gateSpacingMeters: gateSpacingMeters || 1000,
                             scale: 2.0,
-                            offsetVal: 66.0,
+                            offsetVal: isVel ? 129.0 : 66.0,
                             numGates: numGates,
                             radials: new Array(TARGET_RADIALS),
                             filledRays: new Uint8Array(TARGET_RADIALS)
@@ -194,7 +206,7 @@ function parseSweepsFromLevel2(rawBytes, stationId) {
 
                     const sweep = sweepsByElevation.get(elIndex);
                     const rayIdx = Math.min(TARGET_RADIALS - 1, Math.max(0, Math.round(azAngle * 2) % TARGET_RADIALS));
-                    const gateStart = msgOffset + refPtr;
+                    const gateStart = msgOffset + dataPtr;
                     const gateBytes = rawBytes.subarray(gateStart, gateStart + numGates);
                     sweep.radials[rayIdx] = new Uint8Array(gateBytes);
                     sweep.filledRays[rayIdx] = 1;
@@ -331,7 +343,7 @@ function smoothVolume3D(src, X, Y, Z) {
  * 🌟 Constructs Ultra-HD 3D Volume (384 x 96 x 384) with Hermite & Gaussian Beam Interpolation
  */
 function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX') {
-    const sweeps = parseSweepsFromLevel2(rawBytes, stationId);
+    const sweeps = parseSweepsFromLevel2(rawBytes, stationId, 'REF');
     if (sweeps.length === 0) {
         throw new Error(`No valid Level 2 sweeps found for ${stationId}`);
     }
@@ -389,12 +401,10 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
                     const span = Math.max(0.4, sweepAbove.elAngle - sweepBelow.elAngle);
 
                     if (dbz1 > 0.0 && dbz2 > 0.0) {
-                        // Smooth Hermite S-curve blending between elevation angles
                         const t = Math.max(0.0, Math.min(1.0, (elAngleDeg - sweepBelow.elAngle) / span));
                         const smoothT = t * t * (3.0 - 2.0 * t);
                         finalDbz = dbz1 + smoothT * (dbz2 - dbz1);
                     } else if (dbz1 > 0.0) {
-                        // Smooth Gaussian beam dispersion into clear air
                         const diff = elAngleDeg - sweepBelow.elAngle;
                         const normDiff = diff / span;
                         finalDbz = dbz1 * Math.exp(-1.6 * normDiff * normDiff);
@@ -430,19 +440,63 @@ function processVolume(rawBytes, radarLat, radarLon, bounds, stationId = 'KDMX')
         }
     }
 
-    // 🌟 Run the 3D Separable Spatial Filter across the voxel volume (GR2Analyst-style smoothing)
     const smoothedVoxels = smoothVolume3D(voxels, GRID_X, GRID_Y, GRID_Z);
-
     const tiltsMeta = sweeps.map((s, idx) => ({ index: idx, elevation: s.elAngle }));
     return { voxels: smoothedVoxels, tilts: tiltsMeta };
 }
 
 self.onmessage = async (e) => {
-    const { id, rawBuffer, radarLat, radarLon, bounds, station, cacheKey } = e.data;
+    const { id, rawBuffer, radarLat, radarLon, bounds, station, cacheKey, mode, product, targetTiltIndex } = e.data;
     const startTime = performance.now();
 
     try {
         const decompressedBytes = decompressLevel2(rawBuffer);
+
+        // 🌟 Fast 2D Radial Sweep Extraction (for pre-2020 Level 2 Archives)
+        if (mode === '2d') {
+            const isVel = (product === 'N0U' || product === 'N0G' || product === 'VEL');
+            const targetType = isVel ? 'VEL' : 'REF';
+            const sweeps = parseSweepsFromLevel2(decompressedBytes, station || 'KDIX', targetType);
+            if (sweeps.length === 0) {
+                throw new Error(`No sweeps found in Level 2 scan for ${station || 'RADAR'}`);
+            }
+
+            const tiltIdx = Math.max(0, Math.min(targetTiltIndex || 0, sweeps.length - 1));
+            const sweep = sweeps[tiltIdx];
+            const numBins = sweep.numGates;
+            const flatData = new Uint8Array(TARGET_RADIALS * numBins);
+
+            for (let r = 0; r < TARGET_RADIALS; r++) {
+                const ray = sweep.radials[r];
+                if (ray) {
+                    flatData.set(ray.subarray(0, numBins), r * numBins);
+                }
+            }
+
+            const maxRangeMeters = sweep.firstGateMeters + (numBins * sweep.gateSpacingMeters);
+
+            self.postMessage({
+                id,
+                success: true,
+                mode: '2d',
+                sweep: {
+                    stationId: station || 'RADAR',
+                    product: product || (isVel ? 'N0U' : 'N0B'),
+                    lat: radarLat || 0.0,
+                    lon: radarLon || 0.0,
+                    numRadials: TARGET_RADIALS,
+                    numBins: numBins,
+                    maxRangeMeters: maxRangeMeters > 0 ? maxRangeMeters : 460000.0,
+                    elevation: sweep.elAngle,
+                    hw31: isVel ? -1270 : -320,
+                    hw32: isVel ? 10 : 5,
+                    data: flatData
+                }
+            }, [flatData.buffer]);
+            return;
+        }
+
+        // Standard 3D Volumetric Processing (untouched)
         const { voxels, tilts } = processVolume(
             decompressedBytes,
             radarLat,
