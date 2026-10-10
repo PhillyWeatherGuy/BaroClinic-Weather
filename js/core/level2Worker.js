@@ -20,26 +20,29 @@ const TARGET_RADIALS = 720;
 function decompressLevel2(arrayBuffer) {
     let bytes = new Uint8Array(arrayBuffer);
 
-    // 1. GZIP decompression (standard for pre-2008 archives)
+    // 1. GZIP decompression (standard for pre-2016 archive files ending in .gz)
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         try {
             bytes = unzlibSync(bytes);
         } catch (e) {}
     }
 
+    // 2. Locate where data starts (skipping 24-byte AR2V/ARCHIVE2 volume header)
     let pos = 0;
-    if (bytes.length > 24) {
-        const isAR2V = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56); // 2017+ (AR2V)
-        const isARCH = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x43 && bytes[3] === 0x48); // 1991–2016 (ARCHIVE2)
-        if (isAR2V || isARCH) {
-            pos = 24;
+    for (let p = 0; p < Math.min(bytes.length - 4, 128); p++) {
+        // Look for 4-byte size followed immediately by BZh (0x42, 0x5a, 0x68)
+        if (p + 7 < bytes.length && bytes[p + 4] === 0x42 && bytes[p + 5] === 0x5a && bytes[p + 6] === 0x68) {
+            pos = p;
+            break;
         }
     }
+    if (pos === 0 && bytes.length > 24) {
+        pos = 24;
+    }
 
-    // 🌟 RESTORED THIS LINE:
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
-    // 2. Scan for BZIP2 chunked blocks (standard 2008+)
+    // 3. Scan for BZIP2 chunked blocks (standard 2008–present)
     const decompressedChunks = [];
     while (pos + 4 < bytes.length) {
         let chunkSize = view.getInt32(pos, false);
@@ -77,12 +80,11 @@ function decompressLevel2(arrayBuffer) {
         return fullBuffer;
     }
 
-    // 3. Fallback: single stream BZIP2 or uncompressed raw legacy records
+    // 4. Fallback: single stream BZIP2 or uncompressed raw legacy records (1991–2007)
     try {
         const out = seekBzip.decode(bytes);
         return new Uint8Array(out);
     } catch (e) {
-        // Raw uncompressed legacy records
         return (pos > 0) ? bytes.subarray(pos) : bytes;
     }
 }
@@ -92,19 +94,33 @@ function decompressLevel2(arrayBuffer) {
  */
 function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
     const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
-    const sCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
-    const c0 = sCode.charCodeAt(0), c1 = sCode.charCodeAt(1), c2 = sCode.charCodeAt(2), c3 = sCode.charCodeAt(3);
-
     const sweepsByElevation = new Map();
     const limit = rawBytes.length - 120;
     const isVel = (targetType === 'VEL');
+
+    // 4-letter ICAO and 3-letter FAA identifier variants
+    const fullCode = (stationId.length === 3 ? 'K' + stationId : stationId).toUpperCase();
+    const shortCode = (stationId.length === 4 && stationId.startsWith('K') ? stationId.slice(1) : stationId).toUpperCase();
 
     // =========================================================
     // PASS 1: Modern Message 31 (2008 – Present, Super-Res)
     // =========================================================
     for (let i = 0; i <= limit; i++) {
-        if (rawBytes[i] === c0 && rawBytes[i + 1] === c1 && rawBytes[i + 2] === c2 && rawBytes[i + 3] === c3) {
-            const hdrPos = i;
+        // Match either 4-letter ICAO (e.g. "KILN") OR 3-letter ("ILN ") OR Message Header Type 31
+        let isMsg31 = false;
+        let hdrPos = i;
+
+        if (
+            (rawBytes[i] === fullCode.charCodeAt(0) && rawBytes[i + 1] === fullCode.charCodeAt(1) && rawBytes[i + 2] === fullCode.charCodeAt(2) && rawBytes[i + 3] === fullCode.charCodeAt(3)) ||
+            (rawBytes[i] === shortCode.charCodeAt(0) && rawBytes[i + 1] === shortCode.charCodeAt(1) && rawBytes[i + 2] === shortCode.charCodeAt(2))
+        ) {
+            isMsg31 = true;
+        } else if (i >= 12 && view.getUint8(i - 8) === 31) {
+            // Checked via 12-byte Message Header: Message Type = 31
+            isMsg31 = true;
+        }
+
+        if (isMsg31) {
             const azAngle = view.getFloat32(hdrPos + 12, false);
             const elIndex = view.getUint8(hdrPos + 22);
             const elAngle = view.getFloat32(hdrPos + 24, false);
@@ -119,14 +135,12 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
                     if (ptr > 0 && hdrPos + ptr + 4 <= rawBytes.length) {
                         const blkPos = hdrPos + ptr;
                         if (isVel) {
-                            // Check for DVEL (68, 86, 69, 76) or VEL (86, 69, 76)
                             if ((rawBytes[blkPos] === 68 && rawBytes[blkPos + 1] === 86 && rawBytes[blkPos + 2] === 69 && rawBytes[blkPos + 3] === 76) ||
                                 (rawBytes[blkPos] === 86 && rawBytes[blkPos + 1] === 69 && rawBytes[blkPos + 2] === 76)) {
                                 targetOffset = blkPos;
                                 break;
                             }
                         } else {
-                            // Check for DREF (68, 82, 69, 70) or REF (82, 69, 70)
                             if ((rawBytes[blkPos] === 68 && rawBytes[blkPos + 1] === 82 && rawBytes[blkPos + 2] === 69 && rawBytes[blkPos + 3] === 70) ||
                                 (rawBytes[blkPos] === 82 && rawBytes[blkPos + 1] === 69 && rawBytes[blkPos + 2] === 70)) {
                                 targetOffset = blkPos;
@@ -188,7 +202,6 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
                 const firstGateMeters = view.getUint16(msgOffset + 34, false);
                 const gateSpacingMeters = view.getUint16(msgOffset + 38, false);
                 const numGates = view.getUint16(msgOffset + 42, false);
-                // Byte 64 = Refl pointer, Byte 66 = Velocity pointer
                 const dataPtr = isVel
                     ? (view.getUint16(msgOffset + 66, false) || view.getUint16(msgOffset + 64, false))
                     : view.getUint16(msgOffset + 64, false);
@@ -245,7 +258,6 @@ function parseSweepsFromLevel2(rawBytes, stationId, targetType = 'REF') {
         }
     }
 
-    // Sort sweeps by elevation angle and de-duplicate repeat/SAILS angles (< 0.18° apart)
     const sorted = Array.from(sweepsByElevation.values()).sort((a, b) => a.elAngle - b.elAngle);
     const uniqueSweeps = [];
     for (let i = 0; i < sorted.length; i++) {
@@ -299,7 +311,6 @@ function smoothVolume3D(src, X, Y, Z) {
     const temp = new Uint8Array(X * Y * Z);
     const XY = X * Y;
 
-    // Pass 1: Horizontal X-axis Smoothing
     for (let z = 0; z < Z; z++) {
         const zOff = z * XY;
         for (let y = 0; y < Y; y++) {
@@ -313,7 +324,6 @@ function smoothVolume3D(src, X, Y, Z) {
         }
     }
 
-    // Pass 2: Vertical Y-axis Smoothing
     for (let z = 0; z < Z; z++) {
         const zOff = z * XY;
         for (let x = 0; x < X; x++) {
@@ -329,7 +339,6 @@ function smoothVolume3D(src, X, Y, Z) {
         }
     }
 
-    // Pass 3: Depth Z-axis Smoothing
     for (let y = 0; y < Y; y++) {
         const yOff = y * X;
         for (let x = 0; x < X; x++) {
