@@ -49,25 +49,36 @@ function extractScanMeta(buffer) {
                 const julianDays = view.getUint16(i + 2, false);
                 const secondsSinceMidnight = view.getUint32(i + 4, false);
                 
-                // Sanity check: Julian days > 19000 (after 2022) and seconds < 86400 (24h)
-                if (julianDays > 19000 && julianDays < 35000 && secondsSinceMidnight < 86400) {
+                // Sanity check: Julian days > 5000 (supports 1983+) and seconds < 86400 (24h)
+                if (julianDays > 5000 && julianDays < 35000 && secondsSinceMidnight < 86400) {
                     const unixMs = (julianDays - 1) * 86400000 + (secondsSinceMidnight * 1000);
                     const scanDate = new Date(unixMs);
 
                     let scale = null;
                     let offset = null;
+                    let hw31 = null;
+                    let hw32 = null;
 
-                    // NOAA ICD 2620001: Halfwords 31-32 (i + 60) = Scale, Halfwords 33-34 (i + 64) = Offset
+                    // NOAA ICD 2620001: PDB Halfwords 31 to 34 (i + 60 to i + 68)
                     if (i + 68 <= view.byteLength) {
-                        const s = view.getFloat32(i + 60, false);
-                        const o = view.getFloat32(i + 64, false);
-                        if (Number.isFinite(s) && s > 0) {
-                            scale = s;
-                            offset = Number.isFinite(o) ? o : 0.0;
+                        // Integer threshold modes (Velocity: Product 99, 154, 182)
+                        const h31 = view.getInt16(i + 60, false);
+                        const h32 = view.getInt16(i + 62, false);
+                        if (h32 !== 0 && Math.abs(h31) < 5000) {
+                            hw31 = h31;
+                            hw32 = h32;
+                        }
+
+                        // Floating point threshold modes (Dual-Pol: 159, 161, 163, 170, 172)
+                        const sFloat = view.getFloat32(i + 60, false);
+                        const oFloat = view.getFloat32(i + 64, false);
+                        if (Number.isFinite(sFloat) && sFloat > 0 && sFloat < 10000) {
+                            scale = sFloat;
+                            offset = Number.isFinite(oFloat) ? oFloat : 0.0;
                         }
                     }
 
-                    return { scanDate, scale, offset };
+                    return { scanDate, scale, offset, hw31, hw32 };
                 }
             }
         }
@@ -166,13 +177,15 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
     const scanDate = meta?.scanDate || new Date();
     const scale = meta?.scale ?? null;
     const offset = meta?.offset ?? null;
+    const hw31 = meta?.hw31 ?? null;
+    const hw32 = meta?.hw32 ?? null;
 
     // Identify product type for selective filtering
     const prod = (stationMeta?.product || 'N0B').toUpperCase();
     const isReflectivity = prod === 'N0B' || prod === 'N0Q' || prod === 'REF';
 
-    if (scale !== null) {
-        PRODUCT_CALIBRATION[prod] = { scale, offset };
+    if (scale !== null || hw32 !== null) {
+        PRODUCT_CALIBRATION[prod] = { scale, offset, hw31, hw32 };
     }
 
     // 1. Locate Radial Data Packet Header
@@ -319,6 +332,8 @@ export async function decodeLevel3(rawBuffer, stationMeta = null) {
         scanDate: scanDate,
         scale: scale,
         offset: offset,
+        hw31: hw31,
+        hw32: hw32,
         data: radarGrid
     };
 }
@@ -362,26 +377,40 @@ export function formatRadarValue(rawByte, productOrSweep, optScale = null, optOf
     let productCode = productOrSweep;
     let scale = optScale;
     let offset = optOffset;
+    let hw31 = null;
+    let hw32 = null;
 
     if (typeof productOrSweep === 'object' && productOrSweep !== null) {
         productCode = productOrSweep.product;
         scale = productOrSweep.scale;
         offset = productOrSweep.offset;
+        hw31 = productOrSweep.hw31;
+        hw32 = productOrSweep.hw32;
     }
 
     const p = (productCode || 'N0B').toUpperCase();
 
     // Use cached calibration from decoded file if not passed directly
-    if ((scale === null || scale === undefined) && PRODUCT_CALIBRATION[p]) {
-        scale = PRODUCT_CALIBRATION[p].scale;
-        offset = PRODUCT_CALIBRATION[p].offset;
+    if (PRODUCT_CALIBRATION[p]) {
+        if (scale === null || scale === undefined) scale = PRODUCT_CALIBRATION[p].scale;
+        if (offset === null || offset === undefined) offset = PRODUCT_CALIBRATION[p].offset;
+        if (hw31 === null || hw31 === undefined) hw31 = PRODUCT_CALIBRATION[p].hw31;
+        if (hw32 === null || hw32 === undefined) hw32 = PRODUCT_CALIBRATION[p].hw32;
     }
 
     // 1. Super-Res Velocity (N0U / N0G)
     if (p === 'N0U' || p === 'N0G' || p === 'VEL' || p.includes('VEL')) {
         if (rawByte === 1) return 'RF'; // Range Folded
-        const mph = Math.round((rawByte - 129) * 1.11847);
-        const speed = stateManager.currentUnits === 'metric' ? Math.round(mph * 1.60934) : mph;
+        
+        let velMps;
+        if (hw31 !== null && hw32 !== null && hw32 !== 0) {
+            velMps = (rawByte - 2) * (hw32 / 10.0) + (hw31 / 10.0);
+        } else {
+            velMps = (rawByte - 129) * 0.5;
+        }
+
+        const mph = Math.round(velMps * 2.236936);
+        const speed = stateManager.currentUnits === 'metric' ? Math.round(velMps * 3.6) : mph;
         const speedLabel = speed > 0 ? `+${speed}` : `${speed}`;
         return `${speedLabel} ${stateManager.currentUnits === 'metric' ? 'km/h' : 'MPH'}`;
     }
