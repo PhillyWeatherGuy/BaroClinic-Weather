@@ -27,8 +27,14 @@ function decompressLevel2(arrayBuffer) {
         } catch (e) {}
     }
 
-    let pos = (bytes.length > 24 && bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56) ? 24 : 0;
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let pos = 0;
+if (bytes.length > 24) {
+    const isAR2V = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x32 && bytes[3] === 0x56); // 2017+ (AR2V)
+    const isARCH = (bytes[0] === 0x41 && bytes[1] === 0x52 && bytes[2] === 0x43 && bytes[3] === 0x48); // 1991–2016 (ARCHIVE2)
+    if (isAR2V || isARCH) {
+        pos = 24;
+    }
+}
 
     // 2. Scan for BZIP2 chunked blocks (standard 2008+)
     const decompressedChunks = [];
