@@ -165,9 +165,9 @@ function themeContourFeatures(featureCollection, masterData) {
         const isDarkTheme = stateManager.currentTheme === 'dark';
         const isW250 = (activeParam === 'w250' || activeParam === 'z250');
 
-        // 🌟 250mb Wind gets Electric Neon Green with black casing in dark mode
+        // 🌟 250mb Wind gets Ice Silver (#E0F2FE) with a dark casing in dark mode
         const contourColor = isW250
-            ? (isDarkTheme ? '#E2E8F0' : '#000000')
+            ? (isDarkTheme ? '#E0F2FE' : '#000000')
             : getPvaContourThemeColor();
 
         const glowColor = isW250
@@ -183,10 +183,10 @@ function themeContourFeatures(featureCollection, masterData) {
             feature.properties.stroke = featureColor;
 
             feature.properties.outlineColor = isDarkTheme ? glowColor : null;
-            feature.properties.outlineOpacity = isDarkTheme ? (isW250 ? 0.95 : 0.8) : 0;
+            feature.properties.outlineOpacity = isDarkTheme ? (isW250 ? 0.9 : 0.8) : 0;
             feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
 
-            feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? (isW250 ? '#00FF66' : '#ffffff') : '#000000');
+            feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? (isW250 ? '#E0F2FE' : '#ffffff') : '#000000');
             feature.properties.labelHaloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
 
             if (is540Line) {
@@ -456,6 +456,10 @@ const gpuLayer = {
         const dpr = canvas && canvas.clientWidth ? canvas.width / canvas.clientWidth : (window.devicePixelRatio || 1);
         const wc = Math.floor((map.getCenter().lng + 180) / 360);
 
+        // 🌟 For w250, scale down the glow thickness in proportion with the contour line as you zoom out
+        const isW250 = (stateManager.activeParam === 'w250' || stateManager.paramConfig?.id === 'w250');
+        const glowWidth = isW250 ? (zs.glow * zs.scale) : zs.glow;
+
         let program, U, offsets, m = null, matrixName = null, probe = null;
 
         if (globe) {
@@ -513,7 +517,7 @@ const gpuLayer = {
         }
         gl.uniform2f(U.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.uniform1f(U.scale, zs.scale);
-        gl.uniform1f(U.glow, zs.glow);
+        gl.uniform1f(U.glow, glowWidth);
         gl.uniform1f(U.alpha, zs.alpha);
         gl.uniform1f(U.dpr, dpr);
 
