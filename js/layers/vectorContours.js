@@ -1003,6 +1003,11 @@ async function loadMasterContourFile() {
             urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
         }
         urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
+    } else if (param === 'w250') {
+        if (targetDate && runCycle) {
+            urlsToTry.push(`${stateManager.BASE_URL}${model}_z250_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+        }
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_z250_contours.json?v=${Date.now()}`);
     }
     if (targetDate && runCycle) {
         urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
