@@ -160,8 +160,8 @@ function themeContourFeatures(featureCollection, masterData) {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity Heights & 500mb Anomaly Heights
-    if (activeParam === 'pva' || activeParam === 'z500_anom') {
+    // 3. 500mb PVA / Vorticity Heights, 500mb Anomaly Heights & 250mb Wind Heights
+    if (activeParam === 'pva' || activeParam === 'z500_anom' || activeParam === 'w250' || activeParam === 'z250') {
         const contourColor = getPvaContourThemeColor();
         const glowColor = getPvaContourGlowColor();
         const isDarkTheme = stateManager.currentTheme === 'dark';
