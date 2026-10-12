@@ -160,6 +160,38 @@ const DARK_ANOM_COLORS = [
 const DARK_ANOM_BELOW = "#FD97BB";
 const DARK_ANOM_ABOVE = "#90EFFA";
 
+// 💨 Dark Mode 250mb Wind Speed Levels (kts)
+const DARK_W250_LEVELS = [
+    20.0, 23.5, 27.0, 30.5, 34.0, 37.5, 41.0, 44.5,
+    48.0, 51.5, 55.0, 58.5, 62.0, 65.5, 69.0, 72.5,
+    76.0, 79.5, 83.0, 86.5, 90.0, 93.5, 97.0, 100.5,
+    104.0, 107.5, 111.0, 114.5, 118.0, 121.5, 125.0, 128.5,
+    132.0, 135.5, 139.0, 142.5, 146.0, 150.0, 154.0, 158.0,
+    162.0, 166.0, 170.0, 174.0, 178.0, 182.0, 186.0, 190.0,
+    194.0, 198.0, 202.0, 206.0, 210.0, 214.0, 218.0, 222.0,
+    226.0, 230.0, 234.0, 238.0, 242.0, 246.0, 250.0, 254.0
+];
+
+// 💨 Dark Mode 250mb Wind Speed Hex Colors
+const DARK_W250_COLORS = [
+    "#0d0d0d", "#111928", "#162543", "#1a315e",
+    "#1f3d79", "#234994", "#2755af", "#2c62ca",
+    "#4074d1", "#5486d8", "#6999de", "#7dace5",
+    "#91beeb", "#a6d1f2", "#bae4f8", "#bdd1f5",
+    "#bebcf2", "#c0a6ee", "#c191ea", "#c27be6",
+    "#c366e2", "#c450de", "#c442d4", "#c13dc3",
+    "#be38b1", "#bb33a0", "#b82e8e", "#bc297f",
+    "#c0246f", "#c41f5f", "#c81a50", "#cd1d49",
+    "#d42449", "#da2c48", "#e13347", "#e73d42",
+    "#eb4d32", "#ef5d22", "#f36d12", "#f67c03",
+    "#f88d0f", "#f99d22", "#fbad34", "#fcbd47",
+    "#fcc344", "#fcc83f", "#fdcc39", "#fdd134",
+    "#fdd52e", "#feda29", "#fede23", "#fee31e",
+    "#fee718", "#ffec13", "#fff00d", "#fff312",
+    "#fff425", "#fff537", "#fff64a", "#fff75c",
+    "#fff86f", "#fff982", "#fffa94", "#fffba7"
+];
+
 /**
  * 🌟 WebGL Dynamic Breakpoint Step Interpolator
  * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
@@ -262,6 +294,15 @@ export const PWAT_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+// 💨 Dark Mode 250mb Wind Speed Palette (mapped to parameters.json scaling)
+export const W250_PALETTE = createNonLinearPrecipPalette(
+    DARK_W250_LEVELS,
+    DARK_W250_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
 /**
  * 🌟 Dynamic Palette Selector
  */
@@ -281,6 +322,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
         return PWAT_PALETTE;
+    }
+    if (id === 'w250' || id.includes('w250') || id.includes('wind')) {
+        return W250_PALETTE;
     }
     return TEMP_PALETTE;
 }
