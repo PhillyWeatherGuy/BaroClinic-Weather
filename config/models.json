@@ -164,7 +164,7 @@
       "unit": "kts",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
-      "palette": "w250",
+      "palette": "w300",
       "suppress_city_overlay": true,
       "upscale_2x": false,
       "scaling": {
@@ -182,7 +182,7 @@
       "unit": "kts",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
-      "palette": "w250",
+      "palette": "w500",
       "suppress_city_overlay": true,
       "upscale_2x": false,
       "scaling": {
@@ -200,7 +200,7 @@
       "unit": "kts",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
-      "palette": "w250",
+      "palette": "w700",
       "suppress_city_overlay": true,
       "upscale_2x": false,
       "scaling": {
@@ -218,7 +218,7 @@
       "unit": "kts",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
-      "palette": "w250",
+      "palette": "w850",
       "suppress_city_overlay": true,
       "upscale_2x": false,
       "scaling": {
@@ -236,7 +236,7 @@
       "unit": "kts",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
-      "palette": "w250",
+      "palette": "w925",
       "suppress_city_overlay": true,
       "upscale_2x": false,
       "scaling": {
