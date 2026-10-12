@@ -138,7 +138,7 @@ const DARK_ANOM_LEVELS = [
   315, 324, 333, 342, 351, 378, 414, 423, 432, 441, 450
 ];
 
-// 📊 Dark Mode 500mb Height Anomaly Colors (Pink/Magenta -> Transparent -> Blue/Cyan)
+// 📊 Dark Mode 500mb Height Anomaly Colors
 const DARK_ANOM_COLORS = [
   "#E8FDFF", "#E0FCFF", "#D8FBFF", "#D0FAFF", "#C8F9FF", "#C0F8FF",
   "#B8F7FF", "#B1F5FD", "#AAF3FD", "#A3F2FC", "#9BF1FB", "#94F0FA",
@@ -190,6 +190,34 @@ const DARK_W250_COLORS = [
     "#fee718", "#ffec13", "#fff00d", "#fff312",
     "#fff425", "#fff537", "#fff64a", "#fff75c",
     "#fff86f", "#fff982", "#fffa94", "#fffba7"
+];
+
+// 💨 Dark Mode 500mb Wind Speed Levels (kts)
+const DARK_W500_LEVELS = [
+    16.0, 17.5, 19.0, 20.5, 22.0, 23.5, 25.0, 26.5, 28.0, 29.5, 31.0, 32.5, 34.0, 35.5, 37.0, 38.5, 40.0, 41.5, 43.0, 44.5, 46.0, 47.5, 49.0, 50.5, 52.0, 53.5, 55.0, 56.5, 58.0, 59.5, 61.0, 62.5, 64.0, 65.5, 67.0, 68.5, 70.0, 72.0, 74.0, 76.0, 78.0, 80.0, 82.0, 84.0, 86.0, 88.0, 90.0, 92.0, 94.0, 96.0, 98.0, 100.0, 102.0, 104.0, 106.0, 108.0, 110.0, 113.0, 116.0, 119.0, 122.0, 125.0, 128.0, 131.0, 134.0, 137.0, 140.0, 143.0, 146.0, 149.0, 152.0, 155.0, 158.0, 161.0, 164.0, 167.0, 170.0, 173.0, 176.0, 180.0
+];
+
+// 💨 Dark Mode 500mb Wind Speed Colors
+const DARK_W500_COLORS = [
+    "#0d0d0d", "#111928", "#162543", "#1a315e", "#1f3d79", "#234994", "#2755af", "#2c62ca", "#4074d1", "#5486d8", "#6999de", "#7dace5", "#91beeb", "#a6d1f2", "#bae4f8", "#bdd1f5", "#bebcf2", "#c0a6ee", "#c191ea", "#c27be6", "#c366e2", "#c450de", "#c442d4", "#c13dc3", "#be38b1", "#bb33a0", "#b82e8e", "#bc297f", "#c0246f", "#c41f5f", "#c81a50", "#cd1d49", "#d42449", "#da2c48", "#e13347", "#e73d42", "#eb4d32", "#ef5d22", "#f36d12", "#f67c03", "#f88d0f", "#f99d22", "#fbad34", "#fcbd47", "#fcc344", "#fcc83f", "#fdcc39", "#fdd134", "#fdd52e", "#feda29", "#fede23", "#fee31e", "#fee718", "#ffec13", "#fff00d", "#fff312", "#fff425", "#fff537", "#fff64a", "#fff75c", "#fff86f", "#fff982", "#fffa94", "#fffba7", "#fffcb9", "#fffccc", "#fffdde", "#fffef1", "#fefafa", "#fae3e3", "#f6cdcd", "#f1b7b7", "#eda1a1", "#e98b8b", "#e57474", "#e05e5e", "#dc4848", "#d83232", "#d12626", "#c82222"
+];
+
+// 💨 Dark Mode 700mb / 850mb Wind Speed Levels (kts)
+const DARK_W700_850_LEVELS = [
+    5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 23.0, 26.0, 29.0, 32.0, 35.0, 38.0, 41.0, 44.0, 47.0, 50.0, 53.0, 56.0, 59.0, 62.0, 65.0, 68.0, 71.0, 74.0, 77.0, 80.0, 83.0, 86.0, 89.0, 92.0, 95.0, 98.0, 101.0, 104.0, 107.0, 110.0, 113.0, 116.0, 119.0, 122.0, 125.0
+];
+
+const DARK_W700_850_COLORS = [
+    "#0d0d0d", "#111928", "#162543", "#1a315e", "#1f3d79", "#234994", "#2755af", "#2c62ca", "#4074d1", "#6999de", "#bebcf2", "#c0a6ee", "#c191ea", "#c27be6", "#c366e2", "#c450de", "#c442d4", "#c13dc3", "#be38b1", "#bb33a0", "#b82e8e", "#bc297f", "#c0246f", "#c41f5f", "#c81a50", "#cd1d49", "#e13347", "#e73d42", "#eb4d32", "#ef5d22", "#f36d12", "#f67c03", "#f88d0f", "#f99d22", "#fbad34", "#fcbd47", "#fdcc39", "#fdd134", "#fdd52e", "#feda29", "#fede23", "#fee31e"
+];
+
+// 💨 Dark Mode 925mb Wind Speed Levels (kts)
+const DARK_W925_LEVELS = [
+    1.0, 3.0, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 18.5, 19.5, 20.0, 23.0, 26.0, 29.0, 32.0, 35.0, 38.0, 41.0, 44.0, 47.0, 50.0, 53.0, 56.0, 59.0, 62.0, 65.0, 68.0, 71.0, 74.0, 77.0, 80.0, 83.0, 86.0, 89.0, 92.0, 95.0, 98.0, 101.0, 104.0, 107.0, 110.0, 115.0
+];
+
+const DARK_W925_COLORS = [
+    "#0d0d0d", "#111928", "#162543", "#1a315e", "#1f3d79", "#234994", "#2755af", "#2c62ca", "#4074d1", "#6999de", "#bebcf2", "#c0a6ee", "#c191ea", "#c27be6", "#c366e2", "#c450de", "#c442d4", "#c13dc3", "#be38b1", "#bb33a0", "#b82e8e", "#bc297f", "#c0246f", "#c41f5f", "#c81a50", "#cd1d49", "#e13347", "#e73d42", "#eb4d32", "#ef5d22", "#f36d12", "#f67c03", "#f88d0f", "#f99d22", "#fbad34", "#fcbd47", "#fdcc39", "#fdd134", "#fdd52e", "#feda29", "#fede23", "#fee31e"
 ];
 
 /**
@@ -294,10 +322,37 @@ export const PWAT_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
-// 💨 Dark Mode 250mb Wind Speed Palette (mapped to parameters.json scaling)
+// 💨 Dark Mode 250mb & 300mb Wind Speed Palette
 export const W250_PALETTE = createNonLinearPrecipPalette(
     DARK_W250_LEVELS,
     DARK_W250_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
+// 💨 Dark Mode 500mb Wind Speed Palette
+export const W500_PALETTE = createNonLinearPrecipPalette(
+    DARK_W500_LEVELS,
+    DARK_W500_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
+// 💨 Dark Mode 700mb & 850mb Wind Speed Palette
+export const W700_850_PALETTE = createNonLinearPrecipPalette(
+    DARK_W700_850_LEVELS,
+    DARK_W700_850_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
+// 💨 Dark Mode 925mb Wind Speed Palette
+export const W925_PALETTE = createNonLinearPrecipPalette(
+    DARK_W925_LEVELS,
+    DARK_W925_COLORS,
     [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
     [0, 40, 75, 110, 145, 180, 210, 235, 255],
     256
@@ -323,8 +378,23 @@ export function getPaletteForParameter(paramId) {
     if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
         return PWAT_PALETTE;
     }
-    if (id === 'w250' || id.includes('w250') || id.includes('wind')) {
+    if (id === 'pva' || id.includes('pva') || id === 'vo' || id.includes('vort')) {
+        return PVA_PALETTE;
+    }
+    if (id === 'w250' || id === 'w300') {
         return W250_PALETTE;
+    }
+    if (id === 'w500') {
+        return W500_PALETTE;
+    }
+    if (id === 'w700' || id === 'w850') {
+        return W700_850_PALETTE;
+    }
+    if (id === 'w925') {
+        return W925_PALETTE;
+    }
+    if (id.includes('wind')) {
+        return W850_PALETTE;
     }
     return TEMP_PALETTE;
 }
