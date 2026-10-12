@@ -65,11 +65,13 @@ const LIGHT_PRECIP_LEVELS = [
 
 // 🌧️ Matplotlib Light Mode Precip Hex Colors
 const LIGHT_PRECIP_HEX = [
-    "#D0D0D0", "#A8A8A8", "#8A8A8A", "#787878", "#8C9987", "#B1CFA4", "#91CB7F", "#5DAD4E", "#4F9C3C", "#448D31",
-    "#37725C", "#3361B6", "#5687C3", "#7BA6CA", "#A1BCCF", "#C5D0C8", "#D3CFAA", "#CFC37C", "#CBAC58", "#C88931",
-    "#C67B30", "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841", "#8B7069", "#9D827B",
-    "#B19E97", "#BEB5B4", "#A69EB5", "#877E9D", "#756A92", "#635785", "#594176", "#66136B", "#A223AA", "#B627BF",
-    "#C038CA", "#C45BCD", "#C574CD"
+    "#D0D0D0", "#A8A8A8", "#8A8A8A", "#787878", "#8C9987", "#B1CFA4", "#91CB7F",
+    "#5DAD4E", "#4F9C3C", "#448D31", "#37725C", "#3361B6", "#5687C3", "#7BA6CA",
+    "#A1BCCF", "#C5D0C8", "#D3CFAA", "#CFC37C", "#CBAC58", "#C88931", "#C67B30",
+    "#C35523", "#B02D1C", "#9A2015", "#881C14", "#771811", "#5F1A15", "#634841",
+    "#8B7069", "#9D827B", "#B19E97", "#BEB5B4", "#A69EB5", "#877E9D", "#756A92",
+    "#635785", "#594176", "#66136B", "#A223AA", "#B627BF", "#C038CA", "#C45BCD",
+    "#C574CD"
 ];
 
 const PRATE_LEVELS = [0.015, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 10.0, 200.0];
@@ -87,17 +89,16 @@ const FRZR_COLORS = [
 
 const SLEET_COLORS = [
     "#efb87c", "#e9ab6a", "#e39d59", "#dd9047", "#d88334", "#d17827",
-  "#c96d19", "#c26207", "#ba5900", "#b15100", "#a84a00", "#a14300",
-  "#993d00", "#923600", "#8c3000", "#862b00", "#812600", "#7d2000",
-  "#791c00", "#731d06", "#6f1e0d", "#6b2013"
-
+    "#c96d19", "#c26207", "#ba5900", "#b15100", "#a84a00", "#a14300",
+    "#993d00", "#923600", "#8c3000", "#862b00", "#812600", "#7d2000",
+    "#791c00", "#731d06", "#6f1e0d", "#6b2013"
 ];
 
 const SNOW_COLORS = [
     "#9cc2ea", "#8bb3e5", "#7ea4e1", "#7396de", "#6d87db", "#6c77d8",
-  "#6d67d5", "#7057d0", "#7447c9", "#7738bf", "#7a28b4", "#7d15aa",
-  "#7f009c", "#7e008c", "#7e007e", "#7e0071", "#7f0066", "#81005c",
-  "#c32777", "#e573a3", "#f5b0d0", "#fce3f3"
+    "#6d67d5", "#7057d0", "#7447c9", "#7738bf", "#7a28b4", "#7d15aa",
+    "#7f009c", "#7e008c", "#7e007e", "#7e0071", "#7f0066", "#81005c",
+    "#c32777", "#e573a3", "#f5b0d0", "#fce3f3"
 ];
 
 // ❄️ Total Snowfall (10:1) Levels (Inches)
@@ -133,29 +134,26 @@ const ASNOW_COLORS = [
 
 // 📊 500mb Height Anomaly Levels (Meters)
 const ANOM_LEVELS = [
-  -450, -441, -432, -423, -405, -396, -378, -360, -351, -333, -315, -306,
-  -288, -279, -261, -252, -243, -234, -216, -207, -198, -189, -180, -171,
-  -162, -153, -144, -135, -126, -117, -99, -90, -81, -72, -63, -54, -45,
-  -36, -27, -18,
-  18, 27, 45, 54, 63, 72, 81, 90, 99, 108, 117, 126, 135, 144, 153, 162,
-  171, 180, 189, 198, 207, 216, 234, 252, 270, 297, 324, 351, 396, 432, 450
+    -450, -441, -432, -423, -405, -396, -378, -360, -351, -333, -315, -306,
+    -288, -279, -261, -252, -243, -234, -216, -207, -198, -189, -180, -171,
+    -162, -153, -144, -135, -126, -117, -99, -90, -81, -72, -63, -54, -45,
+    -36, -27, -18,
+    18, 27, 45, 54, 63, 72, 81, 90, 99, 108, 117, 126, 135, 144, 153, 162,
+    171, 180, 189, 198, 207, 216, 234, 252, 270, 297, 324, 351, 396, 432, 450
 ];
 
 // 📊 500mb Height Anomaly Colors (Diverging Blue-White-Red)
 const ANOM_COLORS = [
-  "#b1b2b2", "#a7a9a8", "#9a9b9d", "#878e8c", "#76a86e", "#5c9260",
-  "#437c4d", "#346b3f", "#427c4d", "#5c9260", "#77a86e", "#8db77b",
-  "#a4c688", "#bad995", "#cee6a3", "#ddf3ad", "#d2dfaf", "#c3cea9",
-  "#b9bea6", "#b1b3b1", "#a7a9a9", "#9e9baa", "#9892a9", "#8f86ab",
-  "#867aab", "#6b5daf", "#594faf", "#4649af", "#3f4db0", "#3558af",
-  "#346aae", "#3b79c5", "#4687d9", "#5a95e0", "#70a5e5", "#86b3e9",
-  "#9ec2ec", "#a7c6ed", "#b2cff0",
-  "#fefefe",
-  "#fdffc4", "#fdfab8", "#fdf6ac", "#fcf0a4", "#fbec9c", "#fae390",
-  "#f9de88", "#f8d680", "#f6cd78", "#f5c66e", "#f3bd66", "#f2b15c",
-  "#f1a653", "#ef994a", "#ed7d37", "#ec7231", "#eb612b", "#e85428",
-  "#df4925", "#d83f22", "#d03620", "#c42c1d", "#b9261b", "#bf2928",
-  "#c73045", "#cc3a67", "#c85c87", "#c576a9", "#c59bc0", "#c7adc7"
+    "#b1b2b2", "#a7a9a8", "#9a9b9d", "#878e8c", "#76a86e", "#5c9260", "#437c4d",
+    "#346b3f", "#427c4d", "#5c9260", "#77a86e", "#8db77b", "#a4c688", "#bad995",
+    "#cee6a3", "#ddf3ad", "#d2dfaf", "#c3cea9", "#b9bea6", "#b1b3b1", "#a7a9a9",
+    "#9e9baa", "#9892a9", "#8f86ab", "#867aab", "#6b5daf", "#594faf", "#4649af",
+    "#3f4db0", "#3558af", "#346aae", "#3b79c5", "#4687d9", "#5a95e0", "#70a5e5",
+    "#86b3e9", "#9ec2ec", "#a7c6ed", "#b2cff0", "#fefefe", "#fdffc4", "#fdfab8",
+    "#fdf6ac", "#fcf0a4", "#fbec9c", "#fae390", "#f9de88", "#f8d680", "#f6cd78",
+    "#f5c66e", "#f3bd66", "#f2b15c", "#f1a653", "#ef994a", "#ed7d37", "#ec7231",
+    "#eb612b", "#e85428", "#df4925", "#d83f22", "#d03620", "#c42c1d", "#b9261b",
+    "#bf2928", "#c73045", "#cc3a67", "#c85c87", "#c576a9", "#c59bc0", "#c7adc7"
 ];
 
 const ANOM_BELOW = "#bcbdbf";
@@ -196,14 +194,14 @@ const LIGHT_PVA_HEX = [
     "#770201", "#7b0066", "#92009d", "#a201bc", "#fe01e6", "#ffc8ef"
 ];
 
-// 💨 250mb Wind Speed Levels (kts)
+// 💨 250mb / 300mb Wind Speed Levels (kts)
 const W250_LEVELS = [
     16, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 82,
     86, 90, 94, 100, 106, 114, 120, 126, 132, 138, 144, 152,
     160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240
 ];
 
-// 💨 250mb Wind Speed Hex Colors
+// 💨 250mb / 300mb Wind Speed Hex Colors
 const W250_COLORS = [
     "#aeaeae", "#9e9e9e", "#7e7e7e", "#1957af", "#2a6ec6", "#478bcb",
     "#7faece", "#97c6ce", "#37ae39", "#49c749", "#68ca63", "#7ecb76",
@@ -211,6 +209,34 @@ const W250_COLORS = [
     "#d33111", "#bb1b0f", "#a0100e", "#8b0f0c", "#57372e", "#67473e",
     "#77574e", "#97776f", "#bb9e97", "#c7b6ae", "#d2a6a6", "#cb8786",
     "#bf6e6f", "#bb5657", "#b34746", "#b0362b", "#872221"
+];
+
+// 💨 500mb / 700mb Wind Speed Levels (kts)
+const W500_LEVELS = [
+    12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68,
+    72, 76, 80, 84, 88, 92, 96, 100, 106, 112, 120, 130, 140, 150
+];
+
+const W500_COLORS = [
+    "#aeaeae", "#9e9e9e", "#7e7e7e", "#1957af", "#2a6ec6",
+    "#478bcb", "#7faece", "#97c6ce", "#37ae39", "#49c749", "#68ca63", "#7ecb76",
+    "#a6d29e", "#d3ce8f", "#d2c066", "#d2a038", "#d38716", "#d35412", "#d33111",
+    "#bb1b0f", "#a0100e", "#8b0f0c", "#57372e", "#67473e", "#77574e", "#97776f",
+    "#bb9e97", "#c7b6ae", "#d2a6a6"
+];
+
+// 💨 850mb / 925mb Wind Speed Levels (kts)
+const W850_LEVELS = [
+    4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 27, 30, 34, 38, 42, 46,
+    50, 54, 58, 60, 62, 64, 68, 72, 76, 80, 85, 90, 100, 110, 120, 135
+];
+
+const W850_COLORS = [
+    "#aeaeae", "#9e9e9e", "#7e7e7e", "#1957af", "#2a6ec6",
+    "#478bcb", "#7faece", "#97c6ce", "#37ae39", "#49c749", "#68ca63", "#7ecb76",
+    "#a6d29e", "#d3ce8f", "#d2c066", "#d2a038", "#d38716", "#d35412", "#d33111",
+    "#bb1b0f", "#a0100e", "#8b0f0c", "#57372e", "#67473e", "#77574e", "#97776f",
+    "#bb9e97", "#c7b6ae", "#d2a6a6", "#cb8786", "#bf6e6f", "#bb5657", "#b34746"
 ];
 
 /**
@@ -228,7 +254,7 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
                 break;
             }
         }
-        
+
         let colorIdx = -1;
         for (let k = 0; k < levels.length - 1; k++) {
             if (physicalVal >= levels[k] && physicalVal < levels[k + 1]) {
@@ -278,10 +304,10 @@ function createAnomalyPalette(levels, colors, belowColor, aboveColor, minVal = -
 }
 
 export const PRECIP_PALETTE = createNonLinearPrecipPalette(
-    LIGHT_PRECIP_LEVELS, 
-    LIGHT_PRECIP_HEX, 
+    LIGHT_PRECIP_LEVELS,
+    LIGHT_PRECIP_HEX,
     [0.0, 1.0, 10.0, 30.0],
-    [0, 100, 200, 255], 
+    [0, 100, 200, 255],
     256
 );
 
@@ -355,10 +381,28 @@ export const PVA_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
-// 💨 250mb Wind Speed Palette (knots, mapped to parameters.json scaling)
+// 💨 250mb & 300mb Wind Speed Palette (knots, mapped to parameters.json scaling)
 export const W250_PALETTE = createNonLinearPrecipPalette(
     W250_LEVELS,
     W250_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
+// 💨 500mb & 700mb Wind Speed Palette (knots, mapped to parameters.json scaling)
+export const W500_PALETTE = createNonLinearPrecipPalette(
+    W500_LEVELS,
+    W500_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
+// 💨 850mb & 925mb Wind Speed Palette (knots, mapped to parameters.json scaling)
+export const W850_PALETTE = createNonLinearPrecipPalette(
+    W850_LEVELS,
+    W850_COLORS,
     [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
     [0, 40, 75, 110, 145, 180, 210, 235, 255],
     256
@@ -381,14 +425,23 @@ export function getPaletteForParameter(paramId) {
     if (id === 'tp' || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
     }
-    if (id === 'pwat' || id.includes('pwat' ) || id === 'tcwv') {
+    if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
         return PWAT_PALETTE;
     }
     if (id === 'pva' || id.includes('pva') || id === 'vo' || id.includes('vort')) {
         return PVA_PALETTE;
     }
-    if (id === 'w250' || id.includes('w250') || id.includes('wind')) {
+    if (id === 'w250' || id === 'w300') {
         return W250_PALETTE;
+    }
+    if (id === 'w500' || id === 'w700') {
+        return W500_PALETTE;
+    }
+    if (id === 'w850' || id === 'w925') {
+        return W850_PALETTE;
+    }
+    if (id.includes('wind')) {
+        return W850_PALETTE;
     }
     return TEMP_PALETTE;
 }
