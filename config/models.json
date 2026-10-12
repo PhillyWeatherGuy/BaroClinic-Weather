@@ -5,7 +5,21 @@
       "name": "ECMWF",
       "category": "Global",
       "resolution": "9km",
-      "supported_params": ["2t", "tp", "asnow", "prate", "pwat", "pva", "z500_anom", "w250"]
+      "supported_params": [
+        "2t",
+        "tp",
+        "asnow",
+        "prate",
+        "pwat",
+        "pva",
+        "z500_anom",
+        "w250",
+        "w300",
+        "w500",
+        "w700",
+        "w850",
+        "w925"
+      ]
     }
   },
   "parameters": {
@@ -129,6 +143,96 @@
     "w250": {
       "id": "w250",
       "name": "250mb Wind & Height",
+      "unit": "kts",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "w250",
+      "suppress_city_overlay": true,
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 1.943844,
+        "val_points": [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+        "byte_points": [0, 40, 75, 110, 145, 180, 210, 235, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "w300": {
+      "id": "w300",
+      "name": "300mb Wind & Height",
+      "unit": "kts",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "w250",
+      "suppress_city_overlay": true,
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 1.943844,
+        "val_points": [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+        "byte_points": [0, 40, 75, 110, 145, 180, 210, 235, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "w500": {
+      "id": "w500",
+      "name": "500mb Wind & Height",
+      "unit": "kts",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "w250",
+      "suppress_city_overlay": true,
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 1.943844,
+        "val_points": [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+        "byte_points": [0, 40, 75, 110, 145, 180, 210, 235, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "w700": {
+      "id": "w700",
+      "name": "700mb Wind & Height",
+      "unit": "kts",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "w250",
+      "suppress_city_overlay": true,
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 1.943844,
+        "val_points": [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+        "byte_points": [0, 40, 75, 110, 145, 180, 210, 235, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "w850": {
+      "id": "w850",
+      "name": "850mb Wind & Height",
+      "unit": "kts",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "w250",
+      "suppress_city_overlay": true,
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 1.943844,
+        "val_points": [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+        "byte_points": [0, 40, 75, 110, 145, 180, 210, 235, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "w925": {
+      "id": "w925",
+      "name": "925mb Wind & Height",
       "unit": "kts",
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
