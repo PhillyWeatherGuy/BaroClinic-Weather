@@ -684,7 +684,7 @@ function emitDashedSegments(line, dashLen, gapLen, onSegment) {
                 const tNext = curT + (remainingInPhase / segLen);
                 const endPt = [p0[0] + tNext * segDx, p0[1] + tNext * segDy];
                 if (isDrawing) {
-                    const startPt = [p0[0] + curT * segDx, p0[1] + curT * segDy];
+                    const startPt = [p0[0] + curT * segDx, p0[1] + endPt];
                     onSegment(startPt, endPt);
                 }
                 isDrawing = !isDrawing;
