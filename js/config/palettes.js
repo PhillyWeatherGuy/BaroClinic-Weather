@@ -196,6 +196,23 @@ const LIGHT_PVA_HEX = [
     "#770201", "#7b0066", "#92009d", "#a201bc", "#fe01e6", "#ffc8ef"
 ];
 
+// 💨 250mb Wind Speed Levels (kts)
+const W250_LEVELS = [
+    16, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 82,
+    86, 90, 94, 100, 106, 114, 120, 126, 132, 138, 144, 152,
+    160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240
+];
+
+// 💨 250mb Wind Speed Hex Colors
+const W250_COLORS = [
+    "#aeaeae", "#9e9e9e", "#7e7e7e", "#1957af", "#2a6ec6", "#478bcb",
+    "#7faece", "#97c6ce", "#37ae39", "#49c749", "#68ca63", "#7ecb76",
+    "#a6d29e", "#d3ce8f", "#d2c066", "#d2a038", "#d38716", "#d35412",
+    "#d33111", "#bb1b0f", "#a0100e", "#8b0f0c", "#57372e", "#67473e",
+    "#77574e", "#97776f", "#bb9e97", "#c7b6ae", "#d2a6a6", "#cb8786",
+    "#bf6e6f", "#bb5657", "#b34746", "#b0362b", "#872221"
+];
+
 /**
  * 🌟 WebGL Dynamic Breakpoint Step Interpolator
  * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
@@ -338,6 +355,15 @@ export const PVA_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+// 💨 250mb Wind Speed Palette (knots, mapped to parameters.json scaling)
+export const W250_PALETTE = createNonLinearPrecipPalette(
+    W250_LEVELS,
+    W250_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
 /**
  * 🌟 Dynamic Palette Selector
  */
@@ -360,6 +386,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'pva' || id.includes('pva') || id === 'vo' || id.includes('vort')) {
         return PVA_PALETTE;
+    }
+    if (id === 'w250' || id.includes('w250') || id.includes('wind')) {
+        return W250_PALETTE;
     }
     return TEMP_PALETTE;
 }
