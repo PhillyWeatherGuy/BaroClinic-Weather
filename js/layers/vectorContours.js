@@ -80,6 +80,7 @@ function themeContourFeatures(featureCollection, masterData) {
         const mslpColor = isDark ? '#ffffff' : '#000000';
         const zoom = mapInstance ? mapInstance.getZoom() : 5;
 
+        // Find how many features are MSLP isobars (values between 850 and 1100 mb)
         let mslpCount = 0;
         for (let i = 0; i < featureCollection.features.length; i++) {
             const v = parseFloat(String(featureCollection.features[i]?.properties?.name || ''));
@@ -96,6 +97,7 @@ function themeContourFeatures(featureCollection, masterData) {
             if (!feature) continue;
             const props = feature.properties || (feature.properties = {});
 
+            // Extract numeric value from any possible key
             const rawVal = props.name ?? props.level ?? props.value ?? props.val ?? props.target;
             let val = parseFloat(String(rawVal || '').replace(/[^0-9.-]/g, ''));
 
@@ -103,6 +105,7 @@ function themeContourFeatures(featureCollection, masterData) {
             const idStr = String(props.id || '').toLowerCase();
             const nameStr = String(props.name || '').toLowerCase();
 
+            // Thickness Identification
             let isThickness = (mslpCount > 0 && i >= mslpCount) ||
                               unit === 'dam' || 
                               idStr.includes('thick') || 
@@ -122,6 +125,7 @@ function themeContourFeatures(featureCollection, masterData) {
                     props.name = String(Math.round(thickDam));
                 }
 
+                // Red for > 540 dam, Blue for <= 540 dam
                 const isCold = thickDam <= 540;
                 const thickColor = isCold ? '#2563eb' : '#dc2626';
 
@@ -133,6 +137,7 @@ function themeContourFeatures(featureCollection, masterData) {
                 props.opacity = 0.95;
                 props.dotted = true;
             } else {
+                // MSLP Isobars (solid line)
                 props.color = mslpColor;
                 props.stroke = mslpColor;
                 props.labelColor = mslpColor;
@@ -143,6 +148,7 @@ function themeContourFeatures(featureCollection, masterData) {
             }
         }
 
+        // When zoomed out (< 5.0), decimate 2mb MSLP intervals down to 4mb; keep all thickness lines
         if (zoom < 5.0) {
             featureCollection.features = featureCollection.features.filter(f => {
                 if (f?.properties?.dotted) return true;
@@ -154,17 +160,17 @@ function themeContourFeatures(featureCollection, masterData) {
         return featureCollection;
     }
 
-    // 3. 500mb & 250mb Heights (PVA, Anomaly, or 250mb Wind)
-    if (activeParam === 'pva' || activeParam === 'z500_anom' || activeParam === 'w250' || activeParam === 'z250') {
+    // 3. Heights (PVA, Anomaly, or Wind Heights)
+    if (activeParam === 'pva' || activeParam === 'z500_anom' || activeParam.startsWith('w') || activeParam.match(/^z\d{3}$/)) {
         const isDarkTheme = stateManager.currentTheme === 'dark';
-        const isW250 = (activeParam === 'w250' || activeParam === 'z250');
+        const isWind = activeParam.startsWith('w') || activeParam.match(/^z\d{3}$/);
 
-        // 🌟 250mb Wind gets crisp Ice Silver (#E0F2FE) with a subtle dark casing
-        const contourColor = isW250
+        // 🌟 Upper air winds get crisp Ice Silver (#E0F2FE) with a subtle dark casing
+        const contourColor = isWind
             ? (isDarkTheme ? '#E0F2FE' : '#000000')
             : getPvaContourThemeColor();
 
-        const glowColor = isW250
+        const glowColor = isWind
             ? (isDarkTheme ? '#000000' : null)
             : getPvaContourGlowColor();
 
@@ -177,16 +183,16 @@ function themeContourFeatures(featureCollection, masterData) {
             feature.properties.stroke = featureColor;
 
             feature.properties.outlineColor = isDarkTheme ? glowColor : null;
-            feature.properties.outlineOpacity = isDarkTheme ? (isW250 ? 0.75 : 0.8) : 0;
+            feature.properties.outlineOpacity = isDarkTheme ? (isWind ? 0.75 : 0.8) : 0;
             feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
 
-            feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? (isW250 ? '#E0F2FE' : '#ffffff') : '#000000');
+            feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? (isWind ? '#E0F2FE' : '#ffffff') : '#000000');
             feature.properties.labelHaloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
 
             if (is540Line) {
                 feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
-            } else if (isW250) {
-                // Ensure 250mb contours stay clean and distinct
+            } else if (isWind) {
+                // Ensure upper-air contours stay clean and distinct
                 feature.properties.width = 1.8;
             }
         }
@@ -197,8 +203,12 @@ function themeContourFeatures(featureCollection, masterData) {
 
 // ───────────────────────── GPU line layer ─────────────────────────
 
+// One instance per line segment, 28 bytes:
+//   f32 p0.x p0.y p1.x p1.y (web-mercator 0..1) | f32 width (css px) | u8x4 line RGBA | u8x4 casing RGBA (alpha 0 = no casing)
 const INSTANCE_STRIDE = 28;
 
+// 🌟 [zoom, scale, glow, alpha]
+// Stays 100% opaque down to continental zoom (3.2), then drops off significantly when zoomed out further (<3.2)
 const WIDTH_STOPS = [
     [1.5,  0.45, 1.6, 0.25],
     [2.5,  0.60, 1.8, 0.40],
@@ -209,6 +219,7 @@ const WIDTH_STOPS = [
     [14.0, 2.10, 4.8, 1.00]
 ];
 
+// Shared vertex shader body. PROJECT(p) turns a mercator (0..1) position into clip space.
 const VERT_BODY = `
 layout(location=0) in vec2 a_corner;
 layout(location=1) in vec2 a_p0;
@@ -252,15 +263,18 @@ void main() {
     float zv = USE_PROJ_Z == 1 ? mix(c0.z, c1.z, a_corner.x) : 0.0;
     gl_Position = vec4(pos / hv * wv, zv, wv);
     
+    // Zoom-dependent alpha fade for contours
     v_color = vec4(col.rgb, col.a * u_alpha);
 }`;
 
+// Flat map: our own matrix
 const MERCATOR_VERT = `#version 300 es
 uniform mat4 u_matrix;
 #define PROJECT(p) (u_matrix * vec4((p), 0.0, 1.0))
 #define USE_PROJ_Z 0
 ` + VERT_BODY;
 
+// Globe: MapLibre injects its own projection code (projectTile) through args.shaderData
 function makeGlobeVert(sd, preludeFirst) {
     const inject = preludeFirst
         ? `${sd.vertexShaderPrelude}\n${sd.define}`
@@ -445,10 +459,11 @@ const gpuLayer = {
         const dpr = canvas && canvas.clientWidth ? canvas.width / canvas.clientWidth : (window.devicePixelRatio || 1);
         const wc = Math.floor((map.getCenter().lng + 180) / 360);
 
-        // 🌟 For w250, keep the white line visible and scale the casing down tight so it never drowns out the core
-        const isW250 = (stateManager.activeParam === 'w250' || stateManager.paramConfig?.id === 'w250');
-        const scaleVal = isW250 ? Math.max(0.72, zs.scale) : zs.scale;
-        const glowWidth = isW250 ? (0.75 * scaleVal) : zs.glow;
+        // 🌟 For upper air winds, keep the line visible and scale the casing down tight so it never drowns out the core
+        const activeP = (stateManager.activeParam || stateManager.paramConfig?.id || '').toLowerCase();
+        const isWind = activeP.startsWith('w') || activeP.match(/^z\d{3}$/);
+        const scaleVal = isWind ? Math.max(0.72, zs.scale) : zs.scale;
+        const glowWidth = isWind ? (0.75 * scaleVal) : zs.glow;
 
         let program, U, offsets, m = null, matrixName = null, probe = null;
 
@@ -716,6 +731,7 @@ function packColor(str, alpha, fallback = '#ffffff') {
     return ((a << 24) | (b << 16) | (g << 8) | r) >>> 0;
 }
 
+// Themed GeoJSON -> compact GPU instance bytes + label points
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
     const SUBDIVISIONS = 3;
@@ -787,6 +803,7 @@ function prepareStep(featureCollection) {
                 }
             }
 
+            // One label per reasonably long line, positioned along smooth tangent
             if (name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
                 const mid = len >> 1;
                 const a = line[mid];
@@ -831,7 +848,11 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
                     { ...stepData, features: (stepData.features || []).slice() };
     const themed = themeContourFeatures(decoded, masterData);
     const prepared = prepareStep(themed);
-    stepCache.set(cacheKey, prepared);
+    
+    // Only cache if binary has loaded or geometry was actually present
+    if (prepared.count > 0 || !masterData.binary) {
+        stepCache.set(cacheKey, prepared);
+    }
     return prepared;
 }
 
@@ -864,6 +885,7 @@ function ensureLayers() {
                     'text-color': ['coalesce', ['get', 'labelColor'], ['get', 'color'], '#FFFFFF'],
                     'text-halo-color': ['coalesce', ['get', 'labelHaloColor'], '#0b0f19'],
                     'text-halo-width': ['case', ['has', 'labelColor'], 2.5, 2.0],
+                    // 🌟 Keep label values at 100% full opacity at every zoom level
                     'text-opacity': 1.0
                 }
             });
@@ -886,7 +908,7 @@ function applyStep(stepNum, masterData, rawStep, force) {
 
     const data = getStepData(stepNum, masterData, rawStep);
 
-    if (!data) {
+    if (!data || data.count === 0) {
         setActiveData(null);
         setLabels(EMPTY_GEOJSON);
         displayedStep = null;
@@ -1002,11 +1024,12 @@ async function loadMasterContourFile() {
             urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
         }
         urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
-    } else if (param === 'w250') {
+    } else if (param.startsWith('w')) {
+        const zParam = param.replace('w', 'z');
         if (targetDate && runCycle) {
-            urlsToTry.push(`${stateManager.BASE_URL}${model}_z250_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+            urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
         }
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_z250_contours.json?v=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_contours.json?v=${Date.now()}`);
     }
     if (targetDate && runCycle) {
         urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
@@ -1031,6 +1054,11 @@ async function loadMasterContourFile() {
                                     await binaryResp.arrayBuffer(),
                                     data.binary.scale || 1000
                                 );
+                                stepCache.clear();
+                                displayedStep = null;
+                                if (mapInstance && currentVisibleStep !== null) {
+                                    scheduleApply(currentVisibleStep, currentVisibleStep, true);
+                                }
                             }
                         }
                         console.log(`✅ Loaded Master Contours from: ${contourUrl}`);
