@@ -167,7 +167,7 @@ function themeContourFeatures(featureCollection, masterData) {
 
         // 🌟 250mb Wind gets Electric Neon Green with black casing in dark mode
         const contourColor = isW250
-            ? (isDarkTheme ? '#00FF66' : '#000000')
+            ? (isDarkTheme ? '#E2E8F0' : '#000000')
             : getPvaContourThemeColor();
 
         const glowColor = isW250
