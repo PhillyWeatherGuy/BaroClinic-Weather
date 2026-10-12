@@ -160,11 +160,19 @@ function themeContourFeatures(featureCollection, masterData) {
         return featureCollection;
     }
 
-    // 3. 500mb PVA / Vorticity Heights, 500mb Anomaly Heights & 250mb Wind Heights
+    // 3. 500mb & 250mb Heights (PVA, Anomaly, or 250mb Wind)
     if (activeParam === 'pva' || activeParam === 'z500_anom' || activeParam === 'w250' || activeParam === 'z250') {
-        const contourColor = getPvaContourThemeColor();
-        const glowColor = getPvaContourGlowColor();
         const isDarkTheme = stateManager.currentTheme === 'dark';
+        const isW250 = (activeParam === 'w250' || activeParam === 'z250');
+
+        // 🌟 250mb Wind gets Electric Neon Green with black casing in dark mode
+        const contourColor = isW250
+            ? (isDarkTheme ? '#00FF66' : '#000000')
+            : getPvaContourThemeColor();
+
+        const glowColor = isW250
+            ? (isDarkTheme ? '#000000' : null)
+            : getPvaContourGlowColor();
 
         for (const feature of featureCollection.features) {
             if (!feature || !feature.properties) continue;
@@ -175,10 +183,10 @@ function themeContourFeatures(featureCollection, masterData) {
             feature.properties.stroke = featureColor;
 
             feature.properties.outlineColor = isDarkTheme ? glowColor : null;
-            feature.properties.outlineOpacity = isDarkTheme ? 0.8 : 0;
+            feature.properties.outlineOpacity = isDarkTheme ? (isW250 ? 0.95 : 0.8) : 0;
             feature.properties.outlineBlur = isDarkTheme ? 2.0 : 0;
 
-            feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? '#ffffff' : '#000000');
+            feature.properties.labelColor = is540Line ? featureColor : (isDarkTheme ? (isW250 ? '#00FF66' : '#ffffff') : '#000000');
             feature.properties.labelHaloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
 
             if (is540Line) {
