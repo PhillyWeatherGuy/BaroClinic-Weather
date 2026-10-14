@@ -1,0 +1,636 @@
+// js/layers/threeGlobe.js
+import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE, PWAT_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
+import { stateManager } from '../core/stateManager.js';
+
+// 🌐 High-Definition 50m & 10m Vector Datasets
+const LAND_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_land.geojson';
+const LAKES_POLYGONS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_lakes.geojson';
+const COUNTRY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_0_boundary_lines_land.geojson';
+const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_1_states_provinces_lines.geojson';
+const COASTLINES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_coastline.geojson';
+const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
+
+let scene, camera, renderer, controls, globeGroup, globeMesh, baseGlobeMesh, material, paletteTex;
+let linesMesh = null, countyMesh = null;
+let globeChunkTextures = {};
+let isGlobeActive = false;
+let globeAnimationId = null;
+
+// 2D Equirectangular Basemap Texture Generator for 3D Globe
+let baseMapCanvas = null;
+let baseMapCtx = null;
+let baseMapTexture = null;
+
+let rawLandFeatures = [];
+let rawLakesFeatures = [];
+
+// 🌟 Exact Color Matrix matching 2D Mercator (style_dark.json & map_style_light.json)
+const THEME_COLORS = {
+    dark: {
+        ocean: 0x021425,  // style_dark.json: rgba(2, 20, 37, 1)
+        land: 0x3B333B,   // style_dark.json: rgba(59, 51, 59, 1)
+        lakes: 0x021425,
+        borders: 0xffffff,
+        counties: 0x64748b
+    },
+    light: {
+        ocean: 0xF5FDFF,  // map_style_light.json: #E7F1F4
+        land: 0xEDEDED,   // map_style_light.json: rgba(253, 229, 207, 1)
+        lakes: 0xF5FDFF,
+        borders: 0x000000,
+        counties: 0x475569
+    }
+};
+
+const style = document.createElement('style');
+style.textContent = `
+    #globe-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 2;
+        touch-action: none !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+        background: #050a15;
+    }
+    #globe-container canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        touch-action: none !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+    }
+`;
+document.head.appendChild(style);
+
+const vsThreeGlobe = `
+    varying vec2 v_uv;
+    varying vec3 v_normal;
+    void main() {
+        v_uv = uv;
+        v_normal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const fsThreeGlobe = `
+    precision highp float;
+    uniform sampler2D u_dataTexture;
+    uniform sampler2D u_paletteTexture;
+    uniform vec2 u_uvOffset;
+    uniform vec2 u_uvScale;
+    uniform float u_opacity;
+    uniform vec2 u_texResolution;
+    varying vec2 v_uv;
+    varying vec3 v_normal;
+
+    vec4 cubicBSpline(float f) {
+        float f2 = f * f;
+        float f3 = f2 * f;
+        return vec4(
+            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
+            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
+            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
+            f3 / 6.0
+        );
+    }
+
+    float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
+        vec2 pos = uv * texRes - 0.5;
+        vec2 f = fract(pos);
+        vec2 i = floor(pos);
+
+        vec4 wx = cubicBSpline(f.x);
+        vec4 wy = cubicBSpline(f.y);
+
+        vec2 invTex = 1.0 / texRes;
+        float x0 = (i.x - 0.5) * invTex.x;
+        float x1 = (i.x + 0.5) * invTex.x;
+        float x2 = (i.x + 1.5) * invTex.x;
+        float x3 = (i.x + 2.5) * invTex.x;
+
+        float total = 0.0;
+        for (int y = -1; y <= 2; y++) {
+            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
+            
+            float rowVal = wx.x * texture2D(tex, vec2(x0, yCoord)).r +
+                           wx.y * texture2D(tex, vec2(x1, yCoord)).r +
+                           wx.z * texture2D(tex, vec2(x2, yCoord)).r +
+                           wx.w * texture2D(tex, vec2(x3, yCoord)).r;
+
+            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
+            total += w_y * rowVal;
+        }
+
+        return clamp(total, 0.0, 1.0);
+    }
+
+    void main() {
+        vec2 wrapped_uv = vec2(v_uv.x, 1.0 - v_uv.y);
+        vec2 sprite_uv = u_uvOffset + wrapped_uv * u_uvScale;
+
+        float rawVal = sampleSmoothSpline(u_dataTexture, sprite_uv, u_texResolution);
+
+        if (rawVal < 0.00001) {
+            discard;
+        }
+
+        float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
+        float palU = (palIndex + 0.5) / 256.0;
+        vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
+
+        if (color.a == 0.0) {
+            discard;
+        }
+
+        float intensity = pow(0.65 - dot(v_normal, vec3(0, 0, 1.0)), 2.0);
+        vec3 atmosphere = vec3(0.2, 0.6, 1.0) * intensity;
+
+        gl_FragColor = vec4(color.rgb + atmosphere * 0.2, color.a * u_opacity);
+    }
+`;
+
+function createPaletteTexture(paletteHexArray = TEMP_PALETTE) {
+    const canvas = document.createElement('canvas');
+    canvas.width = paletteHexArray.length;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeShader === 'precip' || stateManager.activeShader === 'precipType');
+
+    paletteHexArray.forEach((hex, i) => {
+        if (isPrecip && i === 0) {
+            ctx.clearRect(i, 0, 1, 1);
+        } else {
+            ctx.fillStyle = hex;
+            ctx.fillRect(i, 0, 1, 1);
+        }
+    });
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
+}
+
+function lngLatToVector3(lng, lat, radius = 2.003) {
+    const phi = (90 - lat) * (Math.PI / 180);
+    const theta = (lng + 180) * (Math.PI / 180);
+
+    const x = -(radius * Math.sin(phi) * Math.cos(theta));
+    const z = (radius * Math.sin(phi) * Math.sin(theta));
+    const y = (radius * Math.cos(phi));
+
+    return new THREE.Vector3(x, y, z);
+}
+
+function renderBaseMapTexture() {
+    if (!baseMapCanvas || !baseMapCtx) {
+        baseMapCanvas = document.createElement('canvas');
+        baseMapCanvas.width = 4096;
+        baseMapCanvas.height = 2048;
+        baseMapCtx = baseMapCanvas.getContext('2d');
+        baseMapTexture = new THREE.CanvasTexture(baseMapCanvas);
+        baseMapTexture.minFilter = THREE.LinearFilter;
+        baseMapTexture.magFilter = THREE.LinearFilter;
+    }
+
+    const w = baseMapCanvas.width;
+    const h = baseMapCanvas.height;
+
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    baseMapCtx.fillStyle = '#' + cfg.ocean.toString(16).padStart(6, '0');
+    baseMapCtx.fillRect(0, 0, w, h);
+
+    function lngLatToCanvas(lng, lat) {
+        const x = ((lng + 180.0) / 360.0) * w;
+        const y = ((90.0 - lat) / 180.0) * h;
+        return [x, y];
+    }
+
+    function drawGeoJsonPolygons(features, fillHex) {
+        baseMapCtx.fillStyle = '#' + fillHex.toString(16).padStart(6, '0');
+
+        features.forEach(feat => {
+            const geom = feat.geometry;
+            if (!geom) return;
+
+            let polyList = [];
+            if (geom.type === 'Polygon') polyList = [geom.coordinates];
+            else if (geom.type === 'MultiPolygon') polyList = geom.coordinates;
+
+            polyList.forEach(polyCoords => {
+                if (!polyCoords || polyCoords.length === 0) return;
+                baseMapCtx.beginPath();
+                
+                polyCoords.forEach(ring => {
+                    for (let i = 0; i < ring.length; i++) {
+                        const [x, y] = lngLatToCanvas(ring[i][0], ring[i][1]);
+                        if (i === 0) baseMapCtx.moveTo(x, y);
+                        else baseMapCtx.lineTo(x, y);
+                    }
+                    baseMapCtx.closePath();
+                });
+
+                baseMapCtx.fill('evenodd');
+            });
+        });
+    }
+
+    drawGeoJsonPolygons(rawLandFeatures, cfg.land);
+    drawGeoJsonPolygons(rawLakesFeatures, cfg.lakes);
+
+    if (baseMapTexture) {
+        baseMapTexture.needsUpdate = true;
+    }
+}
+
+async function load3DBasemapFills() {
+    try {
+        const [landResp, lakesResp] = await Promise.all([
+            fetch(LAND_POLYGONS_URL).catch(() => null),
+            fetch(LAKES_POLYGONS_URL).catch(() => null)
+        ]);
+
+        if (landResp && landResp.ok) {
+            const data = await landResp.json();
+            if (data?.features) rawLandFeatures = data.features;
+        }
+        if (lakesResp && lakesResp.ok) {
+            const data = await lakesResp.json();
+            if (data?.features) rawLakesFeatures = data.features;
+        }
+
+        renderBaseMapTexture();
+    } catch (err) {
+        console.warn("3D land fill load error:", err);
+    }
+}
+
+async function load3DVectorBorders(parentMesh) {
+    const linePoints = [];
+    const urls = [COUNTRY_BORDERS_URL, STATE_BORDERS_URL, COASTLINES_URL];
+
+    for (const url of urls) {
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) continue;
+            const data = await resp.json();
+
+            data.features.forEach(feature => {
+                const geom = feature.geometry;
+                if (!geom) return;
+
+                let lineStrings = [];
+                if (geom.type === 'LineString') lineStrings = [geom.coordinates];
+                else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
+                else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
+                else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
+
+                lineStrings.forEach(coords => {
+                    for (let i = 0; i < coords.length - 1; i++) {
+                        const p1Base = coords[i];
+                        const p2Base = coords[i+1];
+
+                        if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
+
+                        const p1 = lngLatToVector3(p1Base[0], p1Base[1], 2.003);
+                        const p2 = lngLatToVector3(p2Base[0], p2Base[1], 2.003);
+
+                        linePoints.push(p1.x, p1.y, p1.z);
+                        linePoints.push(p2.x, p2.y, p2.z);
+                    }
+                });
+            });
+        } catch (err) {
+            console.warn("3D vector line load error:", err);
+        }
+    }
+
+    if (linePoints.length > 0) {
+        const lineGeometry = new THREE.BufferGeometry();
+        lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
+
+        const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+        const lineMaterial = new THREE.LineBasicMaterial({
+            color: THEME_COLORS[themeKey].borders,
+            opacity: 0.95,
+            transparent: true
+        });
+
+        linesMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
+        parentMesh.add(linesMesh);
+    }
+
+    load3DCountyBorders(parentMesh);
+}
+
+async function load3DCountyBorders(parentMesh) {
+    try {
+        const resp = await fetch(COUNTY_BORDERS_URL);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const linePoints = [];
+
+        data.features.forEach(feature => {
+            const geom = feature.geometry;
+            if (!geom) return;
+
+            let lineStrings = [];
+            if (geom.type === 'LineString') lineStrings = [geom.coordinates];
+            else if (geom.type === 'MultiLineString') lineStrings = geom.coordinates;
+            else if (geom.type === 'Polygon') lineStrings = geom.coordinates;
+            else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(r => lineStrings.push(r)));
+
+            lineStrings.forEach(coords => {
+                for (let i = 0; i < coords.length - 1; i++) {
+                    const p1Base = coords[i];
+                    const p2Base = coords[i+1];
+
+                    if (Math.abs(p1Base[0] - p2Base[0]) > 180) continue;
+
+                    const p1 = lngLatToVector3(p1Base[0], p1Base[1], 2.004);
+                    const p2 = lngLatToVector3(p2Base[0], p2Base[1], 2.004);
+
+                    linePoints.push(p1.x, p1.y, p1.z);
+                    linePoints.push(p2.x, p2.y, p2.z);
+                }
+            });
+        });
+
+        if (linePoints.length > 0) {
+            const lineGeometry = new THREE.BufferGeometry();
+            lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
+
+            const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: THEME_COLORS[themeKey].counties,
+                opacity: 0.55,
+                transparent: true
+            });
+
+            countyMesh = new THREE.LineSegments(lineGeometry, lineMaterial);
+            countyMesh.visible = false;
+            parentMesh.add(countyMesh);
+        }
+    } catch (err) {
+        console.warn("County border load error:", err);
+    }
+}
+
+/**
+ * 🌟 Dynamic Screen-Fitting Camera Framer
+ * Uses a telephoto lens (26°) so the Earth fills the entire screen without the fishbowl bulge
+ */
+function fitGlobeToScreen() {
+    if (!camera || !renderer) return;
+
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = aspect;
+    camera.fov = 26; // 🌟 Low-distortion telephoto lens
+
+    const halfFovRad = (camera.fov * 0.5) * (Math.PI / 180);
+
+    // Calculate distance so the sphere fills ~98% of the screen width (no black space on the sides!)
+    const targetSpan = 3.65;
+    let dist;
+
+    if (aspect >= 1.0) {
+        // Desktop / Landscape: Match screen width
+        dist = targetSpan / (2.0 * Math.tan(halfFovRad) * Math.min(aspect, 1.65));
+        // Angle down towards 35°N (North America center)
+        camera.position.set(0, dist * 0.32, dist);
+    } else {
+        // Mobile / Portrait: Match screen height
+        dist = targetSpan / (2.0 * Math.tan(halfFovRad) * aspect);
+        camera.position.set(0, dist * 0.25, dist);
+    }
+
+    if (controls) {
+        controls.target.set(0, 0.35, 0); // Focus on mid-latitudes
+        controls.minDistance = 2.15;      // Allow deep zoom into storm cells
+        controls.maxDistance = 14.0;
+        controls.update();
+    }
+
+    camera.updateProjectionMatrix();
+}
+
+function animate() {
+    if (!isGlobeActive) {
+        globeAnimationId = null;
+        return;
+    }
+    globeAnimationId = requestAnimationFrame(animate);
+
+    if (controls && renderer && scene && globeGroup) {
+        const dist = camera.position.distanceTo(controls.target);
+
+        const zoomRatio = Math.max(0, Math.min(1, (dist - controls.minDistance) / (controls.maxDistance - controls.minDistance)));
+        controls.rotateSpeed = 0.12 + zoomRatio * 0.53;
+
+        controls.update();
+
+        if (countyMesh) {
+            countyMesh.visible = (dist < 4.2);
+        }
+
+        renderer.render(scene, camera);
+    }
+}
+
+export function initThreeGlobe() {
+    const container = document.getElementById('globe-container');
+    if (!container || scene) return;
+
+    scene = new THREE.Scene();
+    
+    // 🌟 Telephoto 26° lens eliminates spherical warping
+    camera = new THREE.PerspectiveCamera(26, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.04;
+    controls.zoomSpeed = 0.7;
+    controls.enablePan = false;
+    controls.minPolarAngle = Math.PI * 0.05;
+    controls.maxPolarAngle = Math.PI * 0.95;
+
+    if (THREE.TOUCH) {
+        controls.touches = {
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY_PAN
+        };
+    }
+
+    globeGroup = new THREE.Group();
+    // Rotate 90°W towards the camera (centers US & North America)
+    globeGroup.rotation.y = -Math.PI / 2;
+    scene.add(globeGroup);
+
+    renderBaseMapTexture();
+    const baseGeometry = new THREE.SphereGeometry(1.996, 64, 64);
+    const baseMaterial = new THREE.MeshBasicMaterial({ map: baseMapTexture });
+    baseGlobeMesh = new THREE.Mesh(baseGeometry, baseMaterial);
+    globeGroup.add(baseGlobeMesh);
+
+    load3DBasemapFills();
+
+    const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+    const initialPalette = paletteFunc(stateManager.activeParam || '2t');
+    paletteTex = createPaletteTexture(initialPalette);
+
+    material = new THREE.ShaderMaterial({
+        vertexShader: vsThreeGlobe,
+        fragmentShader: fsThreeGlobe,
+        uniforms: {
+            u_dataTexture: { value: null },
+            u_paletteTexture: { value: paletteTex },
+            u_uvOffset: { value: new THREE.Vector2(0, 0) },
+            u_uvScale: { value: new THREE.Vector2(1, 1) },
+            u_opacity: { value: 1 },
+            u_texResolution: { value: new THREE.Vector2(2880.0, 1442.0) }
+        },
+        transparent: true,
+        depthWrite: false
+    });
+
+    const geometry = new THREE.SphereGeometry(2.0, 64, 64);
+    globeMesh = new THREE.Mesh(geometry, material);
+    globeGroup.add(globeMesh);
+
+    load3DVectorBorders(globeGroup);
+
+    fitGlobeToScreen();
+
+    window.addEventListener('resize', () => {
+        if (!renderer || !camera) return;
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        fitGlobeToScreen();
+    });
+
+    if (isGlobeActive && !globeAnimationId) {
+        animate();
+    }
+}
+
+/**
+ * 🌟 DYNAMIC PALETTE & THEME SWAP FOR 3D GLOBE
+ */
+export function updateThreeGlobePalette(paramIdOrHexArray) {
+    if (!material) return;
+    let hexArray;
+    if (Array.isArray(paramIdOrHexArray)) {
+        hexArray = paramIdOrHexArray;
+    } else {
+        const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+        hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam);
+    }
+    
+    if (paletteTex) {
+        paletteTex.dispose();
+    }
+    paletteTex = createPaletteTexture(hexArray);
+    material.uniforms.u_paletteTexture.value = paletteTex;
+    material.needsUpdate = true;
+
+    renderBaseMapTexture();
+
+    const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
+    const cfg = THEME_COLORS[themeKey];
+
+    if (linesMesh && linesMesh.material) {
+        linesMesh.material.color.setHex(cfg.borders);
+    }
+    if (countyMesh && countyMesh.material) {
+        countyMesh.material.color.setHex(cfg.counties);
+    }
+}
+
+export function updateThreeGlobeFrame(frameState) {
+    if (!material || !frameState || !frameState.chunkImg) return;
+
+    const cIdx = frameState.chunkIndex;
+    const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
+    const frameKey = `${cIdx}_${fIdx}`;
+    const source = frameState.chunkImg;
+
+    if (!globeChunkTextures[frameKey]) {
+        let texture;
+        if (source.data && source.width && source.height) {
+            texture = new THREE.DataTexture(
+                source.data,
+                source.width,
+                source.height,
+                THREE.LuminanceFormat,
+                THREE.UnsignedByteType
+            );
+            texture.needsUpdate = true;
+        } else {
+            texture = new THREE.CanvasTexture(source);
+        }
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        globeChunkTextures[frameKey] = texture;
+    }
+
+    material.uniforms.u_dataTexture.value = globeChunkTextures[frameKey];
+    material.uniforms.u_uvOffset.value.set(frameState.uvOffset[0], frameState.uvOffset[1]);
+    material.uniforms.u_uvScale.value.set(frameState.uvScale[0], frameState.uvScale[1]);
+    
+    if (source.width && source.height) {
+        material.uniforms.u_texResolution.value.set(source.width, source.height);
+    }
+    
+    material.needsUpdate = true;
+}
+
+export function clearThreeGlobeTextures() {
+    for (const key in globeChunkTextures) {
+        if (globeChunkTextures[key]) {
+            globeChunkTextures[key].dispose();
+        }
+    }
+    globeChunkTextures = {};
+}
+
+export function showThreeGlobe() {
+    const container = document.getElementById('globe-container');
+    const polarContainer = document.getElementById('polar-container');
+    const mapDiv = document.getElementById('map');
+
+    if (container) container.style.display = 'block';
+    if (polarContainer) polarContainer.style.display = 'none';
+    if (mapDiv) mapDiv.style.display = 'none';
+
+    isGlobeActive = true;
+    fitGlobeToScreen();
+
+    if (!globeAnimationId) {
+        animate();
+    }
+}
+
+export function hideThreeGlobe() {
+    const container = document.getElementById('globe-container');
+    const mapDiv = document.getElementById('map');
+    if (container) container.style.display = 'none';
+    if (mapDiv) mapDiv.style.display = 'block';
+    isGlobeActive = false;
+
+    if (globeAnimationId) {
+        cancelAnimationFrame(globeAnimationId);
+        globeAnimationId = null;
+    }
+}
