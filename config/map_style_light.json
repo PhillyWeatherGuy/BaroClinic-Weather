@@ -607,4 +607,14 @@
     }
   ],
   "id": "c4268e48-fac9-4478-8120-201224fbd4d8"
+  {
+  "id": "hillshade",
+  "type": "hillshade",
+  "source": "terrain_source",
+  "paint": {
+    "hillshade-shadow-color": "#bcbcbc",
+    "hillshade-highlight-color": "#ffffff",
+    "hillshade-illumination-direction": 315,
+    "hillshade-exaggeration": 0.35
+  }
 }
