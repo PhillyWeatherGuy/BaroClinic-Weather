@@ -14,15 +14,6 @@
   "bearing": 0,
   "pitch": 0,
   "sources": {
-    "terrain_source": {
-      "type": "raster-dem",
-      "tiles": [
-        "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-      ],
-      "encoding": "terrarium",
-      "tileSize": 256,
-      "maxzoom": 15
-    },
     "openmaptiles": {
       "type": "vector",
       "url": "https://tiles.openfreemap.org/planet"
@@ -43,18 +34,6 @@
       "id": "background",
       "type": "background",
       "paint": {"background-color": "#EDEDED"}
-    },
-    {
-      "id": "hillshade",
-      "type": "hillshade",
-      "source": "terrain_source",
-      "paint": {
-        "hillshade-shadow-color": "#2d3748",
-        "hillshade-highlight-color": "#ffffff",
-        "hillshade-accent-color": "#1a202c",
-        "hillshade-illumination-direction": 315,
-        "hillshade-exaggeration": 0.85
-      }
     },
     {
       "id": "WaterColor",
