@@ -49,10 +49,11 @@
       "type": "hillshade",
       "source": "terrain_source",
       "paint": {
-        "hillshade-shadow-color": "#bcbcbc",
+        "hillshade-shadow-color": "#2d3748",
         "hillshade-highlight-color": "#ffffff",
+        "hillshade-accent-color": "#1a202c",
         "hillshade-illumination-direction": 315,
-        "hillshade-exaggeration": 0.35
+        "hillshade-exaggeration": 0.85
       }
     },
     {
