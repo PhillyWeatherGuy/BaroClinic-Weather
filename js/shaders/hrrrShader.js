@@ -1,7 +1,7 @@
 // js/shaders/hrrrShader.js
-// Native-grid HRRR layer: raw uint8 data in an R8 or RG8 texture with Bicubic B-Spline interpolation.
-// Each screen pixel is converted to lon/lat, forward-projected into the HRRR Lambert grid,
-// and smoothly interpolated across neighboring native cells. Works in mercator (2D) and globe (3D) modes.
+// Native-grid HRRR layer: raw uint8 data in an R8 or RG8 texture with Bicubic B-Spline
+// and 5x5 Isotropic Gaussian Curvature Filter interpolation.
+// Works in mercator (2D) and globe (3D) modes.
 import { 
     getPaletteForParameter as getLightPalette, 
     FRZR_PALETTE, 
@@ -135,7 +135,7 @@ const FRAGMENT_BODY = `
         );
     }
 
-    // 🌟 16-tap bicubic B-spline sampling on the native Lambert grid
+    // 🌟 16-tap bicubic B-spline sampling on the native Lambert grid (Intensity / dBZ)
     float sampleSmoothSplineHRRR(sampler2D tex, vec2 gridPos, vec2 gridSize) {
         vec2 f = fract(gridPos);
         vec2 i = floor(gridPos);
@@ -161,6 +161,71 @@ const FRAGMENT_BODY = `
         return clamp(total, 0.0, 1.0);
     }
 
+    // 🌟 5x5 Isotropic Gaussian Curvature Filter (sigma = 1.15) for smooth natural p-type transitions
+    vec4 sampleSmoothPtypeColorHRRR(sampler2D ptypeTex, vec2 gridPos, vec2 gridSize, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
+        vec2 f = fract(gridPos);
+        vec2 i = floor(gridPos);
+        ivec2 maxCoord = ivec2(gridSize) - 1;
+
+        const float invTwoSigmaSq = 0.378;
+
+        float wy[5];
+        for (int y = 0; y < 5; y++) {
+            float d = float(y - 2) - f.y;
+            wy[y] = exp(-d * d * invTwoSigmaSq);
+        }
+
+        float wx[5];
+        for (int x = 0; x < 5; x++) {
+            float d = float(x - 2) - f.x;
+            wx[x] = exp(-d * d * invTwoSigmaSq);
+        }
+
+        float wSnow = 0.0;
+        float wFrzr = 0.0;
+        float wSleet = 0.0;
+        float wRain = 0.0;
+
+        for (int dy = -2; dy <= 2; dy++) {
+            int yCoord = clamp(int(i.y) + dy, 0, maxCoord.y);
+            float weightY = wy[dy + 2];
+
+            for (int dx = -2; dx <= 2; dx++) {
+                int xCoord = clamp(int(i.x) + dx, 0, maxCoord.x);
+                float weight = weightY * wx[dx + 2];
+
+                float code = floor(texelFetch(ptypeTex, ivec2(xCoord, yCoord), 0).g * 255.0 + 0.5);
+
+                if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
+                    wSnow += weight;
+                } else if (code == 3.0 || code == 4.0 || code == 12.0) {
+                    wFrzr += weight;
+                } else if (code == 7.0 || code == 8.0) {
+                    wSleet += weight;
+                } else if (code > 0.5) {
+                    wRain += weight;
+                }
+            }
+        }
+
+        float totalPrecip = wSnow + wFrzr + wSleet + wRain;
+        if (totalPrecip < 0.0001) {
+            return texture(palTex, vec2(palU, 0.5));
+        }
+
+        float maxW = max(max(wSnow, wSleet), max(wFrzr, wRain));
+
+        if (maxW == wFrzr) {
+            return texture(frzrTex, vec2(palU, 0.5));
+        } else if (maxW == wSleet) {
+            return texture(sleetTex, vec2(palU, 0.5));
+        } else if (maxW == wSnow) {
+            return texture(snowTex, vec2(palU, 0.5));
+        } else {
+            return texture(palTex, vec2(palU, 0.5));
+        }
+    }
+
     void main() {
         // mercator tile space -> lon/lat (radians)
         float lon = (v_merc.x - floor(v_merc.x)) * 2.0 * PI - PI;
@@ -181,27 +246,22 @@ const FRAGMENT_BODY = `
             discard;
         }
 
-        // 🌟 Bicubic B-Spline smooth value lookup
-        float v = sampleSmoothSplineHRRR(u_dataTexture, gridPos, u_gridSize);
+        // 🌟 Bicubic B-Spline smooth intensity / dBZ
+        float rawVal = sampleSmoothSplineHRRR(u_dataTexture, gridPos, u_gridSize);
+
+        if (rawVal < 0.00001) {
+            discard;
+        }
+
+        float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
+        float palU = (palIndex + 0.5) / 256.0;
 
         vec4 color;
         if (u_hasPtype > 0.5) {
-            // Sample categorical p-type code at the nearest cell center to prevent border artifacts
-            ivec2 nearestIdx = clamp(ivec2(floor(gridPos + 0.5)), ivec2(0), ivec2(u_gridSize) - 1);
-            float ptypeCode = floor(texelFetch(u_dataTexture, nearestIdx, 0).g * 255.0 + 0.5);
-
-            // P-type routing: Snow (5,6,9,10), Freezing Rain (3,4,12), Sleet (7,8), Rain (1 or fallback)
-            if (ptypeCode >= 4.5 && ptypeCode <= 6.5 || ptypeCode == 9.0 || ptypeCode == 10.0) {
-                color = texture(u_snowPalette, vec2(v, 0.5));
-            } else if (ptypeCode >= 2.5 && ptypeCode <= 4.5 || ptypeCode == 12.0) {
-                color = texture(u_frzrPalette, vec2(v, 0.5));
-            } else if (ptypeCode >= 6.5 && ptypeCode <= 8.5) {
-                color = texture(u_sleetPalette, vec2(v, 0.5));
-            } else {
-                color = texture(u_paletteTexture, vec2(v, 0.5));
-            }
+            // 🌟 5x5 Curvature filter for broad, smooth, natural p-type boundaries
+            color = sampleSmoothPtypeColorHRRR(u_dataTexture, gridPos, u_gridSize, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
         } else {
-            color = texture(u_paletteTexture, vec2(v, 0.5));
+            color = texture(u_paletteTexture, vec2(palU, 0.5));
         }
 
         if (color.a == 0.0) discard;
