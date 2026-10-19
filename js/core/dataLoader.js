@@ -220,6 +220,15 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                 throw new Error("Load cancelled");
             }
         }
+        if (stateManager.manifest.grid && !ptypeBytes) {
+            const frames = [];
+            for (let f = 0; f < numFrames; f++) {
+                frames.push(rawData.subarray(f * frameSize, (f + 1) * frameSize));
+            }
+            const volumeObj = { frames, width: frameW, height: frameH, isVolume: true, isRaw: true };
+            stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
+            return volumeObj;
+        }
 
         const outFrames = [];
         for (let f = 0; f < numFrames; f++) {
