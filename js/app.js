@@ -6,6 +6,7 @@ import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
 import { initHubTransition } from './components/homeScreen.js';
+import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
 import { 
     initViewerUI, 
     syncTimelineWithManifest, 
@@ -442,7 +443,6 @@ export async function applyTheme(theme) {
         try { updatePolarPalette(newPalette); } catch (e) {}
     }
 }
-
 export function initLayer(shaderType = null) {
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
@@ -454,7 +454,9 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    if (chosenShader === 'precipType') {
+    if (stateManager.activeModel === 'hrrr' && chosenShader === 'scalar') {
+        customShaderLayer = createHrrrShaderLayer(map);
+    } else if (chosenShader === 'precipType') {
         customShaderLayer = createPrecipTypeShaderLayer(map);
     } else if (chosenShader === 'precip') {
         customShaderLayer = createPrecipShaderLayer(map);
