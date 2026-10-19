@@ -220,12 +220,27 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                 throw new Error("Load cancelled");
             }
         }
-        if (stateManager.manifest.grid && !ptypeBytes) {
+        
+        // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR whether scalar or ptype
+        if (stateManager.manifest.grid) {
             const frames = [];
+            const ptypeFrames = ptypeBytes ? [] : null;
             for (let f = 0; f < numFrames; f++) {
-                frames.push(rawData.subarray(f * frameSize, (f + 1) * frameSize));
+                const srcStart = f * frameSize;
+                frames.push(rawData.subarray(srcStart, srcStart + frameSize));
+                if (ptypeBytes) {
+                    ptypeFrames.push(ptypeBytes.subarray(srcStart, srcStart + frameSize));
+                }
             }
-            const volumeObj = { frames, width: frameW, height: frameH, isVolume: true, isRaw: true };
+            const volumeObj = { 
+                frames, 
+                ptypeFrames, 
+                width: frameW, 
+                height: frameH, 
+                isVolume: true, 
+                isRaw: true,
+                hasPtype: Boolean(ptypeBytes)
+            };
             stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
             return volumeObj;
         }
