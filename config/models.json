@@ -30,7 +30,6 @@
         "2t",
         "tp",
         "asnow",
-        "prate",
         "refc",
         "pwat",
         "pva",
@@ -114,11 +113,12 @@
     },
     "refc": {
       "id": "refc",
-      "name": "Composite Reflectivity",
+      "name": "Simulated Radar",
       "unit": "dBZ",
-      "category": "Severe Weather",
-      "shader": "scalar",
+      "category": "Surface and Precipitation",
+      "shader": "precipType",
       "palette": "precip",
+      "suppress_city_overlay": true,
       "upscale_2x": false,
       "scaling": {
         "mode": "linear",
