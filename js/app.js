@@ -226,7 +226,7 @@ export function updateBasemapStyle(styleUrl) {
             initRadarMode(map);
         } else {
             setBasemapLabelsVisibility(map, false);
-            try { (); } catch (e) {}
+            try { initLayer(); } catch (e) {}
             try { initVectorContours(map); } catch (e) {}
             try { initCityOverlay(map); } catch (e) {}
 
@@ -454,7 +454,7 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    if (stateManager.activeModel === 'hrrr') {
+    if (stateManager.activeModel === 'hrrr' && chosenShader === 'scalar') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
         customShaderLayer = createPrecipTypeShaderLayer(map);
