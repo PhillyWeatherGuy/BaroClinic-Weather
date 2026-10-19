@@ -20,6 +20,28 @@
         "w850",
         "w925"
       ]
+    },
+    "hrrr": {
+      "id": "hrrr",
+      "name": "HRRR",
+      "category": "Mesoscale",
+      "resolution": "3km",
+      "supported_params": [
+        "2t",
+        "tp",
+        "asnow",
+        "prate",
+        "refc",
+        "pwat",
+        "pva",
+        "z500_anom",
+        "w250",
+        "w300",
+        "w500",
+        "w700",
+        "w850",
+        "w925"
+      ]
     }
   },
   "parameters": {
@@ -86,6 +108,22 @@
         "unit_multiplier": 141.7322834646,
         "val_points": [0.0, 0.1, 1.0, 2.5],
         "byte_points": [0, 100, 200, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "refc": {
+      "id": "refc",
+      "name": "Composite Reflectivity",
+      "unit": "dBZ",
+      "category": "Severe Weather",
+      "shader": "scalar",
+      "palette": "precip",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 0.0,
+        "max_val": 75.0
       },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
