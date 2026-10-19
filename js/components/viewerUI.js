@@ -687,7 +687,7 @@ export function initModelCategoryBar() {
             e.currentTarget.classList.add('active');
             
             const category = e.currentTarget.getAttribute('data-category');
-            renderCategoryParameters(category);
+            renderCategoryModels(category);
         });
     });
 
@@ -760,6 +760,11 @@ export function initParameterCategoryBar() {
 
         const matchingParams = Object.values(modelsData.parameters).filter(p => {
             if (!p.category) return false;
+            
+            // Only show parameters that the active model supports
+            const activeModelParams = modelsData.models?.[stateManager.activeModel]?.supported_params || [];
+            if (activeModelParams.length > 0 && !activeModelParams.includes(p.id)) return false;
+
             const pCatLower = p.category.toLowerCase();
             if (pCatLower === targetCatLower) return true;
             if (targetCatLower.includes('surface') && targetCatLower.includes('precipitation')) {
@@ -1050,17 +1055,22 @@ function initModelRunDropdown() {
         anchorDate = new Date(baseStr);
     }
 
+    // 🌟 DYNAMIC INTERVALS: 1h for HRRR, 6h for ECMWF
+    const isHRRR = stateManager.activeModel === 'hrrr';
+    const intervalHours = isHRRR ? 1 : 6;
+    const totalRuns = isHRRR ? 48 : 28;
+
     if (!anchorDate || isNaN(anchorDate.getTime())) {
-        const delayedNow = new Date(Date.now() - 7.5 * 3600 * 1000);
+        const delayedNow = new Date(Date.now() - (isHRRR ? 1.5 : 7.5) * 3600 * 1000);
         const currentHour = delayedNow.getUTCHours();
-        const latestRunHour = Math.floor(currentHour / 6) * 6;
+        const latestRunHour = Math.floor(currentHour / intervalHours) * intervalHours;
         anchorDate = new Date(Date.UTC(delayedNow.getUTCFullYear(), delayedNow.getUTCMonth(), delayedNow.getUTCDate(), latestRunHour, 0));
     }
 
     const runs = [];
     let currentDate = new Date(anchorDate.getTime());
 
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < totalRuns; i++) {
         const runHour = String(currentDate.getUTCHours()).padStart(2, '0') + 'Z';
         const options = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' };
         const dateStr = currentDate.toLocaleDateString('en-US', options);
@@ -1075,7 +1085,7 @@ function initModelRunDropdown() {
             rawDate: new Date(currentDate.getTime())
         });
 
-        currentDate.setUTCHours(currentDate.getUTCHours() - 6);
+        currentDate.setUTCHours(currentDate.getUTCHours() - intervalHours);
     }
 
     if (runs.length > 0 && labelSpan) {
