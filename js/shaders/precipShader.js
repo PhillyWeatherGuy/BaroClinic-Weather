@@ -256,12 +256,19 @@ export function createPrecipShaderLayer(mapInstance) {
                 uniform sampler2D u_paletteTexture;
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
+                uniform float u_isPixelated;
 
                 ${fragmentShaderBody}
 
                 void main() {
                     vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
-                    float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
+                    
+                    float rawVal;
+                    if (u_isPixelated > 0.5) {
+                        rawVal = texture(u_dataTexture, uv).r;
+                    } else {
+                        rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
+                    }
 
                     if (rawVal < 0.00001) {
                         discard;
@@ -302,12 +309,19 @@ export function createPrecipShaderLayer(mapInstance) {
                 uniform sampler2D u_paletteTexture;
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
+                uniform float u_isPixelated;
 
                 ${fragmentShaderBody.replace(/texture\(/g, 'texture2D(')}
 
                 void main() {
                     vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
-                    float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
+                    
+                    float rawVal;
+                    if (u_isPixelated > 0.5) {
+                        rawVal = texture2D(u_dataTexture, uv).r;
+                    } else {
+                        rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
+                    }
 
                     if (rawVal < 0.00001) {
                         discard;
@@ -357,8 +371,10 @@ export function createPrecipShaderLayer(mapInstance) {
                     gl.RGBA, gl.UNSIGNED_BYTE, img
                 );
                 
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                // 🌟 DYNAMIC TEXTURE FILTERING: Crisp pixels for HRRR, smooth gradients for ECMWF
+                const filter = stateManager.activeModel === 'hrrr' ? gl.NEAREST : gl.LINEAR;
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 return tex;
@@ -438,7 +454,9 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
 
-            // Bind interleaved vertex buffer [x, y, u, v]
+            // 🌟 DYNAMIC UNIFORM: Tells fragment shader to bypass B-spline for HRRR
+            gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), stateManager.activeModel === 'hrrr' ? 1.0 : 0.0);
+
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             
             const aPos = gl.getAttribLocation(program, 'a_pos');
