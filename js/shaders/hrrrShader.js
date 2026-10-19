@@ -1,7 +1,7 @@
 // js/shaders/hrrrShader.js
-// Native-grid HRRR layer: raw uint8 data in an R8 or RG8 texture, NEAREST lookup, no interpolation.
+// Native-grid HRRR layer: raw uint8 data in an R8 or RG8 texture with Bicubic B-Spline interpolation.
 // Each screen pixel is converted to lon/lat, forward-projected into the HRRR Lambert grid,
-// and the matching native cell is read directly. Works in mercator (2D) and globe (3D) modes.
+// and smoothly interpolated across neighboring native cells. Works in mercator (2D) and globe (3D) modes.
 import { 
     getPaletteForParameter as getLightPalette, 
     FRZR_PALETTE, 
@@ -54,7 +54,6 @@ function buildMaueRadarPalette() {
         } else if (dbz >= 72.0) {
             palette[i] = '#ffbaff';
         } else {
-            // Find closest stop
             let closestColor = MAUE_RADAR_STOPS[0][1];
             for (let s = 0; s < MAUE_RADAR_STOPS.length; s++) {
                 if (MAUE_RADAR_STOPS[s][0] <= dbz) {
@@ -89,7 +88,7 @@ function createPaletteTexture(gl, paletteHexArray) {
     gl.bindTexture(gl.TEXTURE_2D, tex);
     const data = new Uint8Array(paletteHexArray.length * 4);
     paletteHexArray.forEach((hex, i) => {
-        if (hex === 'transparent' || !hex) return; // stays 0,0,0,0
+        if (hex === 'transparent' || !hex) return;
         const num = parseInt(hex.replace('#', ''), 16);
         data[i * 4] = (num >> 16) & 255;
         data[i * 4 + 1] = (num >> 8) & 255;
@@ -124,6 +123,44 @@ const FRAGMENT_BODY = `
 
     const float PI = 3.14159265358979;
 
+    // 🌟 Cubic B-Spline basis functions
+    vec4 cubicBSpline(float f) {
+        float f2 = f * f;
+        float f3 = f2 * f;
+        return vec4(
+            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
+            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
+            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
+            f3 / 6.0
+        );
+    }
+
+    // 🌟 16-tap bicubic B-spline sampling on the native Lambert grid
+    float sampleSmoothSplineHRRR(sampler2D tex, vec2 gridPos, vec2 gridSize) {
+        vec2 f = fract(gridPos);
+        vec2 i = floor(gridPos);
+
+        vec4 wx = cubicBSpline(f.x);
+        vec4 wy = cubicBSpline(f.y);
+
+        ivec2 maxCoord = ivec2(gridSize) - 1;
+
+        float total = 0.0;
+        for (int dy = -1; dy <= 2; dy++) {
+            int yCoord = clamp(int(i.y) + dy, 0, maxCoord.y);
+            
+            float rowVal = wx.x * texelFetch(tex, ivec2(clamp(int(i.x) - 1, 0, maxCoord.x), yCoord), 0).r +
+                           wx.y * texelFetch(tex, ivec2(clamp(int(i.x) + 0, 0, maxCoord.x), yCoord), 0).r +
+                           wx.z * texelFetch(tex, ivec2(clamp(int(i.x) + 1, 0, maxCoord.x), yCoord), 0).r +
+                           wx.w * texelFetch(tex, ivec2(clamp(int(i.x) + 2, 0, maxCoord.x), yCoord), 0).r;
+
+            float w_y = (dy == -1) ? wy.x : ((dy == 0) ? wy.y : ((dy == 1) ? wy.z : wy.w));
+            total += w_y * rowVal;
+        }
+
+        return clamp(total, 0.0, 1.0);
+    }
+
     void main() {
         // mercator tile space -> lon/lat (radians)
         float lon = (v_merc.x - floor(v_merc.x)) * 2.0 * PI - PI;
@@ -136,17 +173,22 @@ const FRAGMENT_BODY = `
         float x = rho * sin(theta);
         float y = u_lcc.z - rho * cos(theta);
 
-        // meters -> native cell index (nearest cell center)
-        vec2 idx = floor(vec2((x - u_gridOrigin.x) / u_gridStep.x,
-                              (y - u_gridOrigin.y) / u_gridStep.y) + 0.5);
-        if (idx.x < 0.0 || idx.y < 0.0 || idx.x >= u_gridSize.x || idx.y >= u_gridSize.y) discard;
+        // meters -> native continuous cell coordinates
+        vec2 gridPos = vec2((x - u_gridOrigin.x) / u_gridStep.x,
+                            (y - u_gridOrigin.y) / u_gridStep.y);
+        
+        if (gridPos.x < 0.0 || gridPos.y < 0.0 || gridPos.x >= u_gridSize.x || gridPos.y >= u_gridSize.y) {
+            discard;
+        }
 
-        vec4 cellData = texelFetch(u_dataTexture, ivec2(idx), 0);
-        float v = cellData.r;
+        // 🌟 Bicubic B-Spline smooth value lookup
+        float v = sampleSmoothSplineHRRR(u_dataTexture, gridPos, u_gridSize);
 
         vec4 color;
         if (u_hasPtype > 0.5) {
-            float ptypeCode = floor(cellData.g * 255.0 + 0.5);
+            // Sample categorical p-type code at the nearest cell center to prevent border artifacts
+            ivec2 nearestIdx = clamp(ivec2(floor(gridPos + 0.5)), ivec2(0), ivec2(u_gridSize) - 1);
+            float ptypeCode = floor(texelFetch(u_dataTexture, nearestIdx, 0).g * 255.0 + 0.5);
 
             // P-type routing: Snow (5,6,9,10), Freezing Rain (3,4,12), Sleet (7,8), Rain (1 or fallback)
             if (ptypeCode >= 4.5 && ptypeCode <= 6.5 || ptypeCode == 9.0 || ptypeCode == 10.0) {
