@@ -559,6 +559,25 @@ export function updateSliderTrackAndBounds() {
         rgba(239, 68, 68, 0.6) 100%)`;
 }
 
+// Module-level cache for models configuration and parameter category syncing
+let sharedModelsConfig = null;
+let currentParamCategory = 'Thermodynamics';
+let refreshParamCategoryUI = null;
+
+async function getSharedModelsConfig() {
+    if (sharedModelsConfig) return sharedModelsConfig;
+    try {
+        const resp = await fetch('./config/models.json');
+        if (resp.ok) {
+            sharedModelsConfig = await resp.json();
+            return sharedModelsConfig;
+        }
+    } catch (err) {
+        console.warn("Could not load config/models.json:", err);
+    }
+    return null;
+}
+
 export function initModelCategoryBar() {
     const modelBtn = document.getElementById('btn-model-menu');
     const categoryBar = document.getElementById('model-category-bar');
@@ -568,29 +587,29 @@ export function initModelCategoryBar() {
 
     if (!modelBtn || !categoryBar) return;
 
-    let modelsData = null;
-
-    fetch('./config/models.json')
-        .then(resp => resp.ok ? resp.json() : null)
-        .then(data => {
-            if (data) {
-                modelsData = data;
-                const labelSpan = modelBtn.querySelector('span');
-                if (labelSpan && modelsData.models?.[stateManager.activeModel]) {
-                    labelSpan.textContent = modelsData.models[stateManager.activeModel].name;
-                }
-                renderCategoryModels('Global');
+    getSharedModelsConfig().then(data => {
+        if (data) {
+            const labelSpan = modelBtn.querySelector('span');
+            if (labelSpan && data.models?.[stateManager.activeModel]) {
+                labelSpan.textContent = data.models[stateManager.activeModel].name;
             }
-        })
-        .catch(err => console.warn("Could not load config/models.json:", err));
+            // Auto-select initial category tab matching active model
+            const activeModelCat = data.models?.[stateManager.activeModel]?.category || 'Global';
+            catPills.forEach(p => {
+                const cat = p.getAttribute('data-category');
+                p.classList.toggle('active', cat && cat.toLowerCase() === activeModelCat.toLowerCase());
+            });
+            renderCategoryModels(activeModelCat);
+        }
+    });
 
     function renderCategoryModels(categoryName) {
         if (!modelListContainer) return;
         modelListContainer.innerHTML = '';
 
-        if (!modelsData || !modelsData.models) return;
+        if (!sharedModelsConfig || !sharedModelsConfig.models) return;
 
-        const matchingModels = Object.values(modelsData.models).filter(
+        const matchingModels = Object.values(sharedModelsConfig.models).filter(
             m => m.category && m.category.toLowerCase() === categoryName.toLowerCase()
         );
 
@@ -599,30 +618,88 @@ export function initModelCategoryBar() {
             return;
         }
 
-        matchingModels.forEach((model, idx) => {
+        matchingModels.forEach((model) => {
             const btn = document.createElement('button');
-            btn.className = `model-select-btn ${idx === 0 ? 'active' : ''}`;
+            btn.className = `model-select-btn ${model.id === stateManager.activeModel ? 'active' : ''}`;
             btn.setAttribute('data-model-id', model.id);
             btn.textContent = model.name;
 
             btn.addEventListener('click', async () => {
+                if (stateManager.activeModel === model.id) return;
+
                 document.querySelectorAll('#model-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
 
                 const labelSpan = modelBtn.querySelector('span');
                 if (labelSpan) labelSpan.textContent = model.name;
 
-                if (stateManager.activeModel === model.id) return;
-
                 if (isPlaying) pausePlayback();
 
                 showToast(`Loading model ${model.name}...`);
                 stateManager.activeModel = model.id;
-                saveViewerPreferences({ model: model.id });
-                
+
+                // 🌟 Auto-map parameters between models (e.g. ECMWF prate <-> HRRR refc) or fallback to 2t
+                const supported = model.supported_params || [];
+                let nextParam = stateManager.activeParam;
+                if (!supported.includes(nextParam)) {
+                    if (nextParam === 'prate' && supported.includes('refc')) {
+                        nextParam = 'refc';
+                    } else if (nextParam === 'refc' && supported.includes('prate')) {
+                        nextParam = 'prate';
+                    } else if (supported.includes('2t')) {
+                        nextParam = '2t';
+                    } else if (supported.length > 0) {
+                        nextParam = supported[0];
+                    }
+                }
+
+                stateManager.activeParam = nextParam;
+                const activeCfg = sharedModelsConfig?.parameters?.[nextParam];
+                if (activeCfg) {
+                    stateManager.paramConfig = activeCfg;
+                    stateManager.activeShader = activeCfg.shader || 'scalar';
+                }
+
+                const paramBtn = document.getElementById('btn-param-menu');
+                if (paramBtn && activeCfg) {
+                    const pSpan = paramBtn.querySelector('span');
+                    if (pSpan) pSpan.textContent = activeCfg.name;
+                }
+
+                saveViewerPreferences({ model: model.id, param: nextParam });
+
+                // Update basemap style if specified for the parameter
+                const targetStyle = (stateManager.currentTheme === 'dark' && activeCfg?.map_style_dark)
+                    ? activeCfg.map_style_dark
+                    : (activeCfg?.map_style_light || activeCfg?.map_style);
+                if (targetStyle && typeof updateBasemapStyle === 'function') {
+                    updateBasemapStyle(targetStyle);
+                }
+
+                // Clear previous run cycle/date so we fetch the latest run of the newly selected model
+                stateManager.currentDate = null;
+                stateManager.currentCycle = null;
+                stateManager.activeModelRun = null;
+
+                // Purge previous model textures & state
                 purgeAllAppMemory(shaderLayerRef);
                 highestPreloadedChunk = 0;
                 const thisGen = stateManager.loadGeneration;
+
+                // 🌟 IMMEDIATELY REINITIALIZE LAYER WITH THE TARGET MODEL & PARAMETER SHADER
+                if (typeof initLayer === 'function') {
+                    initLayer(stateManager.activeShader || 'scalar');
+                }
+
+                if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
+                    shaderLayerRef.updatePalette(activeCfg?.palette || nextParam);
+                }
+                try { updatePolarPalette(activeCfg?.palette || nextParam); } catch (e) {}
+
+                // Sync parameter category buttons so only parameters valid for this model are visible
+                if (typeof refreshParamCategoryUI === 'function') {
+                    refreshParamCategoryUI();
+                }
 
                 try {
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
@@ -731,38 +808,45 @@ export function initParameterCategoryBar() {
 
     if (!paramBtn || !paramBar) return;
 
-    let modelsData = null;
+    getSharedModelsConfig().then(data => {
+        if (data) {
+            const activeCfg = data.parameters?.[stateManager.activeParam];
+            stateManager.paramConfig = activeCfg;
 
-    fetch('./config/models.json')
-        .then(resp => resp.ok ? resp.json() : null)
-        .then(data => {
-            if (data) {
-                modelsData = data;
-                const activeCfg = modelsData.parameters?.[stateManager.activeParam];
-                stateManager.paramConfig = activeCfg;
-
-                const labelSpan = paramBtn.querySelector('span');
-                if (labelSpan && activeCfg) {
-                    labelSpan.textContent = activeCfg.name;
-                }
-                renderCategoryParameters('Thermodynamics');
+            const labelSpan = paramBtn.querySelector('span');
+            if (labelSpan && activeCfg) {
+                labelSpan.textContent = activeCfg.name;
             }
-        })
-        .catch(err => console.warn("Could not load config/models.json:", err));
+
+            const initialCategory = activeCfg?.category || 'Thermodynamics';
+            currentParamCategory = initialCategory;
+            catPills.forEach(p => {
+                const cat = p.getAttribute('data-category');
+                p.classList.toggle('active', cat && cat.toLowerCase() === initialCategory.toLowerCase());
+            });
+
+            renderCategoryParameters(initialCategory);
+        }
+    });
+
+    refreshParamCategoryUI = () => {
+        renderCategoryParameters(currentParamCategory);
+    };
 
     function renderCategoryParameters(categoryName) {
+        currentParamCategory = categoryName;
         if (!paramListContainer) return;
         paramListContainer.innerHTML = '';
 
-        if (!modelsData || !modelsData.parameters) return;
+        if (!sharedModelsConfig || !sharedModelsConfig.parameters) return;
 
         const targetCatLower = categoryName.toLowerCase();
 
-        const matchingParams = Object.values(modelsData.parameters).filter(p => {
+        const matchingParams = Object.values(sharedModelsConfig.parameters).filter(p => {
             if (!p.category) return false;
             
             // Only show parameters that the active model supports
-            const activeModelParams = modelsData.models?.[stateManager.activeModel]?.supported_params || [];
+            const activeModelParams = sharedModelsConfig.models?.[stateManager.activeModel]?.supported_params || [];
             if (activeModelParams.length > 0 && !activeModelParams.includes(p.id)) return false;
 
             const pCatLower = p.category.toLowerCase();

@@ -705,7 +705,10 @@ export async function switchAppMode(targetMode) {
     } else if (targetMode === 'modelViewer') {
         showToast("Loading Global Models...");
         
-        if (modelBtn) modelBtn.querySelector('span').textContent = 'ECMWF';
+        if (modelBtn) {
+            const mSpan = modelBtn.querySelector('span');
+            if (mSpan) mSpan.textContent = stateManager.activeModel === 'hrrr' ? 'HRRR' : 'ECMWF';
+        }
         if (paramBtn) paramBtn.querySelector('span').textContent = stateManager.paramConfig?.name || '2m Temperature';
 
         setBasemapLabelsVisibility(map, false);
