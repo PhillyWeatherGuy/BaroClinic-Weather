@@ -2,12 +2,7 @@
 // Native-grid HRRR layer: raw uint8 data in an R8 or RG8 texture with Bicubic B-Spline
 // and 5x5 Isotropic Gaussian Curvature Filter interpolation.
 // Works in mercator (2D) and globe (3D) modes.
-import { 
-    getPaletteForParameter as getLightPalette, 
-    FRZR_PALETTE, 
-    SLEET_PALETTE, 
-    SNOW_PALETTE 
-} from '../config/palettes.js';
+import { getPaletteForParameter as getLightPalette } from '../config/palettes.js';
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
@@ -18,7 +13,7 @@ function latToMercY(lat) {
     return 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * DEG) / 2)) / (2 * Math.PI);
 }
 
-/** 🌟 Ryan Maue's Radar Reflectivity stops (from maue_radar.json: 9 dBZ to 72 dBZ) */
+/** 🌟 Ryan Maue's Radar Reflectivity stops for Rain (from maue_radar.json: 9 dBZ to 72 dBZ) */
 const MAUE_RADAR_STOPS = [
     [9, "#c9c9c9"], [9.75, "#c4c4c4"], [10.5, "#bfbfbf"], [11.25, "#b1b1b1"],
     [12, "#a2a2a2"], [12.75, "#949494"], [13.5, "#858585"], [14.25, "#777777"],
@@ -44,6 +39,34 @@ const MAUE_RADAR_STOPS = [
     [72, "#ffbaff"]
 ];
 
+/** ❄️ Snow: 31 bins, 5.0 to 51.5 dBZ (1.5 dBZ per bin) */
+const SNOW_COLORS = [
+    "#AFD1D2", "#A6C9D1", "#9BC0D0", "#92B8D0", "#88B0CF", "#7EA8CE",
+    "#749FCE", "#6A97CE", "#618FCD", "#5787CD", "#4E7ECC", "#4676CC",
+    "#3D6ECC", "#3666CB", "#2E5ECB", "#2854C8", "#2650C3", "#234CBA",
+    "#2046B3", "#1E41AA", "#1A3BA2", "#19369A", "#163192", "#132A89",
+    "#10247F", "#0E217B", "#0B1A70", "#0A1669", "#081162", "#070B58",
+    "#070956"
+];
+
+/** 🧊 Sleet / Ice Pellets: 28 bins, 5.0 to 47.0 dBZ (1.5 dBZ per bin) */
+const ICE_COLORS = [
+    "#CABBAE", "#C9B6AA", "#C9B3A7", "#C9AFA3", "#C8ACA0", "#C7A79C",
+    "#C6A399", "#C6A095", "#C69B90", "#C5998E", "#C5938A", "#C59187",
+    "#C48D83", "#C48B81", "#C3837B", "#C28179", "#C27C75", "#C27A72",
+    "#C2756C", "#C1736A", "#C16D66", "#C16B64", "#C0665F", "#C0645D",
+    "#BF5F58", "#BF5C56", "#BF5952", "#BF564F"
+];
+
+/** 🌸 Freezing Rain: 28 bins, 5.0 to 47.0 dBZ (1.5 dBZ per bin) */
+const FRZR_COLORS = [
+    "#C47EC2", "#C27CC1", "#BF78BD", "#BC74BB", "#B970B7", "#B56AB4",
+    "#B468B2", "#B062AE", "#AE5FAC", "#AB5BA9", "#A856A6", "#A552A3",
+    "#A24E9F", "#9F499C", "#9C469A", "#984195", "#973F94", "#933A90",
+    "#91368E", "#8D328A", "#8C3089", "#892C85", "#862882", "#84257F",
+    "#81227C", "#6F1E76", "#5A196F", "#55176D"
+];
+
 /** Converts maue_radar stops into a 256-entry array matching HRRR 0-75 dBZ scaling */
 function buildMaueRadarPalette() {
     const palette = new Array(256).fill('transparent');
@@ -63,6 +86,24 @@ function buildMaueRadarPalette() {
                 }
             }
             palette[i] = closestColor;
+        }
+    }
+    return palette;
+}
+
+/** Converts binned frozen scales into 256-entry arrays matching HRRR 0-75 dBZ scaling */
+function buildFrozenPalette(colorBins, minDbz, maxDbz) {
+    const palette = new Array(256).fill('transparent');
+    const numBins = colorBins.length;
+    for (let i = 0; i < 256; i++) {
+        const dbz = (i / 255.0) * 75.0;
+        if (dbz < minDbz) {
+            palette[i] = 'transparent';
+        } else if (dbz >= maxDbz) {
+            palette[i] = colorBins[numBins - 1];
+        } else {
+            const binIdx = Math.min(numBins - 1, Math.floor(((dbz - minDbz) / (maxDbz - minDbz)) * numBins));
+            palette[i] = colorBins[binIdx];
         }
     }
     return palette;
@@ -111,7 +152,7 @@ const FRAGMENT_BODY = `
     uniform sampler2D u_dataTexture;     // R8 (scalar) or RG8 (Reflectivity + P-Type)
     uniform sampler2D u_paletteTexture;  // Base / Rain palette (maue_radar)
     uniform sampler2D u_frzrPalette;     // Freezing Rain palette (pinks)
-    uniform sampler2D u_sleetPalette;    // Sleet palette (purples)
+    uniform sampler2D u_sleetPalette;    // Sleet palette (tan / ice)
     uniform sampler2D u_snowPalette;     // Snow palette (blues)
 
     uniform float u_hasPtype;
@@ -327,9 +368,9 @@ export function createHrrrShaderLayer(mapInstance) {
                 : ((stateManager.currentTheme === 'dark' ? getDarkPalette : getLightPalette)(activeParam));
 
             this.paletteTex = createPaletteTexture(gl, basePalette);
-            this.frzrPaletteTex = createPaletteTexture(gl, FRZR_PALETTE || []);
-            this.sleetPaletteTex = createPaletteTexture(gl, SLEET_PALETTE || []);
-            this.snowPaletteTex = createPaletteTexture(gl, SNOW_PALETTE || []);
+            this.frzrPaletteTex = createPaletteTexture(gl, buildFrozenPalette(FRZR_COLORS, 5.0, 47.0));
+            this.sleetPaletteTex = createPaletteTexture(gl, buildFrozenPalette(ICE_COLORS, 5.0, 47.0));
+            this.snowPaletteTex = createPaletteTexture(gl, buildFrozenPalette(SNOW_COLORS, 5.0, 51.5));
         },
 
         /** Build per-manifest constants + the mesh covering the HRRR bounds. */
@@ -477,7 +518,7 @@ export function createHrrrShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
             gl.uniform1i(U('u_frzrPalette'), 2);
 
-            // Texture 3: Sleet Palette
+            // Texture 3: Sleet / Ice Palette
             gl.activeTexture(gl.TEXTURE3);
             gl.bindTexture(gl.TEXTURE_2D, this.sleetPaletteTex);
             gl.uniform1i(U('u_sleetPalette'), 3);
