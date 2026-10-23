@@ -48,11 +48,13 @@ let haloCtx = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
+const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768;
+
 const map = new maplibregl.Map({
     container: 'map',
     style: './config/style_default.json',
-    center: [-74.4, 39.3], 
-    zoom: 7,
+    center: [-96.5, 38.5], 
+    zoom: isMobileViewport ? 3.2 : 3.8,
     keyboard: false
 });
 
@@ -712,6 +714,13 @@ export async function switchAppMode(targetMode) {
         if (paramBtn) paramBtn.querySelector('span').textContent = stateManager.paramConfig?.name || '2m Temperature';
 
         setBasemapLabelsVisibility(map, false);
+        if (map && map.getZoom() > 6) {
+            map.easeTo({
+                center: [-96.5, 38.5],
+                zoom: (typeof window !== 'undefined' && window.innerWidth < 768) ? 3.2 : 3.8,
+                duration: 600
+            });
+        }
 
         const targetStyle = stateManager.currentTheme === 'dark'
             ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
