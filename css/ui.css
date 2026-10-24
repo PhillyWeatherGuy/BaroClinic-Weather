@@ -574,11 +574,6 @@
         gap: 6px;
     }
 
-    /* Hide redundant dropdown button on desktop in Model Viewer mode */
-    body:not(.radar-mode) #btn-param-menu {
-        display: none !important;
-    }
-
     /* Hide duplicate category pills in sub-bar on desktop so only parameter buttons display */
     #param-category-bar .category-scroll-container {
         display: none !important;

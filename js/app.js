@@ -676,7 +676,10 @@ export async function switchAppMode(targetMode) {
     }
 
     if (modelBtn) modelBtn.style.display = '';
-    if (paramBtn) paramBtn.style.display = '';
+    // On desktop modelViewer the category pills in the nav replace the param button
+    if (paramBtn) {
+        paramBtn.style.display = (targetMode === 'modelViewer' && window.innerWidth >= 1024) ? 'none' : '';
+    }
     hideComingSoonScreen();
 
     if (targetMode === 'radar') {
