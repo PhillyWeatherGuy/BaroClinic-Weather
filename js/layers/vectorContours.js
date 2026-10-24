@@ -61,13 +61,11 @@ function themeContourFeatures(featureCollection, masterData) {
         ''
     ).toLowerCase();
 
-    // 1. 2m Temperature (Freezing Line)
+    // 1. 2m Temperature (Freezing Line) - Lines only, labels disabled
     if (activeParam === '2t') {
-        const freezingLabel = stateManager.currentUnits === 'metric' ? '0°C' : '32°F';
         for (const feature of featureCollection.features) {
-            const name = String(feature?.properties?.name || '');
-            if (feature?.properties && (Number(name) === 273.15 || /freez|273\.15/i.test(name))) {
-                feature.properties.name = freezingLabel;
+            if (feature?.properties) {
+                feature.properties.name = null;
             }
         }
         return featureCollection;
@@ -186,7 +184,6 @@ function themeContourFeatures(featureCollection, masterData) {
             if (is540Line) {
                 feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
             } else if (isW250) {
-                // Ensure 250mb contours stay clean and distinct
                 feature.properties.width = 1.8;
             }
         }
