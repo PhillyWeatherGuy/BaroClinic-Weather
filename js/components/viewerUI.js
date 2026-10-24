@@ -178,8 +178,9 @@ export function initRadarBoxTool(map) {
     mapContainer.addEventListener('mousedown', (e) => {
         if (!stateManager.boxSelectActive || e.button !== 0) return;
         isDrawing = true;
-        startX = e.clientX;
-        startY = e.clientY;
+        const _z = parseFloat(document.documentElement.style.zoom) || 1;
+        startX = e.clientX / _z;
+        startY = e.clientY / _z;
 
         if (dragBoxEl) {
             dragBoxEl.style.left = `${startX}px`;
@@ -193,8 +194,9 @@ export function initRadarBoxTool(map) {
     window.addEventListener('mousemove', (e) => {
         if (!isDrawing || !dragBoxEl) return;
 
-        const currentX = e.clientX;
-        const currentY = e.clientY;
+        const _z = parseFloat(document.documentElement.style.zoom) || 1;
+        const currentX = e.clientX / _z;
+        const currentY = e.clientY / _z;
 
         const minX = Math.min(startX, currentX);
         const maxX = Math.max(startX, currentX);
@@ -211,8 +213,9 @@ export function initRadarBoxTool(map) {
         if (!isDrawing) return;
         isDrawing = false;
 
-        const endX = e.clientX;
-        const endY = e.clientY;
+        const _z = parseFloat(document.documentElement.style.zoom) || 1;
+        const endX = e.clientX / _z;
+        const endY = e.clientY / _z;
 
         if (dragBoxEl) dragBoxEl.style.display = 'none';
 
@@ -229,8 +232,8 @@ export function initRadarBoxTool(map) {
         if (maxX - minX < 15 || maxY - minY < 15) return;
 
         const rect = mapContainer.getBoundingClientRect();
-        const swPoint = [minX - rect.left, maxY - rect.top];
-        const nePoint = [maxX - rect.left, minY - rect.top];
+        const swPoint = [(minX - rect.left / _z), (maxY - rect.top / _z)];
+        const nePoint = [(maxX - rect.left / _z), (minY - rect.top / _z)];
 
         const sw = map.unproject(swPoint);
         const ne = map.unproject(nePoint);
