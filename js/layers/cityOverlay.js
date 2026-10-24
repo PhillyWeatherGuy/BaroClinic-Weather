@@ -52,6 +52,40 @@ style.textContent = `
 document.head.appendChild(style);
 
 /**
+ * 🌟 Forward-projects (lon, lat) to native HRRR Lambert Conformal Conic grid cell index
+ */
+function projectHRRRLCC(lon, lat, grid) {
+    const DEG = Math.PI / 180;
+    const R = grid.earth_radius || 6371229.0;
+    const p1 = (grid.lat_1 ?? 38.5) * DEG;
+    const p0 = (grid.lat_0 ?? 38.5) * DEG;
+    const lon0 = (grid.lon_0 ?? -97.5) * DEG;
+
+    const n = Math.sin(p1);
+    const F = (Math.cos(p1) * Math.pow(Math.tan(Math.PI / 4 + p1 / 2), n)) / n;
+    const RF = R * F;
+    const rho0 = RF / Math.pow(Math.tan(Math.PI / 4 + p0 / 2), n);
+
+    const lonRad = lon * DEG;
+    const latRad = lat * DEG;
+
+    const rho = RF / Math.pow(Math.tan(Math.PI / 4 + latRad / 2), n);
+    
+    let dLon = ((lonRad - lon0 + Math.PI) % (2 * Math.PI));
+    if (dLon < 0) dLon += 2 * Math.PI;
+    dLon -= Math.PI;
+
+    const theta = n * dLon;
+    const x = rho * Math.sin(theta);
+    const y = rho0 - rho * Math.cos(theta);
+
+    const gridX = (x - grid.x0) / grid.dx;
+    const gridY = (y - grid.y0) / grid.dy;
+
+    return { x: gridX, y: gridY };
+}
+
+/**
  * 🌟 DYNAMIC PIXEL DECODER
  */
 export function decodePixelValue(rawVal, manifest) {
@@ -81,7 +115,7 @@ export function decodePixelValue(rawVal, manifest) {
 }
 
 /**
- * 🌟 GENERIC BILINEAR SAMPLER
+ * 🌟 GENERIC BILINEAR SAMPLER (Supports both Equirectangular ECMWF and Lambert Conformal HRRR)
  */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameState = activeFrameState || stateManager.activeFrameState;
@@ -91,6 +125,60 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const pixelData = stateManager.chunkPixelData[chunkIdx];
     if (!pixelData) return 0.0;
 
+    const activeManifest = manifest || stateManager.manifest;
+    const grid = activeManifest?.grid;
+
+    // =========================================================================
+    // 🌟 PATH A: HRRR Native Lambert Conformal Conic Grid
+    // =========================================================================
+    if (grid && (grid.projection === 'lambert_conformal' || grid.nx)) {
+        const pt = projectHRRRLCC(lng, lat, grid);
+
+        // Check if point is outside the HRRR domain
+        if (pt.x < 0 || pt.x > grid.nx - 1 || pt.y < 0 || pt.y > grid.ny - 1) {
+            return NaN;
+        }
+
+        const x0 = Math.floor(pt.x);
+        const x1 = Math.min(x0 + 1, grid.nx - 1);
+        const y0 = Math.floor(pt.y);
+        const y1 = Math.min(y0 + 1, grid.ny - 1);
+
+        const fracX = pt.x - x0;
+        const fracY = pt.y - y0;
+
+        const frameW = grid.nx;
+        const frameH = grid.ny;
+        const frameSize = frameW * frameH;
+        const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
+        const frameOffset = frameIdx * frameSize;
+
+        // HRRR row order: 0 is south, ny - 1 is north
+        const idx00 = frameOffset + y0 * frameW + x0;
+        const idx10 = frameOffset + y0 * frameW + x1;
+        const idx01 = frameOffset + y1 * frameW + x0;
+        const idx11 = frameOffset + y1 * frameW + x1;
+
+        const v00 = pixelData[idx00];
+        const v10 = pixelData[idx10];
+        const v01 = pixelData[idx01];
+        const v11 = pixelData[idx11];
+
+        if (v00 === undefined) return NaN;
+
+        const d00 = decodePixelValue(v00, activeManifest);
+        const d10 = decodePixelValue(v10 ?? v00, activeManifest);
+        const d01 = decodePixelValue(v01 ?? v00, activeManifest);
+        const d11 = decodePixelValue(v11 ?? v00, activeManifest);
+
+        const bottom = d00 * (1.0 - fracX) + d10 * fracX;
+        const top = d01 * (1.0 - fracX) + d11 * fracX;
+        return bottom * (1.0 - fracY) + top * fracY;
+    }
+
+    // =========================================================================
+    // 🌟 PATH B: Global Equirectangular Grid (ECMWF)
+    // =========================================================================
     let normLng = ((lng % 360) + 360) % 360;
     if (normLng > 180) normLng -= 360;
 
@@ -99,8 +187,8 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 
     if (normY < 0 || normY > 1) return 0.0;
 
-    const frameW = manifest?.frame_width || stateManager.manifest?.frame_width || 1440;
-    const frameH = manifest?.frame_height || stateManager.manifest?.frame_height || 721;
+    const frameW = activeManifest?.frame_width || 1440;
+    const frameH = activeManifest?.frame_height || 721;
     const frameSize = frameW * frameH;
     const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
 
@@ -129,8 +217,6 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 
     if (v00 === undefined) return 0.0;
 
-    const activeManifest = manifest || stateManager.manifest;
-
     const d00 = decodePixelValue(v00, activeManifest);
     const d10 = decodePixelValue(v10 ?? v00, activeManifest);
     const d01 = decodePixelValue(v01 ?? v00, activeManifest);
@@ -152,7 +238,13 @@ export function formatParameterValue(decodedVal, manifest) {
     const paramId = (manifest?.id || manifest?.parameter || stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
     const isMetric = stateManager.currentUnits === 'metric';
 
-    // 1. Surface Precipitation Rate (nearest hundredth)
+    // 1. Radar Reflectivity (dBZ)
+    if (paramId === 'refc' || normalizedUnit.includes('dbz')) {
+        if (decodedVal < 9.0) return "--"; // Mute below radar detection floor
+        return `${Math.round(decodedVal)} dBZ`;
+    }
+
+    // 2. Surface Precipitation Rate (nearest hundredth)
     if (paramId === 'prate' || normalizedUnit.includes('in/hr') || normalizedUnit.includes('mm/hr')) {
         if (isMetric) {
             const mmhr = normalizedUnit.includes('in') ? decodedVal * 25.4 : decodedVal;
@@ -162,7 +254,7 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${inhr.toFixed(2)} in/hr`;
     }
 
-    // 2. Temperatures
+    // 3. Temperatures
     if (unit.includes('°') || normalizedUnit.includes('fahrenheit') || normalizedUnit.includes('celsius')) {
         let celsius = decodedVal;
         if (decodedVal > 150) {
@@ -174,7 +266,7 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(temperature)}°${isMetric ? 'C' : 'F'}`;
     }
 
-    // 3. Accumulated Precipitation
+    // 4. Accumulated Precipitation
     if (normalizedUnit === 'in' || normalizedUnit.includes('inch')) {
         return isMetric ? `${(decodedVal * 25.4).toFixed(1)} mm` : `${decodedVal.toFixed(2)} in`;
     }
@@ -293,7 +385,6 @@ export async function initCityOverlay(map) {
 }
 
 export function updateCityPositions() {
-    // 🛑 100% OFF during Radar mode
     if (stateManager.activeMode !== 'modelViewer') {
         destroyCityOverlay();
         return;
@@ -335,11 +426,10 @@ export function updateCityPositions() {
         const pos = mapInstance.project([city.lng, city.lat]);
 
         const nameLen = (city.name || '').length;
-        // Bounding box size: width accommodates name or data value; height accommodates 2 lines + outline
         const boxW = Math.max(52, nameLen * 6.8) + 12;
         const boxH = 28;
-        const padX = 10; // Extra horizontal clearance buffer
-        const padY = 6;  // Extra vertical clearance buffer
+        const padX = 10;
+        const padY = 6;
 
         const candidateBox = {
             left: pos.x - (boxW / 2) - padX,
@@ -412,7 +502,16 @@ function renderCityValues(activeFrameState, manifest) {
         const decodedVal = sampleBilinearValue(city.lng, city.lat, activeFrameState, manifest);
         const formattedText = formatParameterValue(decodedVal, manifest);
 
-        const valEl = marker.getElement().querySelector('.city-callout-val');
+        const el = marker.getElement();
+        // Hide city marker completely if it falls outside model domain or below radar noise floor
+        if (formattedText === "--") {
+            el.style.display = 'none';
+            continue;
+        } else {
+            el.style.display = 'flex';
+        }
+
+        const valEl = el.querySelector('.city-callout-val');
         if (valEl) {
             valEl.className = isPrecipType ? 'city-callout-val precip-val' : 'city-callout-val';
             valEl.textContent = formattedText;
@@ -421,7 +520,6 @@ function renderCityValues(activeFrameState, manifest) {
 }
 
 export function updateCityCallouts(map, activeFrameState, manifest) {
-    // 🛑 100% OFF during Radar mode
     if (!isLoaded || stateManager.activeMode !== 'modelViewer') return;
 
     const isSuppressed = stateManager.paramConfig?.suppress_city_overlay 
