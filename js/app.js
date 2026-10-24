@@ -661,6 +661,11 @@ export async function switchAppMode(targetMode) {
     if (modelBtn) modelBtn.classList.remove('active', 'open');
     if (paramBtn) paramBtn.classList.remove('active', 'open');
 
+    const desktopCats = document.getElementById('desktop-param-categories');
+    if (desktopCats) {
+        desktopCats.style.display = (targetMode === 'modelViewer' && window.innerWidth >= 1024) ? 'flex' : 'none';
+    }
+
     if (targetMode === 'satellite' || targetMode === 'tropics') {
         if (timeline) timeline.style.display = 'none';
         if (radarTools) radarTools.style.display = 'none';

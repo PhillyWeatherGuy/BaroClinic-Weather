@@ -804,23 +804,23 @@ export function initParameterCategoryBar() {
     const paramBar = document.getElementById('param-category-bar');
     const scrollContainer = paramBar ? paramBar.querySelector('.category-scroll-container') : null;
     const paramListContainer = document.getElementById('param-list-container');
-    const catPills = paramBar ? paramBar.querySelectorAll('.param-cat-pill') : [];
+    const catPills = document.querySelectorAll('.param-cat-pill');
 
-    if (!paramBtn || !paramBar) return;
+    if (!paramBar) return;
 
     getSharedModelsConfig().then(data => {
         if (data) {
             const activeCfg = data.parameters?.[stateManager.activeParam];
             stateManager.paramConfig = activeCfg;
 
-            const labelSpan = paramBtn.querySelector('span');
+            const labelSpan = paramBtn?.querySelector('span');
             if (labelSpan && activeCfg) {
                 labelSpan.textContent = activeCfg.name;
             }
 
             const initialCategory = activeCfg?.category || 'Thermodynamics';
             currentParamCategory = initialCategory;
-            catPills.forEach(p => {
+            document.querySelectorAll('.param-cat-pill').forEach(p => {
                 const cat = p.getAttribute('data-category');
                 p.classList.toggle('active', cat && cat.toLowerCase() === initialCategory.toLowerCase());
             });
@@ -831,6 +831,10 @@ export function initParameterCategoryBar() {
 
     refreshParamCategoryUI = () => {
         renderCategoryParameters(currentParamCategory);
+        document.querySelectorAll('.param-cat-pill').forEach(p => {
+            const cat = p.getAttribute('data-category');
+            p.classList.toggle('active', cat && cat.toLowerCase() === currentParamCategory.toLowerCase());
+        });
     };
 
     function renderCategoryParameters(categoryName) {
@@ -872,8 +876,14 @@ export function initParameterCategoryBar() {
                 document.querySelectorAll('#param-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
 
-                const labelSpan = paramBtn.querySelector('span');
+                const labelSpan = paramBtn?.querySelector('span');
                 if (labelSpan) labelSpan.textContent = param.name;
+
+                // On desktop, auto-close the parameter list once a selection is made
+                if (window.innerWidth >= 1024) {
+                    paramBar.style.display = 'none';
+                    document.querySelectorAll('.param-cat-pill').forEach(p => p.classList.remove('open'));
+                }
 
                 if (stateManager.activeParam === param.id) return;
 
@@ -940,38 +950,64 @@ export function initParameterCategoryBar() {
         });
     }
 
-    paramBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
+    if (paramBtn) {
+        paramBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
 
-        if (stateManager.activeMode === 'radar') {
-            paramBar.style.display = 'none';
-            paramBtn.classList.remove('active', 'open');
-            return;
-        }
+            if (stateManager.activeMode === 'radar') {
+                paramBar.style.display = 'none';
+                paramBtn.classList.remove('active', 'open');
+                return;
+            }
 
-        const modelBar = document.getElementById('model-category-bar');
-        const modelBtn = document.getElementById('btn-model-menu');
-        if (modelBar) modelBar.style.display = 'none';
-        if (modelBtn) modelBtn.classList.remove('active', 'open');
+            const modelBar = document.getElementById('model-category-bar');
+            const modelBtn = document.getElementById('btn-model-menu');
+            if (modelBar) modelBar.style.display = 'none';
+            if (modelBtn) modelBtn.classList.remove('active', 'open');
 
-        const isOpen = paramBar.style.display === 'block';
+            const isOpen = paramBar.style.display === 'block';
 
-        if (isOpen) {
-            paramBar.style.display = 'none';
-            paramBtn.classList.remove('active', 'open');
-        } else {
-            paramBar.style.display = 'block';
-            paramBtn.classList.add('active', 'open');
-        }
-    });
+            if (isOpen) {
+                paramBar.style.display = 'none';
+                paramBtn.classList.remove('active', 'open');
+            } else {
+                paramBar.style.display = 'block';
+                paramBtn.classList.add('active', 'open');
+            }
+        });
+    }
 
-    catPills.forEach(pill => {
+    document.querySelectorAll('.param-cat-pill').forEach(pill => {
         pill.addEventListener('click', (e) => {
-            catPills.forEach(p => p.classList.remove('active'));
-            e.currentTarget.classList.add('active');
-            
+            e.stopPropagation();
+
+            if (stateManager.activeMode === 'radar') return;
+
             const category = e.currentTarget.getAttribute('data-category');
+            const isDesktop = window.innerWidth >= 1024;
+            const isOpen = paramBar.style.display === 'block';
+
+            // On desktop, clicking the same category that is currently open toggles it closed
+            if (isDesktop && isOpen && currentParamCategory === category) {
+                paramBar.style.display = 'none';
+                document.querySelectorAll('.param-cat-pill').forEach(p => p.classList.remove('open'));
+                return;
+            }
+
+            document.querySelectorAll('.param-cat-pill').forEach(p => {
+                const cat = p.getAttribute('data-category');
+                p.classList.toggle('active', cat === category);
+                p.classList.remove('open');
+            });
+            e.currentTarget.classList.add('open');
+
             renderCategoryParameters(category);
+            paramBar.style.display = 'block';
+
+            const modelBar = document.getElementById('model-category-bar');
+            const modelBtn = document.getElementById('btn-model-menu');
+            if (modelBar) modelBar.style.display = 'none';
+            if (modelBtn) modelBtn.classList.remove('active', 'open');
         });
     });
 
@@ -999,9 +1035,14 @@ export function initParameterCategoryBar() {
     }
 
     document.addEventListener('click', (e) => {
-        if (!paramBar.contains(e.target) && !paramBtn.contains(e.target)) {
+        const desktopCats = document.getElementById('desktop-param-categories');
+        const isClickInside = paramBar.contains(e.target) || 
+                              (paramBtn && paramBtn.contains(e.target)) ||
+                              (desktopCats && desktopCats.contains(e.target));
+        if (!isClickInside) {
             paramBar.style.display = 'none';
-            paramBtn.classList.remove('active', 'open');
+            if (paramBtn) paramBtn.classList.remove('active', 'open');
+            document.querySelectorAll('.param-cat-pill').forEach(p => p.classList.remove('open'));
         }
     });
 }
