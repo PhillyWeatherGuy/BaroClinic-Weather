@@ -285,7 +285,7 @@ function createNonLinearPrecipPalette(levels, colors, valPoints = [0.0, 1.0, 30.
 /**
  * 🌟 Linear Diverging Palette Interpolator for Height Anomalies (-350m to +350m)
  */
-function createAnomalyPalette(levels, colors, belowColor, aboveColor, minVal = -350.0, maxVal = 350.0, numEntries = 256) {
+function createAnomalyPalette(levels, colors, belowColor, aboveColor, minVal = -450.0, maxVal = 450.0, numEntries = 256) {
     const palette = [];
     for (let i = 0; i < numEntries; i++) {
         const physicalVal = minVal + (i / (numEntries - 1)) * (maxVal - minVal);
