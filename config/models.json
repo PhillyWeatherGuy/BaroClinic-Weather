@@ -49,7 +49,7 @@
       "name": "2m Temperature",
       "unit": "°F",
       "category": "Thermodynamics",
-      "shader": "scalar",
+      "shader": "precip",
       "palette": "temp",
       "upscale_2x": false,
       "scaling": {
