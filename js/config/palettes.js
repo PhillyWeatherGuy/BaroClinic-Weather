@@ -164,9 +164,6 @@ const ANOM_COLORS = [
   "#cf76ad", "#ce88b9", "#ca98c0", "#cbaac8", "#ccbfce"
 ];
 
-const ANOM_BELOW = "#bcbdbf";
-const ANOM_ABOVE = "#c8c8ce";
-
 // 💧 Light Mode PWAT Levels (Inches)
 const LIGHT_PWAT_LEVELS = [
     0.00, 0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45,
