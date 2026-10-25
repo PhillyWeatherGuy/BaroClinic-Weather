@@ -306,8 +306,8 @@ export const Z500_ANOM_PALETTE = createAnomalyPalette(
     DARK_ANOM_COLORS,
     DARK_ANOM_BELOW,
     DARK_ANOM_ABOVE,
-    -350.0,
-    350.0,
+    -450.0,
+    450.0,
     256
 );
 
