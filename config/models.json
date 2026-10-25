@@ -172,8 +172,8 @@
       "suppress_city_overlay": true,
       "scaling": {
         "mode": "linear",
-        "min_val": -350.0,
-        "max_val": 350.0
+        "min_val": -450.0,
+        "max_val": 450.0
       },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
