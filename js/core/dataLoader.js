@@ -4,20 +4,9 @@ import { clearThreeGlobeTextures } from '../layers/threeGlobe.js';
 import { clearPolarTextures } from '../layers/polarMap.js';
 import { clearVectorContours } from '../layers/vectorContours.js';
 
-// 🌟 Map models to their respective Hugging Face repositories
-const MODEL_REPOS = {
-    'hrrr': 'baroclinic-hrrr-data',
-    'rrfs': 'baroclinic-rrfs-data-backend'
-};
-
 export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
-
-    // 🌟 Dynamically swap the Base URL so RRFS fetches from its own repo
-    if (MODEL_REPOS[activeModel]) {
-        stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/${MODEL_REPOS[activeModel]}/resolve/main/`;
-    }
 
     if (run && run.year && run.month && run.day && run.cycle) {
         stateManager.currentDate = `${run.year}${run.month}${run.day}`;
@@ -232,7 +221,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             }
         }
         
-        // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR/RRFS whether scalar or ptype
+        // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR whether scalar or ptype
         if (stateManager.manifest.grid) {
             const frames = [];
             const ptypeFrames = ptypeBytes ? [] : null;
