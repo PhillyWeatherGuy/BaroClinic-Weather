@@ -76,7 +76,7 @@
     "cape": {
       "id": "cape",
       "name": "Surface-Based CAPE",
-      "unit": "J kg^-1",
+      "unit": "J/Kg",
       "category": "Severe Weather",
       "shader": "precip",
       "palette": "cape",
