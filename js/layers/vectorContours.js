@@ -182,7 +182,7 @@ function themeContourFeatures(featureCollection, masterData) {
             feature.properties.labelHaloColor = isDarkTheme ? '#0b0f19' : '#ffffff';
 
             if (is540Line) {
-                feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 2.4);
+                feature.properties.width = Math.max(Number(feature.properties.width) || 1.6, 3.5);
             } else if (isW250) {
                 feature.properties.width = 1.8;
             }
