@@ -644,6 +644,17 @@ export function initModelCategoryBar() {
                 // 🌟 Auto-map parameters between models (e.g. ECMWF prate <-> HRRR refc) or fallback to 2t
                 const supported = model.supported_params || [];
                 let nextParam = stateManager.activeParam;
+                
+                // 🌟 Handle RRFS specific parameter mapping
+                if (model.id === 'rrfs' && !supported.includes(nextParam) && supported.includes(`${nextParam}_rrfs`)) {
+                    nextParam = `${nextParam}_rrfs`;
+                } else if (model.id !== 'rrfs' && nextParam.endsWith('_rrfs')) {
+                    const baseParam = nextParam.replace('_rrfs', '');
+                    if (supported.includes(baseParam)) {
+                        nextParam = baseParam;
+                    }
+                }
+
                 if (!supported.includes(nextParam)) {
                     if (nextParam === 'prate' && supported.includes('refc')) {
                         nextParam = 'refc';
@@ -1183,7 +1194,7 @@ function initModelRunDropdown() {
         anchorDate = new Date(baseStr);
     }
 
-    // 🌟 DYNAMIC INTERVALS: 1h for HRRR, 6h for ECMWF
+    // 🌟 DYNAMIC INTERVALS: 1h for HRRR, 6h for ECMWF & RRFS
     const isHRRR = stateManager.activeModel === 'hrrr';
     const intervalHours = isHRRR ? 1 : 6;
     const totalRuns = isHRRR ? 48 : 28;
