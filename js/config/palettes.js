@@ -132,6 +132,11 @@ const ASNOW_COLORS = [
     "#cb95f2"   // 47 - 48
 ];
 
+const CAPE_LEVELS = [
+    0, 135, 270, 400, 545, 675, 810, 945, 1080, 1210, 1345, 1490, 1575, 1755, 1890, 2025, 2155, 2290, 2430, 2565, 2700, 2835, 2965, 3150, 3235, 3375, 3510, 3645, 3780, 3910, 4045, 4180, 4320, 4455, 4590, 4720, 4855, 4990, 5125, 5265, 5400, 5535, 5665, 5800, 5935, 6070, 6210, 6295, 6345, 6475, 6610, 6690, 6745, 6880, 7010, 7155, 7290, 7420, 7555, 7690, 7825, 7955, 8100, 8230, 8365, 8500];
+const CAPE_COLORS = [
+    "#ffffff", "#f0f4f8", "#e1e9f0", "#cddbe8", "#b4cbe0", "#98b9d8", "#7aa5cf", "#598fc5", "#3b79ba", "#2364b0", "#1653a4", "#104496", "#0a3787", "#253593", "#3c329d", "#532ca4", "#6a22aa", "#8112af", "#9900b3", "#ad00b0", "#c000ab", "#d200a4", "#e2009a", "#f0008e", "#f71081", "#fc2973", "#ff4065", "#ff5657", "#ff6c4a", "#ff803d", "#ff9431", "#ffa724", "#ffb816", "#ffc700", "#ffd500", "#ffe300", "#fff000", "#fffc00", "#f5ff1a", "#e6ff33", "#d4ff4d", "#c0ff66", "#a8ff80", "#8eff99", "#73ffb3", "#57ffcc", "#38ffe6", "#00ffff", "#00f0f5", "#00e0ea", "#00d1df", "#00c2d4", "#00b3c8", "#00a5bd", "#0097b1", "#0089a4", "#007c98", "#00708b", "#00647f", "#005972", "#004f66", "#00455a", "#003c4f", "#003344", "#002b39", "#00232e"];
+
 // 📊 500mb Height Anomaly Levels (Meters)
 const ANOM_LEVELS = [
     -450.0, -446.4, -433.8, -421.2, -408.6, -396,
@@ -311,6 +316,14 @@ function createAnomalyPalette(levels, colors, belowColor, aboveColor, minVal = -
     return palette;
 }
 
+export const CAPE_PALETTE = createNonLinearPrecipPalette(
+    CAPE_LEVELS,
+    CAPE_COLORS,
+    [0.0, 10000.0],
+    [0, 255],
+    256
+);
+
 export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     LIGHT_PRECIP_LEVELS,
     LIGHT_PRECIP_HEX,
@@ -447,6 +460,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'w850' || id === 'w925') {
         return W850_PALETTE;
+    }
+    if (id === 'cape'){
+        return CAPE_PALETTE;
     }
     if (id.includes('wind')) {
         return W850_PALETTE;
