@@ -69,7 +69,7 @@
         "tp_3h",
         "tp_6h",
         "tp_24h",
-        "snow_depth",
+        "total_snowfall",
         "refc",
         "pwat",
         "pva",
