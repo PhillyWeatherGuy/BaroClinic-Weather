@@ -366,13 +366,13 @@ export function getPaletteForParameter(paramId) {
     if (id === 'prate') {
         return PRATE_PALETTE;
     }
-    if (id === 'asnow' || id.includes('snow') || id === 'sf') {
+    if (id === 'asnow' || id.startsWith('asnow') || id.includes('snow') || id === 'sf') {
         return ASNOW_PALETTE;
     }
     if (id === 'z500_anom' || id.includes('anom')) {
         return Z500_ANOM_PALETTE;
     }
-    if (id === 'tp' || id === 'precip' || id.includes('precip')) {
+    if (id === 'tp' || id.startsWith('tp_') || id === 'precip' || id.includes('precip')) {
         return PRECIP_PALETTE;
     }
     if (id === 'pwat' || id.includes('pwat') || id === 'tcwv') {
