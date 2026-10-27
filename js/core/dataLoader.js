@@ -15,8 +15,8 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     // 🌟 Dynamically swap the Base URL for RRFS
     if (activeModel === 'rrfs') {
-        // Note: If this fails, change to 'baroclinic-rrfs-data' (without the -backend)
-        stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-rrfs-data-backend/resolve/main/`;
+        // Note: If this fails, change to 'baroclinic-rrfs-data'
+        stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-rrfs-data/resolve/main/`;
     } else if (activeModel === 'hrrr') {
         stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-hrrr-data/resolve/main/`;
     } else {
