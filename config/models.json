@@ -69,7 +69,7 @@
         "tp_3h",
         "tp_6h",
         "tp_24h",
-        "total_snowfall",
+        "asnow_rrfs",
         "refc",
         "pwat",
         "pva",
@@ -281,8 +281,8 @@
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
     },
-    "total_snowfall": {
-      "id": "total_snowfall",
+    "asnow_rrfs": {
+      "id": "asnow_rrfs",
       "name": "Total Snowfall",
       "unit": "in",
       "category": "Winter Weather",
@@ -291,13 +291,13 @@
       "upscale_2x": false,
       "scaling": {
         "mode": "piecewise",
-        "unit_multiplier": 0.393701,
+        "unit_multiplier": 0.0393701,
         "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
         "byte_points": [0, 100, 200, 226, 255]
       },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
-    },    
+    },
     "prate": {
       "id": "prate",
       "name": "Precip Type/Rate",
