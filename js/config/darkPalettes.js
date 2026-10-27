@@ -311,8 +311,8 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(
 export const ASNOW1HR3_PALETTE = createNonLinearPrecipPalette(
     DARK_ASNOW1HR3_LEVELS,
     SNOW_RADAR_GLOW,
-    [0.0, 0.01, 0.1, 0.5, 1, 10],
-    [0, 100, 150, 200, 220, 255],
+    [0.0, 0.1, 0.5, 1.0, 3.0, 10.0],
+    [0, 50, 110, 160, 210, 255],
     256
 );
 
@@ -320,7 +320,7 @@ export const ASNOW_PALETTE = createNonLinearPrecipPalette(
     DARK_ASNOW_LEVELS,
     SNOW_RADAR_GLOW,
     [0.0, 1.0, 10.0, 50.0],
-    [0, 100, 200, 255],
+    [0, 100, 200, 255], 
     256
 );
 
@@ -397,7 +397,7 @@ export function getPaletteForParameter(paramId) {
     if (id === 'prate') {
         return PRATE_PALETTE;
     }
-    if (id === 'asnow_1h' || id === 'asnow_3h') {
+    if (id === 'asnow_1h' || id === 'asnow_3h' || id === 'asnow1hr3') {
         return ASNOW1HR3_PALETTE;
     }
     if (id === 'asnow' || id.startsWith('asnow') || id.includes('snow') || id === 'sf') {
@@ -424,7 +424,7 @@ export function getPaletteForParameter(paramId) {
     if (id === 'w700' || id === 'w850') {
         return W700_850_PALETTE;
     }
-    if (id === 'cape'){
+    if (id === 'cape') {
         return CAPE_PALETTE;
     }
     if (id === 'w925') {
