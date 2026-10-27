@@ -127,7 +127,7 @@ function themeContourFeatures(featureCollection, masterData) {
                 props.stroke = thickColor;
                 props.labelColor = thickColor;
                 props.labelHaloColor = isDark ? '#0b0f19' : '#ffffff';
-                props.width = Math.abs(thickDam - 540) < 0.5 ? 5.0 : 1.4;
+                props.width = Math.abs(thickDam - 540) < 0.5 ? 3.5 : 1.8;
                 props.opacity = 0.95;
                 props.dotted = true;
             } else {
