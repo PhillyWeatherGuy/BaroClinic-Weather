@@ -456,7 +456,7 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    if (stateManager.activeModel === 'hrrr') {
+    if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
         customShaderLayer = createPrecipTypeShaderLayer(map);
@@ -717,7 +717,7 @@ export async function switchAppMode(targetMode) {
         
         if (modelBtn) {
             const mSpan = modelBtn.querySelector('span');
-            if (mSpan) mSpan.textContent = stateManager.activeModel === 'hrrr' ? 'HRRR' : 'ECMWF';
+            if (mSpan) mSpan.textContent = stateManager.activeModel === 'hrrr' ? 'HRRR' : (stateManager.activeModel === 'rrfs' ? 'RRFS' : 'ECMWF');
         }
         if (paramBtn) paramBtn.querySelector('span').textContent = stateManager.paramConfig?.name || '2m Temperature';
 
