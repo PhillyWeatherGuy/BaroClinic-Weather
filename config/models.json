@@ -33,7 +33,15 @@
       "supported_params": [
         "2t",
         "tp",
+        "tp_1h",
+        "tp_3h",
+        "tp_6h",
+        "tp_24h",
         "asnow",
+        "asnow_1h",
+        "asnow_3h",
+        "asnow_6h",
+        "asnow_24h",
         "refc",
         "pwat",
         "pva",
@@ -67,6 +75,38 @@
     "tp": {
       "id": "tp",
       "name": "Total Accum. Precip",
+      "unit": "in",
+      "category": "Surface and Precipitation",
+      "shader": "precip",
+      "palette": "precip",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "val_points": [0.0, 1.0, 10.0, 50.0],
+        "byte_points": [0, 100, 200, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "tp_1h": {
+      "id": "tp_1h",
+      "name": "1-Hour Accum. Precip",
+      "unit": "in",
+      "category": "Surface and Precipitation",
+      "shader": "precip",
+      "palette": "precip",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "val_points": [0.0, 1.0, 10.0, 50.0],
+        "byte_points": [0, 100, 200, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "tp_3h": {
+      "id": "tp_3h",
+      "name": "3-Hour Accum. Precip",
       "unit": "in",
       "category": "Surface and Precipitation",
       "shader": "precip",
@@ -115,6 +155,40 @@
     "asnow": {
       "id": "asnow",
       "name": "Total Snowfall (10:1)",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 393.701,
+        "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
+        "byte_points": [0, 100, 200, 226, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow_1h": {
+      "id": "asnow_1h",
+      "name": "1-Hour Snowfall (10:1)",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 393.701,
+        "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
+        "byte_points": [0, 100, 200, 226, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow_3h": {
+      "id": "asnow_3h",
+      "name": "3-Hour Snowfall (10:1)",
       "unit": "in",
       "category": "Winter Weather",
       "shader": "precip",
