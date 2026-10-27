@@ -305,7 +305,7 @@ export const ASNOW_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
-export const CAPE_PALETTE = createNonLinearCapePalette(
+export const CAPE_PALETTE = createNonLinearPrecipPalette(
     DARK_CAPE_LEVELS,
     DARK_CAPE_COLORS,
     [0.0, 10000.0],
