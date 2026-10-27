@@ -32,6 +32,7 @@
       "resolution": "3km",
       "supported_params": [
         "2t",
+        "cape",
         "tp",
         "tp_1h",
         "tp_3h",
@@ -68,6 +69,22 @@
         "mode": "linear",
         "min_val": 216.4833,
         "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "cape": {
+      "id": "cape",
+      "name": "Surface-Based CAPE",
+      "unit": "J kg^-1",
+      "category": "Severe Weather",
+      "shader": "precip",
+      "palette": "cape",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 0.0,
+        "max_val": 10000.0
       },
       "map_style_light": "./config/map_style_light.json",
       "map_style_dark": "./config/style_dark.json"
