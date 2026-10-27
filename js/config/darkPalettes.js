@@ -191,6 +191,10 @@ const DARK_W250_COLORS = [
     "#fff425", "#fff537", "#fff64a", "#fff75c",
     "#fff86f", "#fff982", "#fffa94", "#fffba7"
 ];
+const DARK_CAPE_LEVELS = [
+    0, 135, 270, 400, 545, 675, 810, 945, 1080, 1210, 1345, 1490, 1575, 1755, 1890, 2025, 2155, 2290, 2430, 2565, 2700, 2835, 2965, 3150, 3235, 3375, 3510, 3645, 3780, 3910, 4045, 4180, 4320, 4455, 4590, 4720, 4855, 4990, 5125, 5265, 5400, 5535, 5665, 5800, 5935, 6070, 6210, 6295, 6345, 6475, 6610, 6690, 6745, 6880, 7010, 7155, 7290, 7420, 7555, 7690, 7825, 7955, 8100, 8230, 8365, 8500];
+const DARK_CAPE_COLORS = [
+    "#0a0b10", "#101424", "#141d3a", "#162752", "#17326b", "#153e85", "#114ba0", "#0759bc", "#0069d9", "#267eed", "#4fa2fa", "#73beff", "#99d5ff", "#89b3f7", "#7b92f0", "#7270ea", "#704ee3", "#7126dc", "#7c00d6", "#8f00cf", "#a300c7", "#b800be", "#cd00b2", "#e100a4", "#eb1297", "#f3288a", "#f93d7c", "#fd516f", "#ff6561", "#ff7854", "#ff8b46", "#ff9d37", "#ffa32d", "#ffa922", "#ffae14", "#ffb400", "#ffbe00", "#ffc700", "#ffd100", "#ffda00", "#ffe400", "#ffed00", "#fff600", "#ffff26", "#ffff54", "#ffff7a", "#ffff9e", "#ffffc2", "#ffffe0", "#f3fff0", "#e1ffe6", "#ccffdd", "#b3ffd5", "#99ffce", "#7fffca", "#5cffc9", "#2effcb", "#00ffd1", "#00f5cb", "#00ecc6", "#00e2bf", "#00d9b9", "#00cfb2", "#00c6ac", "#00bda6", "#00b39f"];
 
 // 💨 Dark Mode 500mb Wind Speed Levels (kts)
 const DARK_W500_LEVELS = [
@@ -301,6 +305,14 @@ export const ASNOW_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+export const CAPE_PALETTE = createNonLinearCapePalette(
+    DARK_CAPE_LEVELS,
+    DARK_CAPE_COLORS,
+    [0.0, 10000.0],
+    [0, 255],
+    256
+);
+
 export const Z500_ANOM_PALETTE = createAnomalyPalette(
     DARK_ANOM_LEVELS,
     DARK_ANOM_COLORS,
@@ -389,6 +401,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'w700' || id === 'w850') {
         return W700_850_PALETTE;
+    }
+    if (id === 'cape'){
+        return CAPE_PALETTE;
     }
     if (id === 'w925') {
         return W925_PALETTE;
