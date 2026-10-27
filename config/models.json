@@ -286,7 +286,7 @@
       "map_style_dark": "./config/style_dark.json"
     },
     "asnow_rrfs": {
-      "id": "asnow",
+      "id": "asnow_rrfs",
       "name": "Total Snowfall",
       "unit": "in",
       "category": "Winter Weather",
@@ -303,7 +303,7 @@
       "map_style_dark": "./config/style_dark.json"
     },
     "asnow_1h_rrfs": {
-      "id": "asnow_1h",
+      "id": "asnow_1h_rrfs",
       "name": "1-Hour Snowfall",
       "unit": "in",
       "category": "Winter Weather",
@@ -320,7 +320,7 @@
       "map_style_dark": "./config/style_dark.json"
     },
     "asnow_3h_rrfs": {
-      "id": "asnow_3h",
+      "id": "asnow_3h_rrfs",
       "name": "3-Hour Snowfall",
       "unit": "in",
       "category": "Winter Weather",
@@ -337,7 +337,7 @@
       "map_style_dark": "./config/style_dark.json"
     },
     "asnow_6h_rrfs": {
-      "id": "asnow_6h",
+      "id": "asnow_6h_rrfs",
       "name": "6-Hour Snowfall",
       "unit": "in",
       "category": "Winter Weather",
@@ -354,7 +354,7 @@
       "map_style_dark": "./config/style_dark.json"
     },
     "asnow_24h_rrfs": {
-      "id": "asnow_24h",
+      "id": "asnow_24h_rrfs",
       "name": "24-Hour Snowfall",
       "unit": "in",
       "category": "Winter Weather",
