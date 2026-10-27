@@ -79,7 +79,13 @@ export async function fetchManifest(run = null, model = null, param = null) {
     if (stateManager.manifest.date) stateManager.currentDate = stateManager.manifest.date;
     if (stateManager.manifest.run) stateManager.currentCycle = stateManager.manifest.run.toLowerCase();
     if (stateManager.manifest.model) stateManager.activeModel = stateManager.manifest.model;
-    if (stateManager.manifest.parameter) stateManager.activeParam = stateManager.manifest.parameter;
+    
+    // 🌟 Preserve the frontend-specific _rrfs parameter ID
+    if (stateManager.manifest.parameter) {
+        if (!stateManager.activeParam.endsWith('_rrfs')) {
+            stateManager.activeParam = stateManager.manifest.parameter;
+        }
+    }
 
     stateManager.initTime = stateManager.manifest.init_time 
                          || stateManager.manifest.run_time 
