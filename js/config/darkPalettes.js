@@ -105,6 +105,32 @@ const SNOW_RADAR_GLOW = [
   "#cb95f2"   // 47 - 48
 ];
 
+const DARK_ASNOW1HR3_LEVELS = [
+    0.02, 0.1, 0.21, 0.31, 0.42, 0.52, 0.62, 0.73, 0.83, 0.94, 1.04, 1.15, 1.25, 1.35, 1.46, 1.56, 1.67, 1.77, 1.88, 1.98, 2.08, 2.29, 2.5, 2.71, 2.92, 3.12, 3.33, 3.54, 3.75, 3.96, 4.17, 4.38, 4.58, 4.79, 5, 5.21, 5.42, 5.62, 5.83, 6.46, 6.67, 7.29, 7.92, 8.54, 9.17, 9.79, 10];
+];
+
+// ❄️ Dark Mode Total Snowfall (10:1) Radar Glow Colors
+const SNOW_RADAR_GLOW = [
+  "#596571", "#64707d", "#6f7c89", "#7b8895",
+  // blues: 2 - 6 (0.5 steps)
+  "#add7f9", "#90bff7", "#70acf1", "#5f9fed", "#4b8bec", "#3d79e3", "#336ed0", "#2c62c3",
+  // purples to magenta: 6 - 10 (0.5 steps)
+  "#3f0792", "#4d0a94", "#5c0e90", "#691290", "#82188c", "#9d208b", "#be2888", "#df3185",
+  // magenta to pink to lavender to cyan: 10 - 28 (1 inch steps)
+  "#e0358d", "#e654a3", "#e972b3", "#ee80bd", "#ed94c8", "#e89cca", "#e3a3cf", "#e0a9d1",
+  "#d5b7d7", "#d2bddb", "#cbcce2", "#c2dbe9", "#bfe4ef", "#b8eef3", "#b3f8f9", "#b2f3f3",
+  "#a1dfe0", "#92c3c8",
+  // teal-gray to lavender: 28 - 48 (wider bins)
+  "#97bed3",  // 28 - 31
+  "#94b4d6",  // 31 - 32
+  "#a2b3d9",  // 32 - 35
+  "#a9addc",  // 35 - 38
+  "#afa9e0",  // 38 - 41
+  "#b9a0e7",  // 41 - 44
+  "#c49bed",  // 44 - 47
+  "#cb95f2"   // 47 - 48
+];
+
 // 💧 Dark Mode PWAT Levels (Inches)
 const DARK_PWAT_LEVELS = [
     0.00, 0.05, 0.11, 0.16, 0.21, 0.26, 0.31, 0.37, 0.42, 0.47,
@@ -297,6 +323,14 @@ export const PRECIP_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+export const ASNOW1HR3_PALETTE = createNonLinearPrecipPalette(
+    DARK_ASNOW1HR3_LEVELS,
+    SNOW_RADAR_GLOW,
+    [0.0, 0.01, 0.1, 0.5, 1, 10],
+    [0, 100, 150, 200, 220, 255],
+    256
+);
+
 export const ASNOW_PALETTE = createNonLinearPrecipPalette(
     DARK_ASNOW_LEVELS,
     SNOW_RADAR_GLOW,
@@ -378,7 +412,7 @@ export function getPaletteForParameter(paramId) {
     if (id === 'prate') {
         return PRATE_PALETTE;
     }
-    if (id === 'asnow' || id.startsWith('asnow') || id.includes('snow') || id === 'sf') {
+    if (id === 'asnow' || id === 'sf') {
         return ASNOW_PALETTE;
     }
     if (id === 'z500_anom' || id.includes('anom')) {
@@ -404,6 +438,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'cape'){
         return CAPE_PALETTE;
+    }
+    if (id === 'asnow_1h' || 'asnow_3h') {
+        return ASNOW1HR3_PALETTE;
     }
     if (id === 'w925') {
         return W925_PALETTE;
