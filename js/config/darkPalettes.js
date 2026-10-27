@@ -83,30 +83,9 @@ const DARK_ASNOW_LEVELS = [
     31, 32, 35, 38, 41, 44, 47, 48
 ];
 
-// ❄️ Dark Mode Total Snowfall (10:1) Radar Glow Colors
-const SNOW_RADAR_GLOW = [
-  "#596571", "#64707d", "#6f7c89", "#7b8895",
-  // blues: 2 - 6 (0.5 steps)
-  "#add7f9", "#90bff7", "#70acf1", "#5f9fed", "#4b8bec", "#3d79e3", "#336ed0", "#2c62c3",
-  // purples to magenta: 6 - 10 (0.5 steps)
-  "#3f0792", "#4d0a94", "#5c0e90", "#691290", "#82188c", "#9d208b", "#be2888", "#df3185",
-  // magenta to pink to lavender to cyan: 10 - 28 (1 inch steps)
-  "#e0358d", "#e654a3", "#e972b3", "#ee80bd", "#ed94c8", "#e89cca", "#e3a3cf", "#e0a9d1",
-  "#d5b7d7", "#d2bddb", "#cbcce2", "#c2dbe9", "#bfe4ef", "#b8eef3", "#b3f8f9", "#b2f3f3",
-  "#a1dfe0", "#92c3c8",
-  // teal-gray to lavender: 28 - 48 (wider bins)
-  "#97bed3",  // 28 - 31
-  "#94b4d6",  // 31 - 32
-  "#a2b3d9",  // 32 - 35
-  "#a9addc",  // 35 - 38
-  "#afa9e0",  // 38 - 41
-  "#b9a0e7",  // 41 - 44
-  "#c49bed",  // 44 - 47
-  "#cb95f2"   // 47 - 48
-];
-
+// ❄️ Dark Mode 1h / 3h Snowfall Levels (Inches)
 const DARK_ASNOW1HR3_LEVELS = [
-    0.02, 0.1, 0.21, 0.31, 0.42, 0.52, 0.62, 0.73, 0.83, 0.94, 1.04, 1.15, 1.25, 1.35, 1.46, 1.56, 1.67, 1.77, 1.88, 1.98, 2.08, 2.29, 2.5, 2.71, 2.92, 3.12, 3.33, 3.54, 3.75, 3.96, 4.17, 4.38, 4.58, 4.79, 5, 5.21, 5.42, 5.62, 5.83, 6.46, 6.67, 7.29, 7.92, 8.54, 9.17, 9.79, 10];
+    0.02, 0.1, 0.21, 0.31, 0.42, 0.52, 0.62, 0.73, 0.83, 0.94, 1.04, 1.15, 1.25, 1.35, 1.46, 1.56, 1.67, 1.77, 1.88, 1.98, 2.08, 2.29, 2.5, 2.71, 2.92, 3.12, 3.33, 3.54, 3.75, 3.96, 4.17, 4.38, 4.58, 4.79, 5, 5.21, 5.42, 5.62, 5.83, 6.46, 6.67, 7.29, 7.92, 8.54, 9.17, 9.79, 10
 ];
 
 // ❄️ Dark Mode Total Snowfall (10:1) Radar Glow Colors
@@ -217,10 +196,16 @@ const DARK_W250_COLORS = [
     "#fff425", "#fff537", "#fff64a", "#fff75c",
     "#fff86f", "#fff982", "#fffa94", "#fffba7"
 ];
+
+// ⚡ Dark Mode Surface-Based CAPE Levels (J/kg)
 const DARK_CAPE_LEVELS = [
-    0, 25, 65, 120, 180, 245, 315, 390, 470, 555, 645, 740, 800, 935, 1035, 1140, 1245, 1355, 1475, 1590, 1705, 1825, 1950, 2115, 2200, 2335, 2465, 2595, 2730, 2870, 3005, 3145, 3295, 3440, 3585, 3735, 3880, 4030, 4185, 4345, 4505, 4660, 4820, 4980, 5140, 5305, 5475, 5585, 5645, 5810, 5980, 6080, 6150, 6320, 6495, 6680, 6855, 7030, 7210, 7385, 7570, 7750, 7945, 8130, 8315, 8500];
+    0, 25, 65, 120, 180, 245, 315, 390, 470, 555, 645, 740, 800, 935, 1035, 1140, 1245, 1355, 1475, 1590, 1705, 1825, 1950, 2115, 2200, 2335, 2465, 2595, 2730, 2870, 3005, 3145, 3295, 3440, 3585, 3735, 3880, 4030, 4185, 4345, 4505, 4660, 4820, 4980, 5140, 5305, 5475, 5585, 5645, 5810, 5980, 6080, 6150, 6320, 6495, 6680, 6855, 7030, 7210, 7385, 7570, 7750, 7945, 8130, 8315, 8500
+];
+
+// ⚡ Dark Mode Surface-Based CAPE Hex Colors
 const DARK_CAPE_COLORS = [
-    "#0a0b10", "#101424", "#141d3a", "#162752", "#17326b", "#153e85", "#114ba0", "#0759bc", "#0069d9", "#267eed", "#4fa2fa", "#73beff", "#99d5ff", "#89b3f7", "#7b92f0", "#7270ea", "#704ee3", "#7126dc", "#7c00d6", "#8f00cf", "#a300c7", "#b800be", "#cd00b2", "#e100a4", "#eb1297", "#f3288a", "#f93d7c", "#fd516f", "#ff6561", "#ff7854", "#ff8b46", "#ff9d37", "#ffa32d", "#ffa922", "#ffae14", "#ffb400", "#ffbe00", "#ffc700", "#ffd100", "#ffda00", "#ffe400", "#ffed00", "#fff600", "#ffff26", "#ffff54", "#ffff7a", "#ffff9e", "#ffffc2", "#ffffe0", "#f3fff0", "#e1ffe6", "#ccffdd", "#b3ffd5", "#99ffce", "#7fffca", "#5cffc9", "#2effcb", "#00ffd1", "#00f5cb", "#00ecc6", "#00e2bf", "#00d9b9", "#00cfb2", "#00c6ac", "#00bda6", "#00b39f"];
+    "#0a0b10", "#101424", "#141d3a", "#162752", "#17326b", "#153e85", "#114ba0", "#0759bc", "#0069d9", "#267eed", "#4fa2fa", "#73beff", "#99d5ff", "#89b3f7", "#7b92f0", "#7270ea", "#704ee3", "#7126dc", "#7c00d6", "#8f00cf", "#a300c7", "#b800be", "#cd00b2", "#e100a4", "#eb1297", "#f3288a", "#f93d7c", "#fd516f", "#ff6561", "#ff7854", "#ff8b46", "#ff9d37", "#ffa32d", "#ffa922", "#ffae14", "#ffb400", "#ffbe00", "#ffc700", "#ffd100", "#ffda00", "#ffe400", "#ffed00", "#fff600", "#ffff26", "#ffff54", "#ffff7a", "#ffff9e", "#ffffc2", "#ffffe0", "#f3fff0", "#e1ffe6", "#ccffdd", "#b3ffd5", "#99ffce", "#7fffca", "#5cffc9", "#2effcb", "#00ffd1", "#00f5cb", "#00ecc6", "#00e2bf", "#00d9b9", "#00cfb2", "#00c6ac", "#00bda6", "#00b39f"
+];
 
 // 💨 Dark Mode 500mb Wind Speed Levels (kts)
 const DARK_W500_LEVELS = [
@@ -412,7 +397,10 @@ export function getPaletteForParameter(paramId) {
     if (id === 'prate') {
         return PRATE_PALETTE;
     }
-    if (id === 'asnow' || id === 'sf') {
+    if (id === 'asnow_1h' || id === 'asnow_3h') {
+        return ASNOW1HR3_PALETTE;
+    }
+    if (id === 'asnow' || id.startsWith('asnow') || id.includes('snow') || id === 'sf') {
         return ASNOW_PALETTE;
     }
     if (id === 'z500_anom' || id.includes('anom')) {
@@ -438,9 +426,6 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'cape'){
         return CAPE_PALETTE;
-    }
-    if (id === 'asnow_1h' || 'asnow_3h') {
-        return ASNOW1HR3_PALETTE;
     }
     if (id === 'w925') {
         return W925_PALETTE;
