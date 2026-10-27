@@ -8,22 +8,47 @@ export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
 
+    // 🌟 Store the original default base URL so we can restore it for ECMWF/HRRR
+    if (!stateManager.DEFAULT_BASE_URL) {
+        stateManager.DEFAULT_BASE_URL = stateManager.BASE_URL;
+    }
+
+    // 🌟 Dynamically swap the Base URL for RRFS
+    if (activeModel === 'rrfs') {
+        // Note: If this fails, change to 'baroclinic-rrfs-data' (without the -backend)
+        stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-rrfs-data-backend/resolve/main/`;
+    } else if (activeModel === 'hrrr') {
+        stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-hrrr-data/resolve/main/`;
+    } else {
+        stateManager.BASE_URL = stateManager.DEFAULT_BASE_URL;
+    }
+
     if (run && run.year && run.month && run.day && run.cycle) {
         stateManager.currentDate = `${run.year}${run.month}${run.day}`;
         stateManager.currentCycle = run.cycle.toLowerCase();
     }
 
+    // 🌟 Map frontend parameter IDs to the actual backend manifest filenames
+    let manifestParam = activeParam;
+    if (activeParam === 'pva') {
+        manifestParam = 'z500';
+    } else if (activeParam === 'asnow_rrfs') {
+        manifestParam = 'asnow';
+    } else if (activeParam.endsWith('_rrfs')) {
+        manifestParam = activeParam.replace('_rrfs', '');
+    }
+
     const urlsToTry = [];
-    const manifestParam = activeParam === 'pva' ? 'z500' : activeParam;
     const latestUrl = `${stateManager.BASE_URL}${activeModel}_${manifestParam}_manifest.json`;
 
     if (stateManager.currentDate && stateManager.currentCycle) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
+        
         if (activeParam === 'pva') {
             urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_z500_${dateStr}_${cycleStr}_manifest.json`);
         } else {
-            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${activeParam}_${dateStr}_${cycleStr}_manifest.json`);
+            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${manifestParam}_${dateStr}_${cycleStr}_manifest.json`);
         }
     }
     if (!run) {
@@ -221,7 +246,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             }
         }
         
-        // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR whether scalar or ptype
+        // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR/RRFS whether scalar or ptype
         if (stateManager.manifest.grid) {
             const frames = [];
             const ptypeFrames = ptypeBytes ? [] : null;
