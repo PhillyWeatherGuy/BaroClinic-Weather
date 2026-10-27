@@ -55,6 +55,36 @@
         "w850",
         "w925"
       ]
+    },
+    "rrfs": {
+      "id": "rrfs",
+      "name": "RRFS",
+      "category": "Mesoscale",
+      "resolution": "3km",
+      "supported_params": [
+        "2t",
+        "cape",
+        "tp",
+        "tp_1h",
+        "tp_3h",
+        "tp_6h",
+        "tp_24h",
+        "asnow_rrfs",
+        "asnow_1h_rrfs",
+        "asnow_3h_rrfs",
+        "asnow_6h_rrfs",
+        "asnow_24h_rrfs",
+        "refc",
+        "pwat",
+        "pva",
+        "z500_anom",
+        "w250",
+        "w300",
+        "w500",
+        "w700",
+        "w850",
+        "w925"
+      ]
     }
   },
   "parameters": {
@@ -249,6 +279,91 @@
       "scaling": {
         "mode": "piecewise",
         "unit_multiplier": 393.701,
+        "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
+        "byte_points": [0, 100, 200, 226, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow_rrfs": {
+      "id": "asnow",
+      "name": "Total Snowfall",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 0.0393701,
+        "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
+        "byte_points": [0, 100, 200, 226, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow_1h_rrfs": {
+      "id": "asnow_1h",
+      "name": "1-Hour Snowfall",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 0.0393701,
+        "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
+        "byte_points": [0, 100, 200, 226, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow_3h_rrfs": {
+      "id": "asnow_3h",
+      "name": "3-Hour Snowfall",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 0.0393701,
+        "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
+        "byte_points": [0, 100, 200, 226, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow_6h_rrfs": {
+      "id": "asnow_6h",
+      "name": "6-Hour Snowfall",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 0.0393701,
+        "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
+        "byte_points": [0, 100, 200, 226, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "asnow_24h_rrfs": {
+      "id": "asnow_24h",
+      "name": "24-Hour Snowfall",
+      "unit": "in",
+      "category": "Winter Weather",
+      "shader": "precip",
+      "palette": "asnow",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 0.0393701,
         "val_points": [0.0, 1.0, 10.0, 36.0, 150.0],
         "byte_points": [0, 100, 200, 226, 255]
       },
