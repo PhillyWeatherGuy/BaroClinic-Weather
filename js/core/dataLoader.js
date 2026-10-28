@@ -8,13 +8,15 @@ export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
 
-    // 🌟 Store the original default base URL so we can restore it for ECMWF/HRRR
+    // 🌟 Store the original default base URL so we can restore it for ECMWF
     if (!stateManager.DEFAULT_BASE_URL) {
         stateManager.DEFAULT_BASE_URL = stateManager.BASE_URL;
     }
 
-    // 🌟 Dynamically swap the Base URL for RRFS
-    if (activeModel === 'rrfs') {
+    // 🌟 Dynamically swap the Base URL for different models
+    if (activeModel === 'aifs') {
+        stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-aifs-data/resolve/main/`;
+    } else if (activeModel === 'rrfs') {
         // Note: If this fails, change to 'baroclinic-rrfs-data'
         stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-rrfs-data/resolve/main/`;
     } else if (activeModel === 'hrrr') {
