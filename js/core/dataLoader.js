@@ -185,119 +185,161 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         return stateManager.loadedChunkBitmaps[chunkIndex];
     }
 
-    const chunk = stateManager.manifest?.chunks?.[chunkIndex];
-    if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
-
-    const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-    const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
-    
-    // 🌟 Pass the abort signal
-    const imgResp = await fetch(chunkUrl, { signal: stateManager.activeFetchController?.signal });
-    if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
-
-    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-        throw new Error("Load cancelled");
+    // 🌟 DEDUPLICATE CONCURRENT FETCHES (Prevents double downloading)
+    if (!stateManager.activeChunkPromises) stateManager.activeChunkPromises = {};
+    if (stateManager.activeChunkPromises[chunkIndex]) {
+        return stateManager.activeChunkPromises[chunkIndex];
     }
 
-    const frameW = stateManager.manifest.frame_width || 1440;
-    const frameH = stateManager.manifest.frame_height || 721;
-    const frameSize = frameW * frameH;
-    const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
+    const loadPromise = (async () => {
+        const chunk = stateManager.manifest?.chunks?.[chunkIndex];
+        if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
-    // 🌟 Dynamically check if models.json specifies upscale_2x for this parameter
-    const shouldUpscale = Boolean(stateManager.paramConfig?.upscale_2x || stateManager.manifest?.upscale_2x);
+        const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+        
+        // 🌟 REMOVED CACHE BUSTER: Allows Cloudflare and browser to cache the immutable .bin file
+        const chunkUrl = rawChunkUrl; 
+        
+        // 🌟 Pass the abort signal
+        const imgResp = await fetch(chunkUrl, { signal: stateManager.activeFetchController?.signal });
+        if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
-    // 🌟 PATH A: Compressed Binary Time Volume (.bin)
-    if (chunk.file.endsWith('.bin')) {
-        let rawData = stateManager.chunkPixelData[chunkIndex];
+        if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+            throw new Error("Load cancelled");
+        }
 
-        if (!rawData) {
-            const arrayBuffer = await imgResp.arrayBuffer();
-            const bytes = new Uint8Array(arrayBuffer);
+        const frameW = stateManager.manifest.frame_width || 1440;
+        const frameH = stateManager.manifest.frame_height || 721;
+        const frameSize = frameW * frameH;
+        const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
 
-            if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
-                try {
-                    const stream = new Response(arrayBuffer).body.pipeThrough(new DecompressionStream('gzip'));
-                    const decompressedBlob = await new Response(stream).blob();
-                    const decompressedBuffer = await decompressedBlob.arrayBuffer();
-                    rawData = new Uint8Array(decompressedBuffer);
-                } catch (e) {
+        // 🌟 Dynamically check if models.json specifies upscale_2x for this parameter
+        const shouldUpscale = Boolean(stateManager.paramConfig?.upscale_2x || stateManager.manifest?.upscale_2x);
+
+        // 🌟 PATH A: Compressed Binary Time Volume (.bin)
+        if (chunk.file.endsWith('.bin')) {
+            let rawData = stateManager.chunkPixelData[chunkIndex];
+
+            if (!rawData) {
+                const arrayBuffer = await imgResp.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuffer);
+
+                if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+                    try {
+                        const stream = new Response(arrayBuffer).body.pipeThrough(new DecompressionStream('gzip'));
+                        const decompressedBlob = await new Response(stream).blob();
+                        const decompressedBuffer = await decompressedBlob.arrayBuffer();
+                        rawData = new Uint8Array(decompressedBuffer);
+                    } catch (e) {
+                        rawData = bytes;
+                    }
+                } else {
                     rawData = bytes;
                 }
-            } else {
-                rawData = bytes;
+
+                if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+                    throw new Error("Load cancelled");
+                }
+
+                stateManager.chunkPixelData[chunkIndex] = rawData;
             }
 
-            if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-                throw new Error("Load cancelled");
+            let ptypeBytes = null;
+            if (chunk.ptype_file) {
+                try {
+                    // 🌟 REMOVED CACHE BUSTER here as well
+                    const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}`;
+                    
+                    // 🌟 Pass the abort signal
+                    const ptypeResp = await fetch(ptypeUrl, { signal: stateManager.activeFetchController?.signal });
+                    if (ptypeResp.ok) {
+                        const ptypeBuffer = await ptypeResp.arrayBuffer();
+                        let rawPtype = new Uint8Array(ptypeBuffer);
+                        if (rawPtype[0] === 0x1f && rawPtype[1] === 0x8b) {
+                            const stream = new Response(ptypeBuffer).body.pipeThrough(new DecompressionStream('gzip'));
+                            ptypeBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+                        } else {
+                            ptypeBytes = rawPtype;
+                        }
+                    }
+                } catch (e) {
+                    if (e.name !== 'AbortError') console.warn("Could not load ptype_file:", e);
+                }
+
+                if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+                    throw new Error("Load cancelled");
+                }
             }
-
-            stateManager.chunkPixelData[chunkIndex] = rawData;
-        }
-
-        let ptypeBytes = null;
-        if (chunk.ptype_file) {
-            try {
-                const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}?t=${Date.now()}`;
-                
-                // 🌟 Pass the abort signal
-                const ptypeResp = await fetch(ptypeUrl, { signal: stateManager.activeFetchController?.signal });
-                if (ptypeResp.ok) {
-                    const ptypeBuffer = await ptypeResp.arrayBuffer();
-                    let rawPtype = new Uint8Array(ptypeBuffer);
-                    if (rawPtype[0] === 0x1f && rawPtype[1] === 0x8b) {
-                        const stream = new Response(ptypeBuffer).body.pipeThrough(new DecompressionStream('gzip'));
-                        ptypeBytes = new Uint8Array(await new Response(stream).arrayBuffer());
-                    } else {
-                        ptypeBytes = rawPtype;
+            
+            // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR/RRFS whether scalar or ptype
+            if (stateManager.manifest.grid) {
+                const frames = [];
+                const ptypeFrames = ptypeBytes ? [] : null;
+                for (let f = 0; f < numFrames; f++) {
+                    const srcStart = f * frameSize;
+                    frames.push(rawData.subarray(srcStart, srcStart + frameSize));
+                    if (ptypeBytes) {
+                        ptypeFrames.push(ptypeBytes.subarray(srcStart, srcStart + frameSize));
                     }
                 }
-            } catch (e) {
-                if (e.name !== 'AbortError') console.warn("Could not load ptype_file:", e);
+                const volumeObj = { 
+                    frames, 
+                    ptypeFrames, 
+                    width: frameW, 
+                    height: frameH, 
+                    isVolume: true, 
+                    isRaw: true,
+                    hasPtype: Boolean(ptypeBytes)
+                };
+                stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
+                return volumeObj;
+            }
+
+            const outFrames = [];
+            for (let f = 0; f < numFrames; f++) {
+                const srcStart = f * frameSize;
+                const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
+                const ptypeSlice = ptypeBytes ? ptypeBytes.subarray(srcStart, srcStart + frameSize) : null;
+                const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale, ptypeSlice);
+                outFrames.push(bitmap);
             }
 
             if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+                outFrames.forEach(b => { if (b && typeof b.close === 'function') b.close(); });
                 throw new Error("Load cancelled");
             }
-        }
-        
-        // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR/RRFS whether scalar or ptype
-        if (stateManager.manifest.grid) {
-            const frames = [];
-            const ptypeFrames = ptypeBytes ? [] : null;
-            for (let f = 0; f < numFrames; f++) {
-                const srcStart = f * frameSize;
-                frames.push(rawData.subarray(srcStart, srcStart + frameSize));
-                if (ptypeBytes) {
-                    ptypeFrames.push(ptypeBytes.subarray(srcStart, srcStart + frameSize));
-                }
-            }
-            const volumeObj = { 
-                frames, 
-                ptypeFrames, 
-                width: frameW, 
-                height: frameH, 
-                isVolume: true, 
-                isRaw: true,
-                hasPtype: Boolean(ptypeBytes)
+
+            const volumeObj = {
+                frames: outFrames,
+                width: shouldUpscale ? frameW * 2 : frameW,
+                height: shouldUpscale ? frameH * 2 : frameH,
+                isVolume: true
             };
+
             stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
             return volumeObj;
         }
 
-        const outFrames = [];
-        for (let f = 0; f < numFrames; f++) {
-            const srcStart = f * frameSize;
-            const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
-            const ptypeSlice = ptypeBytes ? ptypeBytes.subarray(srcStart, srcStart + frameSize) : null;
-            const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale, ptypeSlice);
-            outFrames.push(bitmap);
-        }
+        // 🌟 PATH B: Image fallback (.png / .webp)
+        const blob = await imgResp.blob();
+        const fullBitmap = await createImageBitmap(blob);
 
         if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-            outFrames.forEach(b => { if (b && typeof b.close === 'function') b.close(); });
+            fullBitmap.close();
             throw new Error("Load cancelled");
         }
+
+        const outFrames = [];
+        for (let f = 0; f < numFrames; f++) {
+            const frameBitmap = await createImageBitmap(
+                fullBitmap, 
+                f * frameW, 0, frameW, frameH,
+                shouldUpscale ? { resizeWidth: frameW * 2, resizeHeight: frameH * 2, resizeQuality: 'high' } : undefined
+            );
+            outFrames.push(frameBitmap);
+        }
+
+        fullBitmap.close();
 
         const volumeObj = {
             frames: outFrames,
@@ -308,38 +350,15 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
         stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
         return volumeObj;
+    })();
+
+    stateManager.activeChunkPromises[chunkIndex] = loadPromise;
+
+    try {
+        return await loadPromise;
+    } finally {
+        delete stateManager.activeChunkPromises[chunkIndex];
     }
-
-    // 🌟 PATH B: Image fallback (.png / .webp)
-    const blob = await imgResp.blob();
-    const fullBitmap = await createImageBitmap(blob);
-
-    if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-        fullBitmap.close();
-        throw new Error("Load cancelled");
-    }
-
-    const outFrames = [];
-    for (let f = 0; f < numFrames; f++) {
-        const frameBitmap = await createImageBitmap(
-            fullBitmap, 
-            f * frameW, 0, frameW, frameH,
-            shouldUpscale ? { resizeWidth: frameW * 2, resizeHeight: frameH * 2, resizeQuality: 'high' } : undefined
-        );
-        outFrames.push(frameBitmap);
-    }
-
-    fullBitmap.close();
-
-    const volumeObj = {
-        frames: outFrames,
-        width: shouldUpscale ? frameW * 2 : frameW,
-        height: shouldUpscale ? frameH * 2 : frameH,
-        isVolume: true
-    };
-
-    stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
-    return volumeObj;
 }
 
 export function purgeAllAppMemory(shaderLayerRef = null) {
@@ -350,6 +369,9 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
         try { stateManager.activeFetchController.abort(); } catch(e){}
     }
     stateManager.activeFetchController = new AbortController();
+    
+    // 🌟 CLEAR PROMISE LOCKS
+    stateManager.activeChunkPromises = {};
 
     clearThreeGlobeTextures();
     clearPolarTextures();
