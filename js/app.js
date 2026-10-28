@@ -41,6 +41,7 @@ let customShaderLayer = null;
 let renderDebounceId = null;
 let activeRenderId = 0;
 let polarMapLoaded = false;
+let isFirstLoad = true; // 🌟 Forces default model/param on initial site load
 
 // 🌟 Dedicated Atmosphere Canvas (Placed BEHIND MapLibre canvas for draw-order occlusion)
 let haloCanvas = null;
@@ -604,9 +605,16 @@ export async function preloadRemainingChunks(currentGen) {
 async function loadInitialModelData() {
     const thisGen = stateManager.loadGeneration;
     try {
-        const preferences = getViewerPreferences();
-        if (preferences.model) stateManager.activeModel = preferences.model;
-        if (preferences.param) stateManager.activeParam = preferences.param;
+        // 🌟 Force default to ECMWF / 2t on the very first site load
+        if (isFirstLoad) {
+            stateManager.activeModel = 'ecmwf';
+            stateManager.activeParam = '2t';
+            isFirstLoad = false;
+        } else {
+            const preferences = getViewerPreferences();
+            if (preferences.model) stateManager.activeModel = preferences.model;
+            if (preferences.param) stateManager.activeParam = preferences.param;
+        }
 
         await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
         initLayer();
@@ -717,7 +725,12 @@ export async function switchAppMode(targetMode) {
         
         if (modelBtn) {
             const mSpan = modelBtn.querySelector('span');
-            if (mSpan) mSpan.textContent = stateManager.activeModel === 'hrrr' ? 'HRRR' : (stateManager.activeModel === 'rrfs' ? 'RRFS' : 'ECMWF');
+            if (mSpan) {
+                if (stateManager.activeModel === 'hrrr') mSpan.textContent = 'HRRR';
+                else if (stateManager.activeModel === 'rrfs') mSpan.textContent = 'RRFS';
+                else if (stateManager.activeModel === 'aifs') mSpan.textContent = 'EC-AIFS';
+                else mSpan.textContent = 'ECMWF-IFS';
+            }
         }
         if (paramBtn) paramBtn.querySelector('span').textContent = stateManager.paramConfig?.name || '2m Temperature';
 
