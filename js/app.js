@@ -593,6 +593,7 @@ export async function preloadRemainingChunks(currentGen) {
                 }
                 updateSliderTrackAndBounds();
             } catch (err) {
+                if (err.name === 'AbortError') break; // 🌟 Stop immediately if aborted
                 if (err.message !== "Load cancelled") {
                     console.warn(`Preload chunk ${i} skipped:`, err);
                 }
@@ -605,13 +606,37 @@ export async function preloadRemainingChunks(currentGen) {
 async function loadInitialModelData() {
     const thisGen = stateManager.loadGeneration;
     try {
+        // 🌟 FIX: Pull preferences outside the else block to prevent ReferenceError
+        const preferences = getViewerPreferences();
+
         // 🌟 Force default to ECMWF / 2t on the very first site load
         if (isFirstLoad) {
             stateManager.activeModel = 'ecmwf';
             stateManager.activeParam = '2t';
             isFirstLoad = false;
+
+            // 🌟 FIX: Force the shader and paramConfig to match 2t immediately
+            try {
+                const resp = await fetch('./config/models.json');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    stateManager.paramConfig = data.parameters['2t'];
+                    stateManager.activeShader = stateManager.paramConfig.shader || 'precip';
+                }
+            } catch(e) {}
+
+            // 🌟 FIX: Update the UI button text to match the forced parameter
+            const paramBtn = document.getElementById('btn-param-menu');
+            if (paramBtn) {
+                const pSpan = paramBtn.querySelector('span');
+                if (pSpan) pSpan.textContent = '2m Temperature';
+            }
+            const modelBtn = document.getElementById('btn-model-menu');
+            if (modelBtn) {
+                const mSpan = modelBtn.querySelector('span');
+                if (mSpan) mSpan.textContent = 'ECMWF-IFS';
+            }
         } else {
-            const preferences = getViewerPreferences();
             if (preferences.model) stateManager.activeModel = preferences.model;
             if (preferences.param) stateManager.activeParam = preferences.param;
         }
@@ -628,15 +653,19 @@ async function loadInitialModelData() {
             }
 
             syncTimelineWithManifest();
-            const savedStep = Number.isInteger(preferences.modelStep)
+            const savedStep = Number.isInteger(preferences?.modelStep)
                 ? Math.min(preferences.modelStep, stateManager.globalSteps.length - 1)
                 : 0;
             setStepIndex(Math.max(0, savedStep));
             await renderFrame(Math.max(0, savedStep));
             hideToast();
 
-            preloadRemainingChunks(thisGen);
-            preloadAllContours(thisGen);
+            // 🌟 FIX: Await the chunks before starting the contour downloads to prevent bandwidth traffic jams
+            preloadRemainingChunks(thisGen).then(() => {
+                if (thisGen === stateManager.loadGeneration) {
+                    preloadAllContours(thisGen);
+                }
+            });
         }
     } catch (err) {
         if (err.message !== "Load cancelled") {
