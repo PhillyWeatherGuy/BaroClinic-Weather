@@ -2,7 +2,7 @@
   "models": {
     "ecmwf": {
       "id": "ecmwf",
-      "name": "ECMWF",
+      "name": "ECMWF-IFS",
       "category": "Global",
       "resolution": "9km",
       "supported_params": [
@@ -24,6 +24,31 @@
         "w850",
         "w925",
         "cape"
+      ]
+    },
+    "aifs": {
+      "id": "aifs",
+      "name": "EC-AIFS",
+      "category": "Global",
+      "resolution": "28km",
+      "supported_params": [
+        "2t",
+        "tp",
+        "tp_6h",
+        "tp_24h",
+        "asnow",
+        "asnow_6h",
+        "asnow_24h",
+        "prate",
+        "pwat",
+        "pva",
+        "z500_anom",
+        "w250",
+        "w300",
+        "w500",
+        "w700",
+        "w850",
+        "w925"
       ]
     },
     "hrrr": {
