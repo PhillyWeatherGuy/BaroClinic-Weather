@@ -576,30 +576,49 @@ async function renderFrame(globalIdx) {
 export async function preloadRemainingChunks(currentGen) {
     if (!stateManager.manifest || !stateManager.manifest.chunks) return;
     const totalChunks = stateManager.manifest.chunks.length;
+    
+    // 🌟 Dynamic Concurrency: 3 on Desktop, 1 on Mobile (prevents RAM crashes)
+    const isMobile = window.innerWidth < 768 || /Mobi|Android/i.test(navigator.userAgent);
+    const CONCURRENCY = isMobile ? 1 : 3;
 
-    for (let i = 1; i < totalChunks; i++) {
-        if (currentGen !== stateManager.loadGeneration) break;
+    let nextChunkToDownload = 1;
 
-        if (!stateManager.loadedChunkBitmaps[i] && !stateManager.chunkPixelData[i]) {
-            try {
-                await new Promise(r => setTimeout(r, 50));
-                if (currentGen !== stateManager.loadGeneration) break;
+    async function chunkWorker() {
+        while (nextChunkToDownload < totalChunks) {
+            const i = nextChunkToDownload++;
+            
+            if (currentGen !== stateManager.loadGeneration) break;
 
-                const bitmap = await loadChunkBitmap(i, currentGen);
-                if (currentGen === stateManager.loadGeneration) {
-                    if (customShaderLayer) {
-                        customShaderLayer.preloadChunkTexture(i, bitmap);
+            if (!stateManager.loadedChunkBitmaps[i] && !stateManager.chunkPixelData[i]) {
+                try {
+                    // Slight stagger to let the main thread breathe
+                    await new Promise(r => setTimeout(r, Math.random() * 100));
+                    if (currentGen !== stateManager.loadGeneration) break;
+
+                    const bitmap = await loadChunkBitmap(i, currentGen);
+                    if (currentGen === stateManager.loadGeneration) {
+                        if (customShaderLayer) {
+                            customShaderLayer.preloadChunkTexture(i, bitmap);
+                        }
+                    }
+                    updateSliderTrackAndBounds();
+                } catch (err) {
+                    if (err.name === 'AbortError') break;
+                    if (err.message !== "Load cancelled") {
+                        console.warn(`Preload chunk ${i} skipped:`, err);
                     }
                 }
-                updateSliderTrackAndBounds();
-            } catch (err) {
-                if (err.message !== "Load cancelled") {
-                    console.warn(`Preload chunk ${i} skipped:`, err);
-                }
-                continue;
             }
         }
     }
+
+    // Spawn workers based on device type
+    const workers = [];
+    for (let i = 0; i < CONCURRENCY; i++) {
+        workers.push(chunkWorker());
+    }
+    
+    await Promise.all(workers);
 }
 
 async function loadInitialModelData() {
