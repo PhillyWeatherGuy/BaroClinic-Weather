@@ -63,13 +63,16 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     for (const url of urlsToTry) {
         try {
-            const resp = await fetch(url + `?t=${Date.now()}`);
+            // 🌟 Pass the abort signal
+            const resp = await fetch(url + `?t=${Date.now()}`, { signal: stateManager.activeFetchController?.signal });
             if (resp.ok) {
                 fetchedData = await resp.json();
                 console.log(`✅ Loaded manifest from: ${url}`);
                 break;
             }
-        } catch (err) {}
+        } catch (err) {
+            if (err.name === 'AbortError') return; // Exit gracefully if aborted
+        }
     }
 
     if (!fetchedData) {
@@ -187,7 +190,9 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
     const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
     const chunkUrl = rawChunkUrl + (rawChunkUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
-    const imgResp = await fetch(chunkUrl);
+    
+    // 🌟 Pass the abort signal
+    const imgResp = await fetch(chunkUrl, { signal: stateManager.activeFetchController?.signal });
     if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
     if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
@@ -234,7 +239,9 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         if (chunk.ptype_file) {
             try {
                 const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}?t=${Date.now()}`;
-                const ptypeResp = await fetch(ptypeUrl);
+                
+                // 🌟 Pass the abort signal
+                const ptypeResp = await fetch(ptypeUrl, { signal: stateManager.activeFetchController?.signal });
                 if (ptypeResp.ok) {
                     const ptypeBuffer = await ptypeResp.arrayBuffer();
                     let rawPtype = new Uint8Array(ptypeBuffer);
@@ -246,7 +253,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                     }
                 }
             } catch (e) {
-                console.warn("Could not load ptype_file:", e);
+                if (e.name !== 'AbortError') console.warn("Could not load ptype_file:", e);
             }
 
             if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
@@ -337,6 +344,12 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
 export function purgeAllAppMemory(shaderLayerRef = null) {
     stateManager.loadGeneration++;
+
+    // 🌟 ABORT ONGOING DOWNLOADS
+    if (stateManager.activeFetchController) {
+        try { stateManager.activeFetchController.abort(); } catch(e){}
+    }
+    stateManager.activeFetchController = new AbortController();
 
     clearThreeGlobeTextures();
     clearPolarTextures();
