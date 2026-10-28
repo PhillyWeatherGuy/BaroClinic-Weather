@@ -74,16 +74,13 @@ const LIGHT_PRECIP_HEX = [
     "#C574CD"
 ];
 
-const PRATE_LEVELS = [0.0, 0.015, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 10.0, 200.0];
-
+const PRATE_LEVELS = [0.015, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 10.0, 200.0];
 const PRATE_COLORS = [
-    "transparent", "transparent", "transparent", "transparent", "transparent",
     "#b4e6a3", "#86d17f", "#5fc267", "#43ae5b", "#2f9a4e", "#25863f", "#1c7436", "#166030", "#104d28", "#0b3a1a",
-    "#ffd700", "#ffaa00", "#ff7700", "#ff007f", "#ff0055", "#ff0033", "#d500f9", "#aa00ff", "#7c00ea"
+    "#ffd700", "#ffaa00", "#ff7700", "#ff007f", "#ff0055", "#ff0033", "#d500f9", "#aa00ff", "#7c00ea", "#311b92", "#1a237e", "#01030a"
 ];
 
 const FRZR_COLORS = [
-    "transparent", "transparent", "transparent", "transparent", "transparent",
     "#d9b4ce", "#dba8cb", "#dd9dc7", "#de92c2", "#de86bc", "#dd7bb5",
     "#dc71ad", "#da66a5", "#d75c9d", "#d45294", "#d0488a", "#cc3f80",
     "#c63676", "#c12d6d", "#ba2563", "#b31e59", "#ab184f", "#a31446",
@@ -91,7 +88,6 @@ const FRZR_COLORS = [
 ];
 
 const SLEET_COLORS = [
-    "transparent", "transparent", "transparent", "transparent", "transparent",
     "#efb87c", "#e9ab6a", "#e39d59", "#dd9047", "#d88334", "#d17827",
     "#c96d19", "#c26207", "#ba5900", "#b15100", "#a84a00", "#a14300",
     "#993d00", "#923600", "#8c3000", "#862b00", "#812600", "#7d2000",
@@ -99,7 +95,6 @@ const SLEET_COLORS = [
 ];
 
 const SNOW_COLORS = [
-    "transparent", "transparent", "transparent", "transparent", "transparent",
     "#9cc2ea", "#8bb3e5", "#7ea4e1", "#7396de", "#6d87db", "#6c77d8",
     "#6d67d5", "#7057d0", "#7447c9", "#7738bf", "#7a28b4", "#7d15aa",
     "#7f009c", "#7e008c", "#7e007e", "#7e0071", "#7f0066", "#81005c",
@@ -373,7 +368,7 @@ export const Z500_ANOM_PALETTE = createAnomalyPalette(
     256
 );
 
-const PRATE_BYTE_POINTS = [0, 11, 22, 33, 44, 55, 66, 77, 89, 100, 111, 122, 133, 144, 155, 166, 177, 188, 199, 210, 221, 232, 244, 255];
+const PRATE_BYTE_POINTS = [11, 22, 33, 44, 55, 66, 77, 89, 100, 111, 122, 133, 144, 155, 166, 177, 188, 199, 210, 221, 232, 244, 255];
 
 export const PRATE_PALETTE = createNonLinearPrecipPalette(
     PRATE_LEVELS,
