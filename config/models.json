@@ -2,7 +2,7 @@
   "models": {
     "ecmwf": {
       "id": "ecmwf",
-      "name": "ECMWF-IFS",
+      "name": "ECMWF",
       "category": "Global",
       "resolution": "9km",
       "supported_params": [
