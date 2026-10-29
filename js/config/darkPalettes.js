@@ -135,12 +135,12 @@ const DARK_PWAT_HEX = [
 
 // 📊 Dark Mode 500mb Height Anomaly Levels (Meters)
 const DARK_ANOM_LEVELS = [
-  -450, -360, -330, -300, -270, -240, -210, -180, -150, -120, -90, -60, -30,
-   30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 360, 450
+  -360, -330, -300, -270, -240, -210, -180, -150, -120, -90, -60, -30,
+   30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 360
 ];
 
 // 📊 Dark Mode 500mb Height Anomaly Colors
-const DARK_ANOM_COLORS = [ "#081652",
+const DARK_ANOM_COLORS = [
   "#081652",            // below -360
   "#062f60",            // -360 to -330
   "#0e437b",            // -330 to -300
@@ -165,7 +165,7 @@ const DARK_ANOM_COLORS = [ "#081652",
   "#b41c2c",            // 270 to 300
   "#9c1027",            // 300 to 330
   "#810822",            // 330 to 360
-  "#790678", "#790678"
+  "#790678"
 ];
 
 const DARK_ANOM_BELOW = "#081652";
