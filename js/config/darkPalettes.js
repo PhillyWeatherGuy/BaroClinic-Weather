@@ -153,7 +153,7 @@ const DARK_ANOM_COLORS = [
   "#8bc0db",            // -120 to -90
   "#a2cde2",            // -90 to -60
   "#bad9e9",            // -60 to -30
-  "rgba(0,0,0,0)",      // -30 to 30 (transparent)
+  "#FFFFFF",      
   "#fddbc6",            // 30 to 60
   "#f9c7ae",            // 60 to 90
   "#f6b293",            // 90 to 120
@@ -168,8 +168,8 @@ const DARK_ANOM_COLORS = [
   "#790678"
 ];
 
-const DARK_ANOM_BELOW = "#FD97BB";
-const DARK_ANOM_ABOVE = "#90EFFA";
+const DARK_ANOM_BELOW = "#081652";
+const DARK_ANOM_ABOVE = "#790678";
 
 // 💨 Dark Mode 250mb Wind Speed Levels (kts)
 const DARK_W250_LEVELS = [
