@@ -42,7 +42,7 @@
         "prate",
         "pwat",
         "pva",
-        "z500_anom",
+        "z500_",
         "w250",
         "w300",
         "w500",
@@ -72,7 +72,7 @@
         "refc",
         "pwat",
         "pva",
-        "z500_anom",
+        "z500_",
         "w250",
         "w300",
         "w500",
@@ -406,7 +406,7 @@
         "max_val": 450.0
       },
       "map_style_light": "./config/map_style_light.json",
-      "map_style_dark": "./config/style_dark.json"
+      "map_style_dark": "./config/map_style_light.json"
     },
     "w250": {
       "id": "w250",
