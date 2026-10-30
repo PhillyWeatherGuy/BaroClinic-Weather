@@ -703,6 +703,7 @@ export function initModelCategoryBar() {
                 stateManager.currentCycle = null;
                 stateManager.activeModelRun = null;
                 stateManager.activeRunObj = null;
+                stateManager.latestInitTime = null;
 
                 // Purge previous model textures & state
                 purgeAllAppMemory(shaderLayerRef);
@@ -726,6 +727,9 @@ export function initModelCategoryBar() {
 
                 try {
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
+                    if (!stateManager.activeRunObj && stateManager.initTime) {
+                        stateManager.latestInitTime = stateManager.initTime;
+                    }
                     syncModelRunDropdown();
 
                     // 🌟 Find the closest available forecast hour in the newly selected model
@@ -1254,9 +1258,15 @@ function initModelRunDropdown() {
 
     if (!toggleBtn || !menu) return;
 
+    // 🌟 Always anchor the dropdown to the true latest run, not a viewed past run
+    if (!stateManager.activeRunObj && stateManager.initTime) {
+        stateManager.latestInitTime = stateManager.initTime;
+    }
+
     let anchorDate = null;
-    if (stateManager.initTime) {
-        let baseStr = stateManager.initTime;
+    const anchorTimeStr = stateManager.latestInitTime || stateManager.initTime;
+    if (anchorTimeStr) {
+        let baseStr = anchorTimeStr;
         if (!baseStr.endsWith('Z') && !baseStr.includes('+') && !baseStr.includes('-')) {
             baseStr = baseStr.replace(' ', 'T') + 'Z';
         }
@@ -1327,11 +1337,12 @@ function initModelRunDropdown() {
 
             showToast(`Loading model run ${run.id}...`);
             try {
-                // 🌟 Save active run id and object
-                stateManager.activeModelRun = run.id;
-                stateManager.activeRunObj = run;
+                // 🌟 If top run selected (index === 0), it's the live latest run (activeRunObj = null)
+                const isLatest = (index === 0);
+                stateManager.activeModelRun = isLatest ? null : run.id;
+                stateManager.activeRunObj = isLatest ? null : run;
                 
-                await fetchManifest(run); 
+                await fetchManifest(isLatest ? null : run); 
 
                 const bitmap0 = await loadChunkBitmap(0, thisGen);
                 if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
