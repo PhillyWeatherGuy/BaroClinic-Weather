@@ -639,6 +639,14 @@ export function initModelCategoryBar() {
                 if (isPlaying) pausePlayback();
 
                 showToast(`Loading model ${model.name}...`);
+
+                // 🌟 Capture current forecast hour so we can seek to it (or closest) in the new model
+                const currentStepObj = stateManager.globalSteps ? stateManager.globalSteps[stateManager.currentStepIndex] : null;
+                const targetForecastHour = currentStepObj ? currentStepObj.step : 0;
+                const targetStepNum = typeof targetForecastHour === 'number' 
+                    ? targetForecastHour 
+                    : parseInt(String(targetForecastHour).replace(/\D/g, ''), 10) || 0;
+
                 stateManager.activeModel = model.id;
 
                 // 🌟 Auto-map parameters between models (e.g. ECMWF prate <-> HRRR refc) or fallback to 2t
@@ -720,18 +728,43 @@ export function initModelCategoryBar() {
                     await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
                     syncModelRunDropdown();
 
-                    const bitmap0 = await loadChunkBitmap(0, thisGen);
+                    // 🌟 Find the closest available forecast hour in the newly selected model
+                    let targetIndex = 0;
+                    if (stateManager.globalSteps && stateManager.globalSteps.length > 0) {
+                        let minDiff = Infinity;
+                        for (let i = 0; i < stateManager.globalSteps.length; i++) {
+                            const sVal = stateManager.globalSteps[i].step;
+                            const num = typeof sVal === 'number' ? sVal : parseInt(String(sVal).replace(/\D/g, ''), 10) || 0;
+                            const diff = Math.abs(num - targetStepNum);
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                targetIndex = i;
+                            }
+                        }
+                    }
+
+                    const targetChunkIdx = stateManager.globalSteps[targetIndex]?.chunkIndex ?? 0;
+
+                    const targetBitmap = await loadChunkBitmap(targetChunkIdx, thisGen);
                     if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
-                        shaderLayerRef.preloadChunkTexture(0, bitmap0);
+                        shaderLayerRef.preloadChunkTexture(targetChunkIdx, targetBitmap);
+                    }
+
+                    if (targetChunkIdx !== 0) {
+                        loadChunkBitmap(0, thisGen).then(b0 => {
+                            if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
+                                shaderLayerRef.preloadChunkTexture(0, b0);
+                            }
+                        }).catch(() => {});
                     }
 
                     if (thisGen !== stateManager.loadGeneration) return;
 
                     syncTimelineWithManifest();
-                    setStepIndex(0);
+                    setStepIndex(targetIndex);
 
                     if (typeof onStepChangeCallback === 'function') {
-                        onStepChangeCallback(0, stateManager.globalSteps[0]);
+                        onStepChangeCallback(targetIndex, stateManager.globalSteps[targetIndex]);
                     }
 
                     hideToast();
