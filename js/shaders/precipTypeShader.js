@@ -351,7 +351,6 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                 uniform float u_hasPtype;
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
-                uniform float u_isMobile;
 
                 ${fragmentShaderBody}
 
@@ -368,13 +367,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     vec4 color = texture(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        if (u_isMobile > 0.5) {
-                            // 🌟 Mobile: Raw pixel lookup for p-type code (skips the heavy 25-step loop)
-                            float code = floor(texture(u_dataTexture, uv).g * 255.0 + 0.5);
-                            color = getPtypeColor(code, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
-                        } else {
-                            color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
-                        }
+                        color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
                     
                     if (color.a == 0.0) {
@@ -412,7 +405,6 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                 uniform float u_hasPtype;
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
-                uniform float u_isMobile;
 
                 ${fragmentShaderBody.replace(/texture\(/g, 'texture2D(')}
 
@@ -429,13 +421,7 @@ export function createPrecipTypeShaderLayer(mapInstance) {
                     vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
 
                     if (u_hasPtype > 0.5) {
-                        if (u_isMobile > 0.5) {
-                            // 🌟 Mobile: Raw pixel lookup for p-type code
-                            float code = floor(texture2D(u_dataTexture, uv).g * 255.0 + 0.5);
-                            color = getPtypeColor(code, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
-                        } else {
-                            color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
-                        }
+                        color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
                     
                     if (color.a == 0.0) {
@@ -549,10 +535,6 @@ export function createPrecipTypeShaderLayer(mapInstance) {
             gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
 
             gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), 1.0);
-
-            // 🌟 Passes 1.0 on mobile to skip the 25-step loop for p-type code
-            const isMobile = (typeof window !== 'undefined' && window.innerWidth < 768);
-            gl.uniform1f(gl.getUniformLocation(program, 'u_isMobile'), isMobile ? 1.0 : 0.0);
 
             if (projData) {
                 const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
