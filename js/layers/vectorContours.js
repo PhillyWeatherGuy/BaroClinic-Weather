@@ -715,6 +715,7 @@ function packColor(str, alpha, fallback = '#ffffff') {
 
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     const SUBDIVISIONS = 3;
     let maxSegs = 0;
     const items = [];
@@ -784,7 +785,8 @@ function prepareStep(featureCollection) {
                 }
             }
 
-            if (name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
+            // 🌟 On mobile, skip constructing text label points to preserve memory & CPU
+            if (!isMobile && name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
                 const mid = len >> 1;
                 const a = line[mid];
                 const b = line[mid + 1];
@@ -877,6 +879,9 @@ function ensureLayers() {
 }
 
 function setLabels(fc) {
+    // 🌟 On mobile, bypass MapLibre source.setData() to prevent Worker thrashing during scrubbing
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+
     const src = mapInstance && mapInstance.getSource(LABEL_SOURCE_ID);
     if (src) src.setData(fc || EMPTY_GEOJSON);
 }
