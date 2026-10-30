@@ -694,6 +694,7 @@ export function initModelCategoryBar() {
                 stateManager.currentDate = null;
                 stateManager.currentCycle = null;
                 stateManager.activeModelRun = null;
+                stateManager.activeRunObj = null;
 
                 // Purge previous model textures & state
                 purgeAllAppMemory(shaderLayerRef);
@@ -905,6 +906,13 @@ export function initParameterCategoryBar() {
 
                 showToast(`Loading ${param.name}...`);
                 
+                // 🌟 1. Capture current forecast hour before clearing so we can seek back to it
+                const currentStepObj = stateManager.globalSteps ? stateManager.globalSteps[stateManager.currentStepIndex] : null;
+                const targetForecastHour = currentStepObj ? currentStepObj.step : 0;
+                const targetStepNum = typeof targetForecastHour === 'number' 
+                    ? targetForecastHour 
+                    : parseInt(String(targetForecastHour).replace(/\D/g, ''), 10) || 0;
+
                 stateManager.paramConfig = param;
                 stateManager.activeParam = param.id;
                 stateManager.activeShader = param.shader || 'scalar';
@@ -932,21 +940,49 @@ export function initParameterCategoryBar() {
                 try { updatePolarPalette(param.palette || param.id); } catch (e) {}
 
                 try {
-                    await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
+                    // 🌟 2. Pass activeRunObj so the same forecast run (e.g. 00Z) loads for the new parameter
+                    await fetchManifest(stateManager.activeRunObj || null, stateManager.activeModel, stateManager.activeParam);
                     syncModelRunDropdown();
 
-                    const bitmap0 = await loadChunkBitmap(0, thisGen);
+                    // 🌟 3. Find the closest available forecast hour in the new parameter
+                    let targetIndex = 0;
+                    if (stateManager.globalSteps && stateManager.globalSteps.length > 0) {
+                        let minDiff = Infinity;
+                        for (let i = 0; i < stateManager.globalSteps.length; i++) {
+                            const sVal = stateManager.globalSteps[i].step;
+                            const num = typeof sVal === 'number' ? sVal : parseInt(String(sVal).replace(/\D/g, ''), 10) || 0;
+                            const diff = Math.abs(num - targetStepNum);
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                targetIndex = i;
+                            }
+                        }
+                    }
+
+                    const targetChunkIdx = stateManager.globalSteps[targetIndex]?.chunkIndex ?? 0;
+
+                    // 🌟 4. Load the target chunk first so the map immediately renders that hour
+                    const targetBitmap = await loadChunkBitmap(targetChunkIdx, thisGen);
                     if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
-                        shaderLayerRef.preloadChunkTexture(0, bitmap0);
+                        shaderLayerRef.preloadChunkTexture(targetChunkIdx, targetBitmap);
+                    }
+
+                    // Also load chunk 0 in background if target is different so scrubbing back to F000 works
+                    if (targetChunkIdx !== 0) {
+                        loadChunkBitmap(0, thisGen).then(b0 => {
+                            if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
+                                shaderLayerRef.preloadChunkTexture(0, b0);
+                            }
+                        }).catch(() => {});
                     }
 
                     if (thisGen !== stateManager.loadGeneration) return;
 
                     syncTimelineWithManifest();
-                    setStepIndex(0);
+                    setStepIndex(targetIndex);
 
                     if (typeof onStepChangeCallback === 'function') {
-                        onStepChangeCallback(0, stateManager.globalSteps[0]);
+                        onStepChangeCallback(targetIndex, stateManager.globalSteps[targetIndex]);
                     }
 
                     hideToast();
@@ -1227,14 +1263,18 @@ function initModelRunDropdown() {
         currentDate.setUTCHours(currentDate.getUTCHours() - intervalHours);
     }
 
-    if (runs.length > 0 && labelSpan) {
-        labelSpan.textContent = runs[0].id;
+    // 🌟 Preserve active run label or default to newest
+    const activeLabel = stateManager.activeModelRun || (runs.length > 0 ? runs[0].id : '');
+    if (runs.length > 0 && labelSpan && activeLabel) {
+        labelSpan.textContent = activeLabel;
     }
 
     menu.innerHTML = '';
     runs.forEach((run, index) => {
+        // 🌟 Keep matching run active in the dropdown list
+        const isRunActive = stateManager.activeModelRun ? (run.id === stateManager.activeModelRun) : (index === 0);
         const item = document.createElement('button');
-        item.className = `run-dropdown-item ${index === 0 ? 'active' : ''}`;
+        item.className = `run-dropdown-item ${isRunActive ? 'active' : ''}`;
         item.setAttribute('data-run', run.id);
         item.innerHTML = `<span>Run Time: ${run.id}</span><span class="check-icon">✓</span>`;
 
@@ -1254,7 +1294,9 @@ function initModelRunDropdown() {
 
             showToast(`Loading model run ${run.id}...`);
             try {
+                // 🌟 Save active run id and object
                 stateManager.activeModelRun = run.id;
+                stateManager.activeRunObj = run;
                 
                 await fetchManifest(run); 
 
