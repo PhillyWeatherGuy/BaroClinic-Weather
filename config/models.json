@@ -23,7 +23,14 @@
         "w700",
         "w850",
         "w925",
-        "cape"
+        "cape",
+        "t1000",
+        "t925",
+        "t850",
+        "t700",
+        "t600",
+        "t500",
+        "t400"
       ]
     },
     "aifs": {
@@ -112,6 +119,118 @@
     "2t": {
       "id": "2t",
       "name": "2m Temperature",
+      "unit": "°F",
+      "category": "Thermodynamics",
+      "shader": "precip",
+      "palette": "temp",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 216.4833,
+        "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "t1000": {
+      "id": "t1000",
+      "name": "1000mb Temperature",
+      "unit": "°F",
+      "category": "Thermodynamics",
+      "shader": "precip",
+      "palette": "temp",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 216.4833,
+        "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "t925": {
+      "id": "t925",
+      "name": "925mb Temperature",
+      "unit": "°F",
+      "category": "Thermodynamics",
+      "shader": "precip",
+      "palette": "temp",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 216.4833,
+        "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "t850": {
+      "id": "t850",
+      "name": "850mb Temperature",
+      "unit": "°F",
+      "category": "Thermodynamics",
+      "shader": "precip",
+      "palette": "temp",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 216.4833,
+        "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "t700": {
+      "id": "t700",
+      "name": "700mb Temperature",
+      "unit": "°F",
+      "category": "Thermodynamics",
+      "shader": "precip",
+      "palette": "temp",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 216.4833,
+        "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "t600": {
+      "id": "t600",
+      "name": "600mb Temperature",
+      "unit": "°F",
+      "category": "Thermodynamics",
+      "shader": "precip",
+      "palette": "temp",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 216.4833,
+        "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "t500": {
+      "id": "t500",
+      "name": "500mb Temperature",
+      "unit": "°F",
+      "category": "Thermodynamics",
+      "shader": "precip",
+      "palette": "temp",
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "linear",
+        "min_val": 216.4833,
+        "max_val": 327.5944
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "t400": {
+      "id": "t400",
+      "name": "400mb Temperature",
       "unit": "°F",
       "category": "Thermodynamics",
       "shader": "precip",
