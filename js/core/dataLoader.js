@@ -53,8 +53,12 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     for (const url of urlsToTry) {
         try {
-            // 🌟 Pass the abort signal
-            const resp = await fetch(url + `?t=${Date.now()}`, { signal: stateManager.activeFetchController?.signal });
+            // 🌟 Cache bypassed with no-store and timestamp
+            const sep = url.includes('?') ? '&' : '?';
+            const resp = await fetch(url + `${sep}t=${Date.now()}`, { 
+                cache: 'no-store',
+                signal: stateManager.activeFetchController?.signal 
+            });
             if (resp.ok) {
                 fetchedData = await resp.json();
                 console.log(`✅ Loaded manifest from: ${url}`);
@@ -187,11 +191,15 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
         const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
         
-        // 🌟 REMOVED CACHE BUSTER: Allows Cloudflare and browser to cache the immutable .bin file
-        const chunkUrl = rawChunkUrl; 
+        // 🌟 CACHE BUSTED: Forces fresh fetch from Cloudflare and browser
+        const chunkSep = rawChunkUrl.includes('?') ? '&' : '?';
+        const chunkUrl = `${rawChunkUrl}${chunkSep}t=${Date.now()}`; 
         
-        // 🌟 Pass the abort signal
-        const imgResp = await fetch(chunkUrl, { signal: stateManager.activeFetchController?.signal });
+        // 🌟 Pass the abort signal with no-store
+        const imgResp = await fetch(chunkUrl, { 
+            cache: 'no-store',
+            signal: stateManager.activeFetchController?.signal 
+        });
         if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
         if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
@@ -237,11 +245,16 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             let ptypeBytes = null;
             if (chunk.ptype_file) {
                 try {
-                    // 🌟 REMOVED CACHE BUSTER here as well
-                    const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}`;
+                    // 🌟 CACHE BUSTED: Forces fresh fetch for ptype file
+                    const ptypeBase = `${stateManager.BASE_URL}${chunk.ptype_file}`;
+                    const ptypeSep = ptypeBase.includes('?') ? '&' : '?';
+                    const ptypeUrl = `${ptypeBase}${ptypeSep}t=${Date.now()}`;
                     
-                    // 🌟 Pass the abort signal
-                    const ptypeResp = await fetch(ptypeUrl, { signal: stateManager.activeFetchController?.signal });
+                    // 🌟 Pass the abort signal with no-store
+                    const ptypeResp = await fetch(ptypeUrl, { 
+                        cache: 'no-store',
+                        signal: stateManager.activeFetchController?.signal 
+                    });
                     if (ptypeResp.ok) {
                         const ptypeBuffer = await ptypeResp.arrayBuffer();
                         let rawPtype = new Uint8Array(ptypeBuffer);
