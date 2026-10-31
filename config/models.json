@@ -1,5 +1,38 @@
 {
   "models": {
+    "gfs": {
+      "id": "gfs",
+      "name": "GFS",
+      "category": "Global",
+      "resolution": "13km",
+      "supported_params": [
+        "2t",
+        "tp",
+        "tp_6h",
+        "tp_24h",
+        "asnow",
+        "asnow_6h",
+        "asnow_24h",
+        "prate",
+        "pwat",
+        "pva",
+        "z500_anom",
+        "w250",
+        "w300",
+        "w500",
+        "w700",
+        "w850",
+        "w925",
+        "cape",
+        "t1000",
+        "t925",
+        "t850",
+        "t700",
+        "t600",
+        "t500",
+        "t400"
+      ]
+    },
     "ecmwf": {
       "id": "ecmwf",
       "name": "ECMWF-IFS",
