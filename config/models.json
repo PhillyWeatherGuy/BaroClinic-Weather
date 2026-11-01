@@ -189,8 +189,8 @@
         "gust10"
       ]
     },
-    "era5_superstorm_1993v3": {
-      "id": "era5_superstorm_1993v3",
+    "era5_superstorm_1993v4": {
+      "id": "era5_superstorm_1993v4",
       "name": "1993 Superstorm",
       "category": "ERA5",
       "resolution": "31km",
