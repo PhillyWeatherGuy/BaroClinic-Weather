@@ -154,8 +154,8 @@
         "w925"
       ]
     },
-    "era5_hurricane_sandyv3": {
-      "id": "era5_hurricane_sandyv3",
+    "era5_hurricane_sandyv4": {
+      "id": "era5_hurricane_sandyv4",
       "name": "Hurricane Sandy",
       "category": "ERA5",
       "resolution": "31km",
