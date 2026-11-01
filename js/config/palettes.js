@@ -90,7 +90,8 @@ const SNOW_COLORS = [
     "#9cc2ea", "#7ea4e1", "#7396de", "#6c77d8",
     "#6d67d5", "#7447c9", "#7738bf", "#7a28b4",
     "#7f009c", "#7e008c", "#7e007e", "#7e0071", "#7f0066", "#81005c",
-    "#c32777", "#e573a3", "#f5b0d0", "#fce3f3"
+    "#c32777", "#e573a3", "#f5b0d0", "#fce3f3", "#fce3f3", 
+    "#fce3f3", "#fce3f3", "#fce3f3"
 ];
 
 // ❄️ Total Snowfall (10:1) Levels (Inches)
