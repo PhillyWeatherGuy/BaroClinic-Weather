@@ -72,7 +72,8 @@ function themeContourFeatures(featureCollection, masterData) {
     }
 
     // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
-    const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || masterData?.parameter === 'prate';
+    // 🌟 UPDATED: Added w10 and gust10 to receive the MSLP styling
+    const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || activeParam === 'w10' || activeParam === 'gust10' || masterData?.parameter === 'prate';
     if (isPrate) {
         const isDark = stateManager.currentTheme === 'dark';
         const mslpColor = isDark ? '#ffffff' : '#000000';
