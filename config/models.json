@@ -224,6 +224,41 @@
         "gust10"
       ]
     },
+    "era5_blizzard_2026": {
+      "id": "era5_blizzard_2026",
+      "name": "Blizzard of '26",
+      "category": "ERA5",
+      "resolution": "31km",
+      "supported_params": [
+        "2t",
+        "tp",
+        "tp_6h",
+        "tp_24h",
+        "asnow",
+        "asnow_6h",
+        "asnow_24h",
+        "prate",
+        "pwat",
+        "pva",
+        "z500_anom",
+        "w250",
+        "w300",
+        "w500",
+        "w700",
+        "w850",
+        "w925",
+        "cape",
+        "t1000",
+        "t925",
+        "t850",
+        "t700",
+        "t600",
+        "t500",
+        "t400",
+        "w10",
+        "gust10"
+      ]
+    },
     "era5_blizzard_1996": {
       "id": "era5_blizzard_1996",
       "name": "Blizzard of '96",
