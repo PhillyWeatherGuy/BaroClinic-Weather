@@ -427,7 +427,7 @@ export function getPaletteForParameter(paramId) {
     if (id === 'cape') {
         return CAPE_PALETTE;
     }
-    if (id === 'w925') {
+    if (id === 'w925' || id === 'gust10') {
         return W925_PALETTE;
     }
     if (id.includes('wind')) {
