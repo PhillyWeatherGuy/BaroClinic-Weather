@@ -224,9 +224,9 @@
         "gust10"
       ]
     },
-    "era5_blizzard_2026": {
-      "id": "era5_blizzard_2026",
-      "name": "Blizzard of '26",
+    "era5_blizzard_1996": {
+      "id": "era5_blizzard_1996",
+      "name": "Blizzard of '96",
       "category": "ERA5",
       "resolution": "31km",
       "supported_params": [
@@ -259,9 +259,9 @@
         "gust10"
       ]
     },
-    "era5_blizzard_1996": {
-      "id": "era5_blizzard_1996",
-      "name": "Blizzard of '96",
+    "era5_blizzard_2026": {
+      "id": "era5_blizzard_2026",
+      "name": "Blizzard of '26",
       "category": "ERA5",
       "resolution": "31km",
       "supported_params": [
