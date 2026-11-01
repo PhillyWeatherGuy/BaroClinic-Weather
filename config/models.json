@@ -154,8 +154,8 @@
         "w925"
       ]
     },
-    "era5_hurricane_sandy": {
-      "id": "era5_hurricane_sandy",
+    "era5_hurricane_sandyv2": {
+      "id": "era5_hurricane_sandyv2",
       "name": "Hurricane Sandy",
       "category": "ERA5",
       "resolution": "31km",
@@ -187,8 +187,8 @@
         "t400"
       ]
     },
-    "era5_superstorm_1993": {
-      "id": "era5_superstorm_1993",
+    "era5_superstorm_1993v2": {
+      "id": "era5_superstorm_1993v2",
       "name": "1993 Superstorm",
       "category": "ERA5",
       "resolution": "31km",
