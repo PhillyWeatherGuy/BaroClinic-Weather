@@ -255,6 +255,22 @@ const W850_COLORS = [
     "#bb9e97", "#c7b6ae", "#d2a6a6", "#cb8786", "#bf6e6f", "#bb5657", "#b34746"
 ];
 
+// 💨 10m Wind Speed Levels (kts)
+const W10_LEVELS = [
+    0, 6, 7, 8, 10, 12, 14, 16, 18, 20, 22, 24, 27, 30, 34, 38, 
+    42, 46, 50, 54, 58, 60, 62, 64, 68, 72, 76, 80, 85, 90, 100, 110, 120, 135
+];
+
+// 💨 10m Wind Speed Hex Colors
+const W10_COLORS = [
+    "transparent", "#d2d2d2", "#bcbcbc", "#969696", "#1464d2", "#2882f0", 
+    "#50a5f5", "#96d2fa", "#b4f0fa", "#37d23c", "#50f050", "#78f573", 
+    "#96f58c", "#c8ffbe", "#fffaaa", "#ffe878", "#ffc03c", "#ffa000", 
+    "#ff6000", "#ff3200", "#e11400", "#c00000", "#a50000", "#643c32", 
+    "#785046", "#8c645a", "#b48c82", "#e1beb4", "#f0dcd2", "#ffc8c8", 
+    "#f5a0a0", "#e68282", "#e16464", "#d75050"
+];
+
 /**
  * 🌟 WebGL Dynamic Breakpoint Step Interpolator
  * Replicates arbitrary breakpoint curves into a 256-color GPU lookup texture
@@ -440,6 +456,14 @@ export const W850_PALETTE = createNonLinearPrecipPalette(
     256
 );
 
+export const W10_PALETTE = createNonLinearPrecipPalette(
+    W10_LEVELS,
+    W10_COLORS,
+    [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+    [0, 40, 75, 110, 145, 180, 210, 235, 255],
+    256
+);
+
 /**
  * 🌟 Dynamic Palette Selector
  */
@@ -474,6 +498,9 @@ export function getPaletteForParameter(paramId) {
     }
     if (id === 'w850' || id === 'w925') {
         return W850_PALETTE;
+    }
+    if (id === 'w10' || id === 'gust10'){
+        return W10_PALETTE;
     }
     if (id === 'cape'){
         return CAPE_PALETTE;
