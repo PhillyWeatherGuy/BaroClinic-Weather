@@ -157,7 +157,7 @@
     "era5_superstorm_1993": {
       "id": "era5_superstorm_1993",
       "name": "1993 Superstorm",
-      "category": "ERA-5",
+      "category": "ERA5",
       "resolution": "31km",
       "supported_params": [
         "2t",
