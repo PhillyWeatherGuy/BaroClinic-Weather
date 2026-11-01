@@ -33,7 +33,8 @@ export async function fetchManifest(run = null, model = null, param = null) {
     const urlsToTry = [];
     const latestUrl = `${stateManager.BASE_URL}${activeModel}_${manifestParam}_manifest.json`;
 
-    if (stateManager.currentDate && stateManager.currentCycle) {
+    // 🌟 For ERA5 storms, always use clean storm-slug URLs without operational date suffixes
+    if (stateManager.currentDate && stateManager.currentCycle && !activeModel.startsWith('era5')) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
         
@@ -43,7 +44,7 @@ export async function fetchManifest(run = null, model = null, param = null) {
             urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${manifestParam}_${dateStr}_${cycleStr}_manifest.json`);
         }
     }
-    if (!run) {
+    if (!run || activeModel.startsWith('era5')) {
         urlsToTry.unshift(latestUrl);
     } else {
         urlsToTry.push(latestUrl);
@@ -88,14 +89,23 @@ export async function fetchManifest(run = null, model = null, param = null) {
                          || stateManager.manifest.model_run
                          || stateManager.manifest.time;
     
+    // 🌟 Approach 1: On phones, if a run has >70 hourly frames, step in 3-hour intervals
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const totalFramesCount = stateManager.manifest.total_frames || 0;
+    const mobileStepInterval = (isMobile && totalFramesCount > 70) ? 3 : 1;
+
     stateManager.globalSteps = [];
     const chunks = stateManager.manifest.chunks || [];
     for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
         const chunk = chunks[cIdx];
         const steps = chunk.forecast_steps || [];
         for (let fIdx = 0; fIdx < steps.length; fIdx++) {
+            const stepVal = steps[fIdx];
+            if (mobileStepInterval > 1 && (stepVal % mobileStepInterval !== 0)) {
+                continue; // Skip intermediate hours on mobile to keep timeline slider light
+            }
             stateManager.globalSteps.push({
-                step: steps[fIdx],
+                step: stepVal,
                 chunkIndex: cIdx,
                 frameIndex: fIdx,
                 col: 0,
@@ -186,11 +196,8 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
         const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-        
-        // 🌟 REMOVED CACHE BUSTER: Allows Cloudflare and browser to cache the immutable .bin file
         const chunkUrl = rawChunkUrl; 
         
-        // 🌟 Pass the abort signal
         const imgResp = await fetch(chunkUrl, { signal: stateManager.activeFetchController?.signal });
         if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
@@ -203,8 +210,12 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         const frameSize = frameW * frameH;
         const numFrames = (chunk.forecast_steps || []).length || chunk.frame_count || 1;
 
-        // 🌟 Dynamically check if models.json specifies upscale_2x for this parameter
         const shouldUpscale = Boolean(stateManager.paramConfig?.upscale_2x || stateManager.manifest?.upscale_2x);
+
+        // 🌟 Determine if intermediate hours are skipped on mobile
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+        const totalFramesCount = stateManager.manifest?.total_frames || 0;
+        const mobileStepInterval = (isMobile && totalFramesCount > 70) ? 3 : 1;
 
         // 🌟 PATH A: Compressed Binary Time Volume (.bin)
         if (chunk.file.endsWith('.bin')) {
@@ -237,10 +248,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             let ptypeBytes = null;
             if (chunk.ptype_file) {
                 try {
-                    // 🌟 REMOVED CACHE BUSTER here as well
                     const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}`;
-                    
-                    // 🌟 Pass the abort signal
                     const ptypeResp = await fetch(ptypeUrl, { signal: stateManager.activeFetchController?.signal });
                     if (ptypeResp.ok) {
                         const ptypeBuffer = await ptypeResp.arrayBuffer();
@@ -261,7 +269,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                 }
             }
             
-            // 🌟 Native Grid Path: Keeps zero-copy typed arrays for HRRR/RRFS whether scalar or ptype
+            // Native Grid Path: Keeps zero-copy typed arrays for HRRR/RRFS whether scalar or ptype
             if (stateManager.manifest.grid) {
                 const frames = [];
                 const ptypeFrames = ptypeBytes ? [] : null;
@@ -287,6 +295,13 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
             const outFrames = [];
             for (let f = 0; f < numFrames; f++) {
+                const stepVal = (chunk.forecast_steps || [])[f];
+                // 🌟 On mobile, skip allocating textures and ImageBitmaps for intermediate hours
+                if (mobileStepInterval > 1 && stepVal !== undefined && (stepVal % mobileStepInterval !== 0)) {
+                    outFrames.push(null);
+                    continue;
+                }
+
                 const srcStart = f * frameSize;
                 const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
                 const ptypeSlice = ptypeBytes ? ptypeBytes.subarray(srcStart, srcStart + frameSize) : null;
