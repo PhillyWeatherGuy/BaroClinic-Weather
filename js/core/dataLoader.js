@@ -8,13 +8,9 @@ export async function fetchManifest(run = null, model = null, param = null) {
     const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
 
+    // 🌟 Keep base URL pointing to the Cloudflare Worker proxy for all models
     if (!stateManager.DEFAULT_BASE_URL) {
         stateManager.DEFAULT_BASE_URL = stateManager.BASE_URL;
-    }
-    
-    // 🌟 Temporarily bypass Cloudflare proxy for ERA5 testing to completely disable caching
-    if (activeModel.startsWith('era5')) {
-        stateManager.BASE_URL = `https://huggingface.co/datasets/PhillyWeatherGuy/baroclinic-era5-data/resolve/main/`;
     } else {
         stateManager.BASE_URL = stateManager.DEFAULT_BASE_URL;
     }
@@ -200,9 +196,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
         const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-        
-        // 🌟 Temporarily add cache buster back ONLY for ERA5 testing
-        const chunkUrl = stateManager.activeModel.startsWith('era5') ? `${rawChunkUrl}?t=${Date.now()}` : rawChunkUrl; 
+        const chunkUrl = rawChunkUrl; 
         
         const imgResp = await fetch(chunkUrl, { signal: stateManager.activeFetchController?.signal });
         if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
@@ -254,9 +248,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             let ptypeBytes = null;
             if (chunk.ptype_file) {
                 try {
-                    const rawPtypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}`;
-                    const ptypeUrl = stateManager.activeModel.startsWith('era5') ? `${rawPtypeUrl}?t=${Date.now()}` : rawPtypeUrl;
-                    
+                    const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}`;
                     const ptypeResp = await fetch(ptypeUrl, { signal: stateManager.activeFetchController?.signal });
                     if (ptypeResp.ok) {
                         const ptypeBuffer = await ptypeResp.arrayBuffer();
