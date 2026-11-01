@@ -184,7 +184,9 @@
         "t700",
         "t600",
         "t500",
-        "t400"
+        "t400",
+        "w10",
+        "gust10"
       ]
     },
     "era5_superstorm_1993v2": {
@@ -217,7 +219,9 @@
         "t700",
         "t600",
         "t500",
-        "t400"
+        "t400",
+        "w10",
+        "gust10"
       ]
     }
   },
@@ -730,6 +734,42 @@
       "category": "Upper/Lower Air Dynamics",
       "shader": "precip",
       "palette": "w925",
+      "suppress_city_overlay": true,
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 1.943844,
+        "val_points": [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+        "byte_points": [0, 40, 75, 110, 145, 180, 210, 235, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "w10": {
+      "id": "w10",
+      "name": "10m Wind",
+      "unit": "kts",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "w10",
+      "suppress_city_overlay": true,
+      "upscale_2x": false,
+      "scaling": {
+        "mode": "piecewise",
+        "unit_multiplier": 1.943844,
+        "val_points": [0.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0, 250.0],
+        "byte_points": [0, 40, 75, 110, 145, 180, 210, 235, 255]
+      },
+      "map_style_light": "./config/map_style_light.json",
+      "map_style_dark": "./config/style_dark.json"
+    },
+    "gust10": {
+      "id": "gust10",
+      "name": "10m Wind Gust",
+      "unit": "kts",
+      "category": "Upper/Lower Air Dynamics",
+      "shader": "precip",
+      "palette": "w10",
       "suppress_city_overlay": true,
       "upscale_2x": false,
       "scaling": {
