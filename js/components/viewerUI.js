@@ -1273,13 +1273,15 @@ function initModelRunDropdown() {
         anchorDate = new Date(baseStr);
     }
 
-    // 🌟 DYNAMIC INTERVALS: 1h for HRRR, 6h for ECMWF & RRFS
+    // 🌟 DYNAMIC INTERVALS: 1h for HRRR, 3h for RRFS (covers both 18h and 84h runs), 6h for GFS/ECMWF
     const isHRRR = stateManager.activeModel === 'hrrr';
-    const intervalHours = isHRRR ? 1 : 6;
-    const totalRuns = isHRRR ? 48 : 28;
+    const isRRFS = stateManager.activeModel === 'rrfs';
+    const intervalHours = isHRRR ? 1 : (isRRFS ? 3 : 6);
+    const totalRuns = isHRRR ? 48 : (isRRFS ? 40 : 28);
 
     if (!anchorDate || isNaN(anchorDate.getTime())) {
-        const delayedNow = new Date(Date.now() - (isHRRR ? 1.5 : 7.5) * 3600 * 1000);
+        const delayHours = isHRRR ? 1.5 : (isRRFS ? 2.5 : 7.5);
+        const delayedNow = new Date(Date.now() - delayHours * 3600 * 1000);
         const currentHour = delayedNow.getUTCHours();
         const latestRunHour = Math.floor(currentHour / intervalHours) * intervalHours;
         anchorDate = new Date(Date.UTC(delayedNow.getUTCFullYear(), delayedNow.getUTCMonth(), delayedNow.getUTCDate(), latestRunHour, 0));
