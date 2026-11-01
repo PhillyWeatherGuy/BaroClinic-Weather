@@ -187,8 +187,7 @@
         "t400"
       ]
     }
-  },
-  "era5_hurricane_sandy": {
+    "era5_hurricane_sandy": {
       "id": "era5_hurricane_sandy",
       "name": "Hurricane Sandy",
       "category": "ERA5",
