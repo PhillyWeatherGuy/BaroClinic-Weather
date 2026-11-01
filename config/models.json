@@ -226,7 +226,7 @@
     },
     "era5_blizzard_1996": {
       "id": "era5_blizzard_1996",
-      "name": "Blizzard of '93",
+      "name": "Blizzard of '96",
       "category": "ERA5",
       "resolution": "31km",
       "supported_params": [
