@@ -399,8 +399,8 @@
         "gust10"
       ]
     },
-    "era5_4easter_2018": {
-      "id": "era5_4easter_2018",
+    "era5_4easter_2018v2": {
+      "id": "era5_4easter_2018v2",
       "name": "Four'Easters of '18",
       "category": "ERA5",
       "resolution": "31km",
