@@ -1394,7 +1394,7 @@ body.globe-view #map {
     position: relative;
     border: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: 6px;
-    background: #11151e;
+    background: transparent;
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
@@ -1420,4 +1420,3 @@ body.globe-view #map {
         bottom: 84px; /* matches the taller mobile #timeline-container */
     }
 }
-
