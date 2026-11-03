@@ -5,7 +5,7 @@ import { getViewerPreferences } from './core/viewerPreferences.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
-import { createEnsembleOverlayShader } from './shaders/ensembleShader.js';
+import { createEnsembleOverlayShader } from './shaders/ensembleShader.js'; // 🌟 OVERLAY SHADER
 import { initHubTransition } from './components/homeScreen.js';
 import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
 import { 
@@ -19,6 +19,7 @@ import {
     hideToast 
 } from './components/viewerUI.js';
 
+// 🌟 Universal overlays
 import { 
     initCityOverlay, 
     updateCityCallouts, 
@@ -30,6 +31,7 @@ import {
 import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
 
+// 🛰️ Real-Time Radar Engine
 import { initRadarMode, destroyRadarMode, updateRadarUnitLabels } from './components/radarUI.js';
 import { hideStormVolume } from './layers/stormVolume3D.js';
 
@@ -57,16 +59,16 @@ const map = new maplibregl.Map({
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
     keyboard: false,
-    preserveDrawingBuffer: true 
+    preserveDrawingBuffer: true // Required for the 2D canvas copy of the basemap
 });
 
-// 🌟 FORCE ENABLE MAP INTERACTIONS
+// 🌟 FORCE MAP INTERACTIONS
 map.dragPan.enable();
 map.scrollZoom.enable();
 map.dragRotate.enable();
 map.touchZoomRotate.enable();
 
-// 🌟 Ensure the overlay canvas exists
+// 🌟 Create the Overlay Canvas dynamically
 let overlayCanvas = document.getElementById('ensemble-overlay-canvas');
 if (!overlayCanvas) {
     overlayCanvas = document.createElement('canvas');
@@ -76,7 +78,7 @@ if (!overlayCanvas) {
     overlayCanvas.style.left = '0';
     overlayCanvas.style.width = '100%';
     overlayCanvas.style.height = '100%';
-    overlayCanvas.style.zIndex = '6';
+    overlayCanvas.style.zIndex = '6'; // Above the grid (5), below timeline (10)
     overlayCanvas.style.pointerEvents = 'none';
     overlayCanvas.style.display = 'none';
     document.body.appendChild(overlayCanvas);
@@ -173,6 +175,7 @@ function unloadActiveViewer() {
 
     if (map.getLayer('weather-gpu-shader')) map.removeLayer('weather-gpu-shader');
     if (map.getLayer('radar-gpu-shader')) map.removeLayer('radar-gpu-shader');
+    if (map.getLayer('matrix-capture-layer')) map.removeLayer('matrix-capture-layer');
     
     if (ensembleOverlayShader) {
         ensembleOverlayShader.clearTextures();
@@ -206,9 +209,8 @@ function syncEnsembleGrid() {
     
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
-    
-    // 🌟 FORCE CLICKS TO PASS THROUGH THE GRID
     grid.style.pointerEvents = 'none';
+    
     overlayCanvas.style.display = shouldShow ? 'block' : 'none';
     overlayCanvas.style.pointerEvents = 'none';
     
@@ -243,7 +245,6 @@ function drawEnsembleBoxes() {
             canvas.style.height = '100%';
             canvas.style.display = 'block';
             canvas.style.borderRadius = '6px';
-            // 🌟 FORCE CLICKS TO PASS THROUGH THE MINI-CANVASES
             canvas.style.pointerEvents = 'none'; 
             card.appendChild(canvas);
         }
@@ -251,8 +252,9 @@ function drawEnsembleBoxes() {
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        const width = Math.floor(rect.width);
-        const height = Math.floor(rect.height);
+        const dpr = window.devicePixelRatio || 1;
+        const width = Math.floor(rect.width * dpr);
+        const height = Math.floor(rect.height * dpr);
 
         if (canvas.width !== width || canvas.height !== height) {
             canvas.width = width;
@@ -278,8 +280,8 @@ function drawEnsembleBoxes() {
         try {
             ctx.drawImage(
                 mapCanvas, 
-                sx, sy, sWidth, sHeight,
-                0, 0, canvas.width, canvas.height
+                sx, sy, sWidth, sHeight, 
+                0, 0, canvas.width, canvas.height 
             );
         } catch (err) {}
     });
