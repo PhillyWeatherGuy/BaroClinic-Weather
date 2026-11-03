@@ -5,7 +5,7 @@ import { getViewerPreferences } from './core/viewerPreferences.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
-import { createEnsembleShaderLayer } from './shaders/ensembleShader.js'; // 🌟 NEW IMPORT
+import { createEnsembleShaderLayer } from './shaders/ensembleShader.js'; // 🌟 IMPORTED
 import { initHubTransition } from './components/homeScreen.js';
 import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
 import { 
@@ -57,7 +57,6 @@ const map = new maplibregl.Map({
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
     keyboard: false
-    // 🌟 Removed preserveDrawingBuffer: true (No longer needed)
 });
 
 function getGlobeScreenCircle(matrix, w, h) {
@@ -263,12 +262,16 @@ function applyRadarTheme(theme) {
         'boundary_state', 'boundary_country_z0-4', 'boundary_country_z5-'
     ];
     outlineLayers.forEach(id => {
-        if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', outlineColor);
+        if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'line-color', outlineColor);
+        }
     });
 
     const fillLayers = ['landuse_residential', 'landcover_wood', 'landcover_ice_shelf', 'landcover_glacier', 'building', 'aeroway-area', 'road_area_pier'];
     fillLayers.forEach(id => {
-        if (map.getLayer(id)) map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
+        if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
+        }
     });
     if (map.getLayer('landuse_park')) {
         map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : '#EDEDED');
@@ -435,7 +438,6 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    // 🌟 USE THE NEW ENSEMBLE SHADER
     if (stateManager.activeModel === 'aifs_ens') {
         customShaderLayer = createEnsembleShaderLayer(map);
     } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
