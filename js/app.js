@@ -204,6 +204,14 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
+// 🌟 ENSEMBLE GRID TOGGLE
+function syncEnsembleGrid() {
+    const grid = document.getElementById('ensemble-grid');
+    if (!grid) return;
+    const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
+    grid.style.display = shouldShow ? 'grid' : 'none';
+}
+
 /**
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
@@ -508,6 +516,7 @@ export function initLayer(shaderType = null) {
 }
 
 async function renderFrame(globalIdx) {
+    syncEnsembleGrid();
     if (!stateManager.manifest || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
     
     const renderId = ++activeRenderId;
@@ -678,6 +687,8 @@ export async function switchAppMode(targetMode) {
     stateManager.activeMode = targetMode;
     console.log(`[App] Switching app mode to: ${targetMode}`);
 
+    syncEnsembleGrid();
+
     updateModeNavigation(targetMode);
     unloadActiveViewer();
 
@@ -758,6 +769,7 @@ export async function switchAppMode(targetMode) {
                 if (stateManager.activeModel === 'hrrr') mSpan.textContent = 'HRRR';
                 else if (stateManager.activeModel === 'rrfs') mSpan.textContent = 'RRFS';
                 else if (stateManager.activeModel === 'aifs') mSpan.textContent = 'EC-AIFS';
+                else if (stateManager.activeModel === 'aifs_ens') mSpan.textContent = 'AIFS-ENS';
                 else mSpan.textContent = 'ECMWF-IFS';
             }
         }
