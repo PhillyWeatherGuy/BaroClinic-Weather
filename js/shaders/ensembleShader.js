@@ -384,13 +384,13 @@ export function createEnsembleShaderLayer(mapInstance) {
 
                     gl.viewport(x, y, w, h);
 
-                    // 🌟 FIX: Calculate exact aspect ratio scale so the weather data fits the box perfectly
+                    // 🌟 FIX: Calculate exact aspect ratio scale (object-fit: cover)
                     const dstAspect = w / h;
                     const srcAspect = canvasWidth / canvasHeight;
                     let scaleX = 1.0, scaleY = 1.0;
-                    
+
                     if (srcAspect > dstAspect) {
-                        scaleX = srcAspect / dstAspect; 
+                        scaleX = srcAspect / dstAspect;
                     } else {
                         scaleY = dstAspect / srcAspect;
                     }
@@ -400,6 +400,11 @@ export function createEnsembleShaderLayer(mapInstance) {
                         scaledMatrix[0] *= scaleX;
                         scaledMatrix[5] *= scaleY;
                         gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_matrix'), false, scaledMatrix);
+                    } else if (projData) {
+                        const scaledMatrix = new Float32Array(projData.mainMatrix);
+                        scaledMatrix[0] *= scaleX;
+                        scaledMatrix[5] *= scaleY;
+                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_projection_matrix'), false, scaledMatrix);
                     }
 
                     gl.activeTexture(gl.TEXTURE0);
