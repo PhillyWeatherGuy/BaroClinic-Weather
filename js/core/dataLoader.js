@@ -196,7 +196,8 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
         const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
-        const chunkUrl = rawChunkUrl; 
+        // 🌟 TURN OFF CACHING FOR AIFS-ENS (Ensures we get fresh binaries during development)
+        const chunkUrl = rawChunkUrl + (stateManager.activeModel === 'aifs_ens' ? `?t=${Date.now()}` : '');
         
         const imgResp = await fetch(chunkUrl, { signal: stateManager.activeFetchController?.signal });
         if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
@@ -293,10 +294,54 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                 return volumeObj;
             }
 
+            // 🌟 NEW PATH: ENSEMBLE CHUNKED (10 members bundled together)
+            if (stateManager.manifest.type === 'ensemble_chunked') {
+                const numMembers = stateManager.manifest.members || 10;
+                const memberSizeBytes = chunk.member_size_bytes || (numFrames * frameSize);
+                
+                const outFrames = []; // Array of arrays: [ [m1_bmp, m2_bmp...m10_bmp], [m1_bmp...m10_bmp] ]
+
+                for (let f = 0; f < numFrames; f++) {
+                    const stepVal = (chunk.forecast_steps || [])[f];
+                    if (mobileStepInterval > 1 && stepVal !== undefined && (stepVal % mobileStepInterval !== 0)) {
+                        outFrames.push(null);
+                        continue;
+                    }
+
+                    const memberBitmaps = [];
+                    for (let m = 0; m < numMembers; m++) {
+                        // Offset formula: (Member Index * Total Size of Member Block) + (Frame Index * Size of One Frame)
+                        const srcStart = (m * memberSizeBytes) + (f * frameSize);
+                        const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
+                        
+                        // Create the bitmap for this specific member and frame
+                        const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale, null);
+                        memberBitmaps.push(bitmap);
+                    }
+                    outFrames.push(memberBitmaps);
+                }
+
+                if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
+                    outFrames.forEach(mArr => { if(mArr) mArr.forEach(b => { if (b && typeof b.close === 'function') b.close(); }); });
+                    throw new Error("Load cancelled");
+                }
+
+                const volumeObj = {
+                    frames: outFrames,
+                    width: shouldUpscale ? frameW * 2 : frameW,
+                    height: shouldUpscale ? frameH * 2 : frameH,
+                    isVolume: true,
+                    isEnsemble: true
+                };
+
+                stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
+                return volumeObj;
+            }
+
+            // Standard Single-Member Volume Path
             const outFrames = [];
             for (let f = 0; f < numFrames; f++) {
                 const stepVal = (chunk.forecast_steps || [])[f];
-                // 🌟 On mobile, skip allocating textures and ImageBitmaps for intermediate hours
                 if (mobileStepInterval > 1 && stepVal !== undefined && (stepVal % mobileStepInterval !== 0)) {
                     outFrames.push(null);
                     continue;
@@ -384,12 +429,21 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
 
     for (const key in stateManager.loadedChunkBitmaps) {
         const item = stateManager.loadedChunkBitmaps[key];
+        
         if (item && item.frames) {
-            item.frames.forEach(frame => {
-                if (frame && typeof frame.close === 'function') {
-                    frame.close();
+            item.frames.forEach(frameOrArray => {
+                // 🌟 Handle Ensemble Arrays
+                if (Array.isArray(frameOrArray)) {
+                    frameOrArray.forEach(bmp => {
+                        if (bmp && typeof bmp.close === 'function') bmp.close();
+                    });
+                } 
+                // 🌟 Handle Standard Single ImageBitmaps
+                else if (frameOrArray && typeof frameOrArray.close === 'function') {
+                    frameOrArray.close();
                 }
             });
+
             if (item.ptypeFrames) {
                 item.ptypeFrames.forEach(frame => {
                     if (frame && typeof frame.close === 'function') frame.close();
@@ -399,6 +453,7 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
             item.close();
         }
     }
+    
     stateManager.loadedChunkBitmaps = {};
     stateManager.chunkPixelData = {};
 
