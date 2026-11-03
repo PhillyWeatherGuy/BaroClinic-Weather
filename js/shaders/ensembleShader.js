@@ -372,6 +372,9 @@ export function createEnsembleShaderLayer(mapInstance) {
             const canvasWidth = gl.canvas.width;
             const canvasHeight = gl.canvas.height;
 
+            // 🌟 Use SCISSOR to crop the box perfectly without stretching the map
+            gl.enable(gl.SCISSOR_TEST);
+
             if (cards.length === 10) {
                 cards.forEach((card, index) => {
                     const rect = card.getBoundingClientRect();
@@ -382,29 +385,15 @@ export function createEnsembleShaderLayer(mapInstance) {
                     const w = rect.width * dpr;
                     const h = rect.height * dpr;
 
-                    gl.viewport(x, y, w, h);
+                    gl.scissor(x, y, w, h);
+                    // Keep the viewport full-screen so it aligns 1:1 with the basemap
+                    gl.viewport(0, 0, canvasWidth, canvasHeight);
 
-                    // 🌟 FIX: Calculate exact aspect ratio scale (object-fit: cover)
-                    const dstAspect = w / h;
-                    const srcAspect = canvasWidth / canvasHeight;
-                    let scaleX = 1.0, scaleY = 1.0;
-
-                    if (srcAspect > dstAspect) {
-                        scaleX = srcAspect / dstAspect;
-                    } else {
-                        scaleY = dstAspect / srcAspect;
-                    }
-
+                    // 🌟 Use the original matrix to keep it perfectly aligned with the basemap
                     if (matrix) {
-                        const scaledMatrix = new Float32Array(matrix);
-                        scaledMatrix[0] *= scaleX;
-                        scaledMatrix[5] *= scaleY;
-                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_matrix'), false, scaledMatrix);
+                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_matrix'), false, matrix);
                     } else if (projData) {
-                        const scaledMatrix = new Float32Array(projData.mainMatrix);
-                        scaledMatrix[0] *= scaleX;
-                        scaledMatrix[5] *= scaleY;
-                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_projection_matrix'), false, scaledMatrix);
+                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_projection_matrix'), false, projData.mainMatrix);
                     }
 
                     gl.activeTexture(gl.TEXTURE0);
@@ -415,6 +404,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 });
             }
 
+            gl.disable(gl.SCISSOR_TEST);
             gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
         }
     };
