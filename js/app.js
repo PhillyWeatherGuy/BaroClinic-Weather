@@ -949,9 +949,14 @@ if (ensembleGrid) {
         activeCard = e.target.closest('.map-card');
         if (!activeCard) return;
         
+        // Stop MapLibre from panning the hidden map underneath
+        e.stopPropagation(); 
+        
         isDragging = true;
         lastX = e.clientX;
         lastY = e.clientY;
+        
+        // Capture the pointer so dragging works even if you move fast
         ensembleGrid.setPointerCapture(e.pointerId);
     });
 
@@ -963,6 +968,7 @@ if (ensembleGrid) {
         lastX = e.clientX;
         lastY = e.clientY;
 
+        // Calculate how much the box is cropped so the drag speed matches the zoom level
         const mapCanvas = map.getCanvas();
         const rect = activeCard.getBoundingClientRect();
         const srcAspect = mapCanvas.width / mapCanvas.height;
@@ -980,20 +986,28 @@ if (ensembleGrid) {
         const scaleX = mapCanvas.width / sWidth;
         const scaleY = mapCanvas.height / sHeight;
 
+        // Instantly pan the main map by the adjusted amount
         map.panBy([-dx * scaleX, -dy * scaleY], { duration: 0 });
     });
 
-    ensembleGrid.addEventListener('pointerup', (e) => {
+    const stopDragging = (e) => {
         isDragging = false;
         activeCard = null;
         if (ensembleGrid.hasPointerCapture(e.pointerId)) {
             ensembleGrid.releasePointerCapture(e.pointerId);
         }
-    });
+    };
+
+    ensembleGrid.addEventListener('pointerup', stopDragging);
+    ensembleGrid.addEventListener('pointercancel', stopDragging);
+    ensembleGrid.addEventListener('pointerleave', stopDragging);
 
     ensembleGrid.addEventListener('wheel', (e) => {
         if (!isDrawingEnsemble) return;
+        
+        // Stop the page from scrolling
         e.preventDefault();
+        e.stopPropagation();
 
         const card = e.target.closest('.map-card');
         if (!card) return;
@@ -1001,9 +1015,11 @@ if (ensembleGrid) {
         const mapCanvas = map.getCanvas();
         const rect = card.getBoundingClientRect();
 
+        // 1. Find where the mouse is inside the specific card (0 to 1)
         const relX = (e.clientX - rect.left) / rect.width;
         const relY = (e.clientY - rect.top) / rect.height;
 
+        // 2. Re-calculate the crop bounds for this card
         const srcAspect = mapCanvas.width / mapCanvas.height;
         const dstAspect = rect.width / rect.height;
         let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
@@ -1016,17 +1032,19 @@ if (ensembleGrid) {
             sy = (mapCanvas.height - sHeight) / 2;
         }
 
+        // 3. Map the mouse position to the ORIGINAL uncropped map pixel
         const mapX = sx + (relX * sWidth);
         const mapY = sy + (relY * sHeight);
 
+        // 4. Convert that pixel to a real coordinate
         const lngLat = map.unproject([mapX, mapY]);
-        const deltaZoom = e.deltaY > 0 ? -0.5 : 0.5;
         
-        map.stop(); // Stop any ongoing animation to prevent jitter
+        // 5. Zoom around that exact coordinate!
+        const deltaZoom = e.deltaY > 0 ? -0.5 : 0.5;
         map.easeTo({
             zoom: Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), map.getZoom() + deltaZoom)),
             around: lngLat,
-            duration: 100
+            duration: 150
         });
     }, { passive: false });
 }
