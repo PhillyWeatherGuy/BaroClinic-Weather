@@ -62,24 +62,20 @@ const map = new maplibregl.Map({
 
 /**
  * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
- * Guaranteed to stay 100% locked to the perimeter across all zoom levels, rotations, and screen sizes!
  */
 function getGlobeScreenCircle(matrix, w, h) {
     if (!matrix) return null;
 
-    // 1. Globe Center (0, 0, 0, 1) in screen pixels
     const cx_clip = matrix[12];
     const cy_clip = matrix[13];
     const cw_clip = matrix[15] || 1.0;
     const cx = (cx_clip / cw_clip * 0.5 + 0.5) * w;
     const cy = (0.5 - cy_clip / cw_clip * 0.5) * h;
 
-    // 2. Camera direction vector from matrix
     let vx = matrix[2], vy = matrix[6], vz = matrix[10];
     const vLen = Math.hypot(vx, vy, vz) || 1.0;
     vx /= vLen; vy /= vLen; vz /= vLen;
 
-    // 3. Up vector orthogonal to camera line of sight
     let ux = 0.0, uy = 1.0, uz = 0.0;
     if (Math.abs(vy) > 0.9) {
         ux = 1.0; uy = 0.0; uz = 0.0;
@@ -89,7 +85,6 @@ function getGlobeScreenCircle(matrix, w, h) {
     const uLen = Math.hypot(ux, uy, uz) || 1.0;
     ux /= uLen; uy /= uLen; uz /= uLen;
 
-    // 4. Project unit sphere horizon point (ux, uy, uz) to screen pixels
     const hx_clip = matrix[0] * ux + matrix[4] * uy + matrix[8] * uz + matrix[12];
     const hy_clip = matrix[1] * ux + matrix[5] * uy + matrix[9] * uz + matrix[13];
     const hw_clip = matrix[3] * ux + matrix[7] * uy + matrix[11] * uz + matrix[15];
@@ -125,7 +120,6 @@ function updateAtmosphereHalo(matrix) {
     const cy = circle.cy;
     const r = circle.r;
 
-    // 🌟 Thicker, multi-layered atmospheric rim glow drawn BEHIND the planet
     const outerR = r * 1.22;
     const grad = haloCtx.createRadialGradient(cx, cy, r * 0.96, cx, cy, outerR);
     grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
@@ -218,7 +212,7 @@ function syncEnsembleGrid() {
     isDrawingEnsemble = shouldShow;
     
     if (shouldShow) {
-        setTimeout(drawEnsembleBoxes, 100); // Initial draw
+        setTimeout(drawEnsembleBoxes, 100);
     }
 }
 
@@ -238,16 +232,12 @@ function drawEnsembleBoxes() {
             canvas.style.height = '100%';
             canvas.style.display = 'block';
             canvas.style.borderRadius = '6px';
-            
-            // Remove any old background images from the previous toDataURL attempt
-            card.style.backgroundImage = 'none'; 
             card.appendChild(canvas);
         }
 
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        // Exact 1:1 pixel mapping for maximum speed
         const width = Math.floor(rect.width);
         const height = Math.floor(rect.height);
 
@@ -258,17 +248,30 @@ function drawEnsembleBoxes() {
 
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 🌟 ASPECT RATIO MATH (Simulate object-fit: cover)
+        const srcAspect = mapCanvas.width / mapCanvas.height;
+        const dstAspect = canvas.width / canvas.height;
         
+        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+
+        if (srcAspect > dstAspect) {
+            // Source is wider than box: Crop the left/right sides
+            sWidth = mapCanvas.height * dstAspect;
+            sx = (mapCanvas.width - sWidth) / 2;
+        } else {
+            // Source is taller than box: Crop the top/bottom
+            sHeight = mapCanvas.width / dstAspect;
+            sy = (mapCanvas.height - sHeight) / 2;
+        }
+
         try {
-            // 🌟 Blazing fast WebGL copy on every frame
             ctx.drawImage(
                 mapCanvas, 
-                0, 0, mapCanvas.width, mapCanvas.height, // Source: Entire map
-                0, 0, canvas.width, canvas.height        // Destination: The small box
+                sx, sy, sWidth, sHeight, // Source: Center-cropped map
+                0, 0, canvas.width, canvas.height // Destination: The box
             );
-        } catch (err) {
-            // Silently fail if the WebGL context is temporarily locked
-        }
+        } catch (err) {}
     });
 }
 
@@ -589,7 +592,6 @@ async function renderFrame(globalIdx) {
     if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
         try {
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
-            // Drop stale response if the user already moved past this frame
             if (renderId !== activeRenderId) return;
 
             if (customShaderLayer) {
@@ -623,13 +625,11 @@ async function renderFrame(globalIdx) {
     const activeView = stateManager.activeView || '2d';
 
     if (activeView === '2d' || activeView === '3d') {
-        // 🌟 Dispatch contour lines FIRST so geometry queues before the raster repaints
         try { initVectorContours(map); } catch (e) {}
         await updateVectorContours(frameInfo.step);
 
         if (renderId !== activeRenderId) return;
 
-        // 🌟 Now swap the shader texture so both render in exact lockstep
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
         }
@@ -662,7 +662,7 @@ export async function preloadRemainingChunks(currentGen) {
                 }
                 updateSliderTrackAndBounds();
             } catch (err) {
-                if (err.name === 'AbortError') break; // 🌟 Stop immediately if aborted
+                if (err.name === 'AbortError') break;
                 if (err.message !== "Load cancelled") {
                     console.warn(`Preload chunk ${i} skipped:`, err);
                 }
@@ -675,16 +675,13 @@ export async function preloadRemainingChunks(currentGen) {
 async function loadInitialModelData() {
     const thisGen = stateManager.loadGeneration;
     try {
-        // 🌟 FIX: Pull preferences outside the else block to prevent ReferenceError
         const preferences = getViewerPreferences();
 
-        // 🌟 Force default to ECMWF / 2t on the very first site load
         if (isFirstLoad) {
             stateManager.activeModel = 'ecmwf';
             stateManager.activeParam = '2t';
             isFirstLoad = false;
 
-            // 🌟 FIX: Force the shader and paramConfig to match 2t immediately
             try {
                 const resp = await fetch('./config/models.json');
                 if (resp.ok) {
@@ -694,7 +691,6 @@ async function loadInitialModelData() {
                 }
             } catch(e) {}
 
-            // 🌟 FIX: Update the UI button text to match the forced parameter
             const paramBtn = document.getElementById('btn-param-menu');
             if (paramBtn) {
                 const pSpan = paramBtn.querySelector('span');
@@ -729,7 +725,6 @@ async function loadInitialModelData() {
             await renderFrame(Math.max(0, savedStep));
             hideToast();
 
-            // 🌟 FIX: Await the chunks before starting the contour downloads to prevent bandwidth traffic jams
             preloadRemainingChunks(thisGen).then(() => {
                 if (thisGen === stateManager.loadGeneration) {
                     preloadAllContours(thisGen);
@@ -784,7 +779,6 @@ export async function switchAppMode(targetMode) {
     }
 
     if (modelBtn) modelBtn.style.display = '';
-    // On desktop modelViewer the category pills in the nav replace the param button
     if (paramBtn) {
         paramBtn.style.display = (targetMode === 'modelViewer' && window.innerWidth >= 1024) ? 'none' : '';
     }
@@ -867,7 +861,7 @@ export async function switchAppMode(targetMode) {
             };
 
             map.once('style.load', onReady);
-            setTimeout(onReady, 2000); // Fail-safe
+            setTimeout(onReady, 2000);
             map.setStyle(targetStyle);
         } else {
             if (typeof map.setProjection === 'function') {
@@ -925,7 +919,6 @@ map.on('load', async () => {
     try { initVectorContours(map); } catch (err) {}
 });
 
-// 🌟 REAL-TIME SYNC: Hook into MapLibre's render loop so it updates as you pan/zoom
 map.on('render', () => {
     if (isDrawingEnsemble) {
         drawEnsembleBoxes();
