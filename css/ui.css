@@ -1410,7 +1410,7 @@ body.globe-view #map {
     font-weight: 700;
     letter-spacing: 0.3px;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-    pointer-events: none;
+    pointer-events: auto;
 }
 
 @media (max-width: 1023px) {
