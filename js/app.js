@@ -60,8 +60,21 @@ const map = new maplibregl.Map({
     preserveDrawingBuffer: true // 🌟 Needed for the 2D basemap copy
 });
 
-// 🌟 Initialize the Overlay Canvas
-const overlayCanvas = document.getElementById('ensemble-overlay-canvas');
+// 🌟 Ensure the overlay canvas exists (creates it dynamically if missing from HTML)
+let overlayCanvas = document.getElementById('ensemble-overlay-canvas');
+if (!overlayCanvas) {
+    overlayCanvas = document.createElement('canvas');
+    overlayCanvas.id = 'ensemble-overlay-canvas';
+    overlayCanvas.style.position = 'absolute';
+    overlayCanvas.style.top = '0';
+    overlayCanvas.style.left = '0';
+    overlayCanvas.style.width = '100%';
+    overlayCanvas.style.height = '100%';
+    overlayCanvas.style.zIndex = '6';
+    overlayCanvas.style.pointerEvents = 'none';
+    overlayCanvas.style.display = 'none';
+    document.body.appendChild(overlayCanvas);
+}
 ensembleOverlayShader = createEnsembleOverlayShader(overlayCanvas);
 
 // 🌟 Dummy Layer to capture the matrix
@@ -221,13 +234,13 @@ function drawEnsembleBoxes() {
             canvas.style.height = '100%';
             canvas.style.display = 'block';
             canvas.style.borderRadius = '6px';
+            canvas.style.pointerEvents = 'none'; // 🌟 FIX: Allow click-through for map zooming
             card.appendChild(canvas);
         }
 
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        // Use CSS pixel size for the 2D canvas
         const width = Math.floor(rect.width);
         const height = Math.floor(rect.height);
 
@@ -255,8 +268,8 @@ function drawEnsembleBoxes() {
         try {
             ctx.drawImage(
                 mapCanvas, 
-                sx, sy, sWidth, sHeight, // Source: Center-cropped map
-                0, 0, canvas.width, canvas.height // Destination: The box
+                sx, sy, sWidth, sHeight,
+                0, 0, canvas.width, canvas.height
             );
         } catch (err) {}
     });
@@ -486,7 +499,7 @@ async function renderFrame(globalIdx) {
             if (ensembleOverlayShader) ensembleOverlayShader.preloadChunkTexture(chunkIdx, bitmap);
             updateSliderTrackAndBounds();
         } catch (err) { return; }
-    } else if (customShaderLayer && !customShaderLayer.chunkTextures[`${chunkIdx}_${frameIdx}`]) {
+    } else if (customShaderLayer && !customShaderLayer.chunkTextures?.[`${chunkIdx}_${frameIdx}`]) {
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
     } else if (ensembleOverlayShader && !ensembleOverlayShader.chunkTextures?.[`${chunkIdx}_${frameIdx}`]) {
         ensembleOverlayShader.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
