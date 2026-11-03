@@ -100,8 +100,8 @@
     },
     "aifs_ens": {
       "id": "aifs_ens",
-      "name": "EC-AIFS-ENS",
-      "category": "Global",
+      "name": "AIFS-ENS",
+      "category": "Ensemble",
       "resolution": "28km",
       "supported_params": [
         "2t"
