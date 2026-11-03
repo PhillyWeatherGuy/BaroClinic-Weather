@@ -119,7 +119,6 @@ function createPaletteTexture(gl, paletteHexArray) {
     return paletteTex;
 }
 
-// 🌟 THE FIX: Scale the entire row, not just the diagonal
 function cropMatrix(m, sx, sy) {
     const out = new Float32Array(m);
     for (const i of [0, 4, 8, 12]) out[i] *= sx;
@@ -144,7 +143,6 @@ export function createEnsembleOverlayShader(canvas) {
     let activeTextures = null;
     let texResolution = [2880.0, 1442.0];
 
-    // Compile Shader
     const vsSource = `
     attribute vec2 a_pos;
     attribute vec2 a_uv;
@@ -158,6 +156,7 @@ export function createEnsembleOverlayShader(canvas) {
             gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
         }
     }`;
+    
     const fsSource = `
     precision highp float;
     varying vec2 v_uv;
@@ -249,7 +248,6 @@ export function createEnsembleOverlayShader(canvas) {
         },
 
         render: function (matrix) {
-            // Handle resize
             const dpr = window.devicePixelRatio || 1;
             const w = window.innerWidth;
             const h = window.innerHeight;
