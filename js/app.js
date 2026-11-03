@@ -238,7 +238,6 @@ function drawEnsembleBoxes() {
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        // 🌟 FIX: Multiply by devicePixelRatio to make the canvas Retina-sharp
         const dpr = window.devicePixelRatio || 1;
         const width = Math.floor(rect.width * dpr);
         const height = Math.floor(rect.height * dpr);
@@ -251,7 +250,6 @@ function drawEnsembleBoxes() {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 🌟 ASPECT RATIO MATH (Simulate object-fit: cover)
         const srcAspect = mapCanvas.width / mapCanvas.height;
         const dstAspect = canvas.width / canvas.height;
         
@@ -268,8 +266,8 @@ function drawEnsembleBoxes() {
         try {
             ctx.drawImage(
                 mapCanvas, 
-                sx, sy, sWidth, sHeight, // Source: Center-cropped map
-                0, 0, canvas.width, canvas.height // Destination: The box
+                sx, sy, sWidth, sHeight, 
+                0, 0, canvas.width, canvas.height 
             );
         } catch (err) {}
     });
@@ -311,7 +309,7 @@ export function updateBasemapStyle(styleUrl) {
     };
 
     map.once('style.load', onStyleReady);
-    setTimeout(onStyleReady, 2000); // Fail-safe
+    setTimeout(onStyleReady, 2000);
     map.setStyle(styleUrl);
 }
 
@@ -937,3 +935,95 @@ map.on('click', (e) => {
          .setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`)
          .addTo(map);
 });
+
+// 🌟 CUSTOM INTERACTION HANDLING FOR ENSEMBLE GRID
+const ensembleGrid = document.getElementById('ensemble-grid');
+if (ensembleGrid) {
+    let isDragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    ensembleGrid.addEventListener('pointerdown', (e) => {
+        if (!isDrawingEnsemble) return;
+        isDragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        ensembleGrid.setPointerCapture(e.pointerId);
+    });
+
+    ensembleGrid.addEventListener('pointermove', (e) => {
+        if (!isDrawingEnsemble || !isDragging) return;
+        
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+
+        const card = e.target.closest('.map-card');
+        if (!card) return;
+
+        const mapCanvas = map.getCanvas();
+        const rect = card.getBoundingClientRect();
+        const srcAspect = mapCanvas.width / mapCanvas.height;
+        const dstAspect = rect.width / rect.height;
+        
+        let sWidth = mapCanvas.width;
+        let sHeight = mapCanvas.height;
+        
+        if (srcAspect > dstAspect) {
+            sWidth = mapCanvas.height * dstAspect;
+        } else {
+            sHeight = mapCanvas.width / dstAspect;
+        }
+
+        const scaleX = mapCanvas.width / sWidth;
+        const scaleY = mapCanvas.height / sHeight;
+
+        map.panBy([-dx * scaleX, -dy * scaleY], { duration: 0 });
+    });
+
+    ensembleGrid.addEventListener('pointerup', (e) => {
+        isDragging = false;
+        if (ensembleGrid.hasPointerCapture(e.pointerId)) {
+            ensembleGrid.releasePointerCapture(e.pointerId);
+        }
+    });
+
+    ensembleGrid.addEventListener('wheel', (e) => {
+        if (!isDrawingEnsemble) return;
+        e.preventDefault();
+
+        const card = e.target.closest('.map-card');
+        if (!card) return;
+
+        const mapCanvas = map.getCanvas();
+        const rect = card.getBoundingClientRect();
+
+        const relX = (e.clientX - rect.left) / rect.width;
+        const relY = (e.clientY - rect.top) / rect.height;
+
+        const srcAspect = mapCanvas.width / mapCanvas.height;
+        const dstAspect = rect.width / rect.height;
+        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+
+        if (srcAspect > dstAspect) {
+            sWidth = mapCanvas.height * dstAspect;
+            sx = (mapCanvas.width - sWidth) / 2;
+        } else {
+            sHeight = mapCanvas.width / dstAspect;
+            sy = (mapCanvas.height - sHeight) / 2;
+        }
+
+        const mapX = sx + (relX * sWidth);
+        const mapY = sy + (relY * sHeight);
+
+        const lngLat = map.unproject([mapX, mapY]);
+        const deltaZoom = e.deltaY > 0 ? -0.5 : 0.5;
+        
+        map.easeTo({
+            zoom: map.getZoom() + deltaZoom,
+            around: lngLat,
+            duration: 150
+        });
+    }, { passive: false });
+}
