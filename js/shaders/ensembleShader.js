@@ -3,7 +3,6 @@ import { getPaletteForParameter as getLightPalette } from '../config/palettes.js
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
-// 🌟 Generates the subdivided grid for smooth projection
 function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
     const vertices = [];
     const dx = (maxX - minX) / cols;
@@ -124,8 +123,8 @@ export function createEnsembleShaderLayer(mapInstance) {
     return {
         id: 'ensemble-gpu-shader',
         type: 'custom',
-        chunkTextures: {}, // Will store arrays of 10 textures per frame
-        activeTextures: null, // Array of 10 active textures for the current frame
+        chunkTextures: {},
+        activeTextures: null,
         paletteTex: null,
         texResolution: [2880.0, 1442.0],
         programs: {},
@@ -176,7 +175,6 @@ export function createEnsembleShaderLayer(mapInstance) {
         },
 
         getProgram: function(gl, shaderData) {
-            // Reuse the exact same program logic from precipShader.js
             const variant = shaderData?.variantName || 'default';
             if (this.programs[variant]) return this.programs[variant];
 
@@ -297,7 +295,6 @@ export function createEnsembleShaderLayer(mapInstance) {
                 return tex;
             };
 
-            // source.frames is now an array of arrays: [ [m1_bmp, m2_bmp...], [m1_bmp...] ]
             if (source.frames && Array.isArray(source.frames)) {
                 if (source.width && source.height) {
                     this.texResolution = [source.width, source.height];
@@ -317,7 +314,6 @@ export function createEnsembleShaderLayer(mapInstance) {
             const cIdx = frameState.chunkIndex;
             const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
             
-            // Retrieve the array of 10 textures for this specific chunk and frame
             this.activeTextures = this.chunkTextures[`${cIdx}_${fIdx}`];
             mapInstance.triggerRepaint();
         },
@@ -371,18 +367,16 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-            // 🌟 THE BLUEPRINT: THE 10-VIEWPORT LOOP
             const cards = document.querySelectorAll('.map-card');
             const dpr = window.devicePixelRatio || 1;
             const canvasHeight = gl.canvas.height;
+            const canvasWidth = gl.canvas.width;
 
-            // We only loop if there are 10 boxes on screen
             if (cards.length === 10) {
                 cards.forEach((card, index) => {
                     const rect = card.getBoundingClientRect();
                     if (rect.width === 0 || rect.height === 0) return;
 
-                    // WebGL Y-axis is inverted (bottom is 0)
                     const x = rect.left * dpr;
                     const y = (canvasHeight - rect.bottom * dpr);
                     const w = rect.width * dpr;
@@ -390,17 +384,26 @@ export function createEnsembleShaderLayer(mapInstance) {
 
                     gl.viewport(x, y, w, h);
 
-                    // Bind this specific member's texture
+                    // 🌟 FIX: Scale the projection matrix to fit the viewport aspect ratio
+                    const scaleX = w / canvasWidth;
+                    const scaleY = h / canvasHeight;
+                    const scale = Math.max(scaleX, scaleY);
+                    
+                    if (matrix) {
+                        const scaledMatrix = new Float32Array(matrix);
+                        scaledMatrix[0] *= scale;
+                        scaledMatrix[5] *= scale;
+                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_matrix'), false, scaledMatrix);
+                    }
+
                     gl.activeTexture(gl.TEXTURE0);
                     gl.bindTexture(gl.TEXTURE_2D, this.activeTextures[index]);
                     gl.uniform1i(gl.getUniformLocation(program, 'u_dataTexture'), 0);
 
-                    // Draw the quad into this viewport
                     gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
                 });
             }
 
-            // Reset viewport for MapLibre's next layers
             gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
         }
     };
