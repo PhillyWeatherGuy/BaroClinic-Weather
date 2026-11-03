@@ -942,9 +942,13 @@ if (ensembleGrid) {
     let isDragging = false;
     let lastX = 0;
     let lastY = 0;
+    let activeCard = null;
 
     ensembleGrid.addEventListener('pointerdown', (e) => {
         if (!isDrawingEnsemble) return;
+        activeCard = e.target.closest('.map-card');
+        if (!activeCard) return;
+        
         isDragging = true;
         lastX = e.clientX;
         lastY = e.clientY;
@@ -952,18 +956,15 @@ if (ensembleGrid) {
     });
 
     ensembleGrid.addEventListener('pointermove', (e) => {
-        if (!isDrawingEnsemble || !isDragging) return;
+        if (!isDrawingEnsemble || !isDragging || !activeCard) return;
         
         const dx = e.clientX - lastX;
         const dy = e.clientY - lastY;
         lastX = e.clientX;
         lastY = e.clientY;
 
-        const card = e.target.closest('.map-card');
-        if (!card) return;
-
         const mapCanvas = map.getCanvas();
-        const rect = card.getBoundingClientRect();
+        const rect = activeCard.getBoundingClientRect();
         const srcAspect = mapCanvas.width / mapCanvas.height;
         const dstAspect = rect.width / rect.height;
         
@@ -984,6 +985,7 @@ if (ensembleGrid) {
 
     ensembleGrid.addEventListener('pointerup', (e) => {
         isDragging = false;
+        activeCard = null;
         if (ensembleGrid.hasPointerCapture(e.pointerId)) {
             ensembleGrid.releasePointerCapture(e.pointerId);
         }
@@ -1020,10 +1022,11 @@ if (ensembleGrid) {
         const lngLat = map.unproject([mapX, mapY]);
         const deltaZoom = e.deltaY > 0 ? -0.5 : 0.5;
         
+        map.stop(); // Stop any ongoing animation to prevent jitter
         map.easeTo({
-            zoom: map.getZoom() + deltaZoom,
+            zoom: Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), map.getZoom() + deltaZoom)),
             around: lngLat,
-            duration: 150
+            duration: 100
         });
     }, { passive: false });
 }
