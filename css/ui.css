@@ -1420,3 +1420,15 @@ body.globe-view #map {
         bottom: 84px; /* matches the taller mobile #timeline-container */
     }
 }
+
+/* 🌟 Add this to the bottom of ui.css */
+#ensemble-overlay-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 6; /* Above the grid (5), below timeline (10) */
+    pointer-events: none; /* Let pan/zoom through */
+    display: none;
+}
