@@ -226,51 +226,27 @@ function syncEnsembleGrid() {
 function drawEnsembleBoxes() {
     if (!isDrawingEnsemble) return;
 
-    // 🌟 Use MapLibre's internal method to get the canvas reliably
-    const mapCanvas = map.getCanvas(); 
+    const mapCanvas = map.getCanvas();
     if (!mapCanvas) return;
 
-    const cards = document.querySelectorAll('.map-card');
-    
-    cards.forEach((card) => {
-        let canvas = card.querySelector('canvas');
-        if (!canvas) {
-            canvas = document.createElement('canvas');
-            canvas.style.width = '100%';
-            canvas.style.height = '100%';
-            canvas.style.display = 'block';
-            canvas.style.borderRadius = '6px';
-            // 🌟 Solid dark background so we know if the snapshot fails
-            canvas.style.backgroundColor = '#11151e'; 
-            card.appendChild(canvas);
-        }
-
-        const rect = card.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
-
-        const dpr = window.devicePixelRatio || 1;
-        const width = Math.floor(rect.width * dpr);
-        const height = Math.floor(rect.height * dpr);
-
-        if (canvas.width !== width || canvas.height !== height) {
-            canvas.width = width;
-            canvas.height = height;
-        }
-
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    try {
+        // 🌟 Force a perfect snapshot of the WebGL canvas
+        const dataUrl = mapCanvas.toDataURL('image/png');
+        const cards = document.querySelectorAll('.map-card');
         
-        try {
-            // Draw the main map canvas into this mini box
-            ctx.drawImage(
-                mapCanvas, 
-                0, 0, mapCanvas.width, mapCanvas.height, // Source: Entire map
-                0, 0, canvas.width, canvas.height        // Destination: The small box
-            );
-        } catch (err) {
-            console.warn("Canvas copy failed:", err);
-        }
-    });
+        cards.forEach((card) => {
+            // Clean up any old canvases from previous attempts
+            const oldCanvas = card.querySelector('canvas');
+            if (oldCanvas) oldCanvas.remove();
+
+            card.style.backgroundImage = `url(${dataUrl})`;
+            card.style.backgroundSize = 'cover';
+            card.style.backgroundPosition = 'center';
+            card.style.overflow = 'hidden';
+        });
+    } catch (err) {
+        console.warn("Canvas snapshot failed:", err);
+    }
 }
 
 /**
@@ -926,10 +902,15 @@ map.on('load', async () => {
     try { initVectorContours(map); } catch (err) {}
 });
 
-// 🌟 Hook into MapLibre's render loop (afterRender is much more reliable for capturing)
+// 🌟 Hook into MapLibre's render loop (throttled so it doesn't freeze while panning)
+let lastSnapshot = 0;
 map.on('afterRender', () => {
     if (isDrawingEnsemble) {
-        drawEnsembleBoxes();
+        const now = performance.now();
+        if (now - lastSnapshot > 250) { // Only update 4 times a second
+            drawEnsembleBoxes();
+            lastSnapshot = now;
+        }
     }
 });
 
