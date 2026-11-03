@@ -57,7 +57,7 @@ const map = new maplibregl.Map({
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
     keyboard: false,
-    preserveDrawingBuffer: true // 🌟 Required for the Canvas Copy Hack
+    preserveDrawingBuffer: true // 🌟 Required for the Canvas Snapshot
 });
 
 /**
@@ -205,7 +205,7 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ENSEMBLE GRID TOGGLE & VISUAL COPY HACK
+// 🌟 ENSEMBLE GRID TOGGLE & SNAPSHOT HACK
 let isDrawingEnsemble = false;
 
 function syncEnsembleGrid() {
@@ -230,15 +230,16 @@ function drawEnsembleBoxes() {
     if (!mapCanvas) return;
 
     try {
-        // 🌟 Force a perfect snapshot of the WebGL canvas
-        const dataUrl = mapCanvas.toDataURL('image/png');
+        // 🌟 Use JPEG instead of PNG for reliable WebGL readback
+        const dataUrl = mapCanvas.toDataURL('image/jpeg', 0.8);
         const cards = document.querySelectorAll('.map-card');
         
         cards.forEach((card) => {
-            // Clean up any old canvases from previous attempts
+            // Remove any old mini-canvases that failed earlier
             const oldCanvas = card.querySelector('canvas');
             if (oldCanvas) oldCanvas.remove();
 
+            // Apply the map snapshot as a background image
             card.style.backgroundImage = `url(${dataUrl})`;
             card.style.backgroundSize = 'cover';
             card.style.backgroundPosition = 'center';
@@ -902,15 +903,10 @@ map.on('load', async () => {
     try { initVectorContours(map); } catch (err) {}
 });
 
-// 🌟 Hook into MapLibre's render loop (throttled so it doesn't freeze while panning)
-let lastSnapshot = 0;
-map.on('afterRender', () => {
+// 🌟 Only capture the map when it is completely idle (finished panning/zooming)
+map.on('idle', () => {
     if (isDrawingEnsemble) {
-        const now = performance.now();
-        if (now - lastSnapshot > 250) { // Only update 4 times a second
-            drawEnsembleBoxes();
-            lastSnapshot = now;
-        }
+        drawEnsembleBoxes();
     }
 });
 
