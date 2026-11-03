@@ -56,7 +56,8 @@ const map = new maplibregl.Map({
     style: './config/style_default.json',
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
-    keyboard: false
+    keyboard: false,
+    preserveDrawingBuffer: true // 🌟 ADDED: Required for the Canvas Copy Hack
 });
 
 /**
@@ -204,12 +205,63 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ENSEMBLE GRID TOGGLE
+// 🌟 ENSEMBLE GRID TOGGLE & VISUAL COPY HACK
+let isDrawingEnsemble = false;
+
 function syncEnsembleGrid() {
     const grid = document.getElementById('ensemble-grid');
     if (!grid) return;
+    
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
+    
+    isDrawingEnsemble = shouldShow;
+    
+    // Give the browser a split second to layout the grid, then draw
+    if (shouldShow) {
+        setTimeout(drawEnsembleBoxes, 100);
+    }
+}
+
+function drawEnsembleBoxes() {
+    if (!isDrawingEnsemble) return;
+
+    const mapCanvas = document.querySelector('#map canvas');
+    if (!mapCanvas) return;
+
+    const cards = document.querySelectorAll('.map-card');
+    
+    cards.forEach((card) => {
+        // Create a small canvas inside each card if it doesn't exist
+        let canvas = card.querySelector('canvas');
+        if (!canvas) {
+            canvas = document.createElement('canvas');
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            canvas.style.display = 'block';
+            canvas.style.borderRadius = '6px';
+            card.appendChild(canvas);
+        }
+
+        const rect = card.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+
+        // Match the internal canvas resolution to the card's physical size
+        if (canvas.width !== Math.floor(rect.width * dpr) || canvas.height !== Math.floor(rect.height * dpr)) {
+            canvas.width = Math.floor(rect.width * dpr);
+            canvas.height = Math.floor(rect.height * dpr);
+        }
+
+        const ctx = canvas.getContext('2d');
+        
+        // Clear the mini canvas and draw the entire MapLibre canvas into it!
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(
+            mapCanvas, 
+            0, 0, mapCanvas.width, mapCanvas.height, // Source: Entire map
+            0, 0, canvas.width, canvas.height        // Destination: The small box
+        );
+    });
 }
 
 /**
@@ -863,6 +915,13 @@ map.on('load', async () => {
     setBasemapLabelsVisibility(map, false);
     initAtmosphereHaloCanvas();
     try { initVectorContours(map); } catch (err) {}
+});
+
+// 🌟 Hook into MapLibre's render loop to update the boxes when the user pans/zooms
+map.on('render', () => {
+    if (isDrawingEnsemble) {
+        drawEnsembleBoxes();
+    }
 });
 
 map.on('click', (e) => {
