@@ -124,7 +124,7 @@ export function createEnsembleShaderLayer(mapInstance) {
     return {
         id: 'ensemble-gpu-shader',
         type: 'custom',
-        chunkTextures: {}, // Will store arrays of 10 textures per chunk
+        chunkTextures: {}, // Will store arrays of 10 textures per frame
         activeTextures: null, // Array of 10 active textures for the current frame
         paletteTex: null,
         texResolution: [2880.0, 1442.0],
@@ -297,25 +297,29 @@ export function createEnsembleShaderLayer(mapInstance) {
                 return tex;
             };
 
-            // Ensemble data comes as an array of 10 ImageBitmaps
-            if (Array.isArray(source.members)) {
+            // source.frames is now an array of arrays: [ [m1_bmp, m2_bmp...], [m1_bmp...] ]
+            if (source.frames && Array.isArray(source.frames)) {
                 if (source.width && source.height) {
                     this.texResolution = [source.width, source.height];
                 }
-                const textures = source.members.map(bmp => uploadSingle(bmp));
-                this.chunkTextures[chunkIndex] = textures;
+                
+                source.frames.forEach((memberBitmaps, fIdx) => {
+                    const key = `${chunkIndex}_${fIdx}`;
+                    if (memberBitmaps && Array.isArray(memberBitmaps) && !this.chunkTextures[key]) {
+                        this.chunkTextures[key] = memberBitmaps.map(bmp => uploadSingle(bmp));
+                    }
+                });
             }
         },
 
         updateFrame: function (frameState) {
             if (!this.gl || !frameState) return;
-            
-            // Grab the array of 10 textures for this chunk
             const cIdx = frameState.chunkIndex;
-            if (this.chunkTextures[cIdx]) {
-                this.activeTextures = this.chunkTextures[cIdx];
-                mapInstance.triggerRepaint();
-            }
+            const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
+            
+            // Retrieve the array of 10 textures for this specific chunk and frame
+            this.activeTextures = this.chunkTextures[`${cIdx}_${fIdx}`];
+            mapInstance.triggerRepaint();
         },
 
         render: function (gl, matrixOrArgs) {
