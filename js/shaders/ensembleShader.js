@@ -119,9 +119,17 @@ function createPaletteTexture(gl, paletteHexArray) {
     return paletteTex;
 }
 
+// 🌟 THE FIX: Scale the entire row, not just the diagonal
+function cropMatrix(m, sx, sy) {
+    const out = new Float32Array(m);
+    for (const i of [0, 4, 8, 12]) out[i] *= sx;
+    for (const i of [1, 5, 9, 13]) out[i] *= sy;
+    return out;
+}
+
 export function createEnsembleShaderLayer(mapInstance) {
     return {
-        id: 'ensemble-gpu-shader',
+        id: 'ensemble-gpu-shader', // 🌟 Ensure ID matches app.js cleanup
         type: 'custom',
         chunkTextures: {},
         activeTextures: null,
@@ -335,7 +343,6 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
 
-            // Set global uniforms that don't change per box
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -369,7 +376,6 @@ export function createEnsembleShaderLayer(mapInstance) {
 
                     gl.viewport(x, y, w, h);
 
-                    // 🌟 Calculate exact aspect ratio scaling
                     const dstAspect = w / h;
                     const srcAspect = canvasWidth / canvasHeight;
                     let scaleX = 1.0, scaleY = 1.0;
@@ -380,16 +386,14 @@ export function createEnsembleShaderLayer(mapInstance) {
                         scaleY = dstAspect / srcAspect;
                     }
 
+                    // 🌟 Apply the correct matrix crop scaling
                     if (projData) {
-                        const scaledMatrix = new Float32Array(projData.mainMatrix);
-                        scaledMatrix[0] *= scaleX;
-                        scaledMatrix[5] *= scaleY;
+                        const scaledMatrix = cropMatrix(projData.mainMatrix, scaleX, scaleY);
                         const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
                         if (locMain) gl.uniformMatrix4fv(locMain, false, scaledMatrix);
                         
-                        // MapLibre v5 also requires these uniforms to be set
                         const locFallback = gl.getUniformLocation(program, 'u_projection_fallback_matrix');
-                        if (locFallback) gl.uniformMatrix4fv(locFallback, false, projData.fallbackMatrix);
+                        if (locFallback) gl.uniformMatrix4fv(locFallback, false, cropMatrix(projData.fallbackMatrix, scaleX, scaleY));
                         const locCoords = gl.getUniformLocation(program, 'u_projection_tile_mercator_coords');
                         if (locCoords) gl.uniform4f(locCoords, projData.tileMercatorCoords[0], projData.tileMercatorCoords[1], projData.tileMercatorCoords[2], projData.tileMercatorCoords[3]);
                         const locClip = gl.getUniformLocation(program, 'u_projection_clipping_plane');
@@ -397,9 +401,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                         const locTrans = gl.getUniformLocation(program, 'u_projection_transition');
                         if (locTrans) gl.uniform1f(locTrans, projData.projectionTransition);
                     } else if (matrix) {
-                        const scaledMatrix = new Float32Array(matrix);
-                        scaledMatrix[0] *= scaleX;
-                        scaledMatrix[5] *= scaleY;
+                        const scaledMatrix = cropMatrix(matrix, scaleX, scaleY);
                         const locMat = gl.getUniformLocation(program, 'u_matrix');
                         if (locMat) gl.uniformMatrix4fv(locMat, false, scaledMatrix);
                     }
