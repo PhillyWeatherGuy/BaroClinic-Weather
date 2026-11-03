@@ -57,7 +57,7 @@ const map = new maplibregl.Map({
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
     keyboard: false,
-    preserveDrawingBuffer: true // 🌟 Required for the Canvas Snapshot
+    preserveDrawingBuffer: true // 🌟 Required for real-time canvas copying
 });
 
 /**
@@ -205,7 +205,7 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ENSEMBLE GRID TOGGLE & SNAPSHOT HACK
+// 🌟 ENSEMBLE GRID TOGGLE & REAL-TIME CANVAS COPY
 let isDrawingEnsemble = false;
 
 function syncEnsembleGrid() {
@@ -218,8 +218,7 @@ function syncEnsembleGrid() {
     isDrawingEnsemble = shouldShow;
     
     if (shouldShow) {
-        // Give the browser a split second to layout the grid, then draw
-        setTimeout(drawEnsembleBoxes, 100);
+        setTimeout(drawEnsembleBoxes, 100); // Initial draw
     }
 }
 
@@ -229,25 +228,48 @@ function drawEnsembleBoxes() {
     const mapCanvas = map.getCanvas();
     if (!mapCanvas) return;
 
-    try {
-        // 🌟 Use JPEG instead of PNG for reliable WebGL readback
-        const dataUrl = mapCanvas.toDataURL('image/jpeg', 0.8);
-        const cards = document.querySelectorAll('.map-card');
-        
-        cards.forEach((card) => {
-            // Remove any old mini-canvases that failed earlier
-            const oldCanvas = card.querySelector('canvas');
-            if (oldCanvas) oldCanvas.remove();
+    const cards = document.querySelectorAll('.map-card');
+    
+    cards.forEach((card) => {
+        let canvas = card.querySelector('canvas');
+        if (!canvas) {
+            canvas = document.createElement('canvas');
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            canvas.style.display = 'block';
+            canvas.style.borderRadius = '6px';
+            
+            // Remove any old background images from the previous toDataURL attempt
+            card.style.backgroundImage = 'none'; 
+            card.appendChild(canvas);
+        }
 
-            // Apply the map snapshot as a background image
-            card.style.backgroundImage = `url(${dataUrl})`;
-            card.style.backgroundSize = 'cover';
-            card.style.backgroundPosition = 'center';
-            card.style.overflow = 'hidden';
-        });
-    } catch (err) {
-        console.warn("Canvas snapshot failed:", err);
-    }
+        const rect = card.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
+        // Exact 1:1 pixel mapping for maximum speed
+        const width = Math.floor(rect.width);
+        const height = Math.floor(rect.height);
+
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        try {
+            // 🌟 Blazing fast WebGL copy on every frame
+            ctx.drawImage(
+                mapCanvas, 
+                0, 0, mapCanvas.width, mapCanvas.height, // Source: Entire map
+                0, 0, canvas.width, canvas.height        // Destination: The small box
+            );
+        } catch (err) {
+            // Silently fail if the WebGL context is temporarily locked
+        }
+    });
 }
 
 /**
@@ -903,8 +925,8 @@ map.on('load', async () => {
     try { initVectorContours(map); } catch (err) {}
 });
 
-// 🌟 Only capture the map when it is completely idle (finished panning/zooming)
-map.on('idle', () => {
+// 🌟 REAL-TIME SYNC: Hook into MapLibre's render loop so it updates as you pan/zoom
+map.on('render', () => {
     if (isDrawingEnsemble) {
         drawEnsembleBoxes();
     }
