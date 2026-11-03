@@ -238,8 +238,10 @@ function drawEnsembleBoxes() {
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        const width = Math.floor(rect.width);
-        const height = Math.floor(rect.height);
+        // 🌟 FIX: Multiply by devicePixelRatio to make the canvas Retina-sharp
+        const dpr = window.devicePixelRatio || 1;
+        const width = Math.floor(rect.width * dpr);
+        const height = Math.floor(rect.height * dpr);
 
         if (canvas.width !== width || canvas.height !== height) {
             canvas.width = width;
@@ -256,11 +258,9 @@ function drawEnsembleBoxes() {
         let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
 
         if (srcAspect > dstAspect) {
-            // Source is wider than box: Crop the left/right sides
             sWidth = mapCanvas.height * dstAspect;
             sx = (mapCanvas.width - sWidth) / 2;
         } else {
-            // Source is taller than box: Crop the top/bottom
             sHeight = mapCanvas.width / dstAspect;
             sy = (mapCanvas.height - sHeight) / 2;
         }
