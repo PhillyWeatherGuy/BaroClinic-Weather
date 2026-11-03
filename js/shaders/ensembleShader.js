@@ -335,22 +335,7 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
 
-            if (projData) {
-                const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
-                if (locMain) gl.uniformMatrix4fv(locMain, false, projData.mainMatrix);
-                const locFallback = gl.getUniformLocation(program, 'u_projection_fallback_matrix');
-                if (locFallback) gl.uniformMatrix4fv(locFallback, false, projData.fallbackMatrix);
-                const locCoords = gl.getUniformLocation(program, 'u_projection_tile_mercator_coords');
-                if (locCoords) gl.uniform4f(locCoords, projData.tileMercatorCoords[0], projData.tileMercatorCoords[1], projData.tileMercatorCoords[2], projData.tileMercatorCoords[3]);
-                const locClip = gl.getUniformLocation(program, 'u_projection_clipping_plane');
-                if (locClip) gl.uniform4f(locClip, projData.clippingPlane[0], projData.clippingPlane[1], projData.clippingPlane[2], projData.clippingPlane[3]);
-                const locTrans = gl.getUniformLocation(program, 'u_projection_transition');
-                if (locTrans) gl.uniform1f(locTrans, projData.projectionTransition);
-            } else if (matrix) {
-                const locMat = gl.getUniformLocation(program, 'u_matrix');
-                if (locMat) gl.uniformMatrix4fv(locMat, false, matrix);
-            }
-
+            // Set global uniforms that don't change per box
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -384,7 +369,7 @@ export function createEnsembleShaderLayer(mapInstance) {
 
                     gl.viewport(x, y, w, h);
 
-                    // 🌟 Calculate the aspect ratio exactly like object-fit: cover
+                    // 🌟 Calculate exact aspect ratio scaling
                     const dstAspect = w / h;
                     const srcAspect = canvasWidth / canvasHeight;
                     let scaleX = 1.0, scaleY = 1.0;
@@ -395,16 +380,28 @@ export function createEnsembleShaderLayer(mapInstance) {
                         scaleY = dstAspect / srcAspect;
                     }
 
-                    if (matrix) {
-                        const scaledMatrix = new Float32Array(matrix);
-                        scaledMatrix[0] *= scaleX;
-                        scaledMatrix[5] *= scaleY;
-                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_matrix'), false, scaledMatrix);
-                    } else if (projData) {
+                    if (projData) {
                         const scaledMatrix = new Float32Array(projData.mainMatrix);
                         scaledMatrix[0] *= scaleX;
                         scaledMatrix[5] *= scaleY;
-                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_projection_matrix'), false, scaledMatrix);
+                        const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
+                        if (locMain) gl.uniformMatrix4fv(locMain, false, scaledMatrix);
+                        
+                        // MapLibre v5 also requires these uniforms to be set
+                        const locFallback = gl.getUniformLocation(program, 'u_projection_fallback_matrix');
+                        if (locFallback) gl.uniformMatrix4fv(locFallback, false, projData.fallbackMatrix);
+                        const locCoords = gl.getUniformLocation(program, 'u_projection_tile_mercator_coords');
+                        if (locCoords) gl.uniform4f(locCoords, projData.tileMercatorCoords[0], projData.tileMercatorCoords[1], projData.tileMercatorCoords[2], projData.tileMercatorCoords[3]);
+                        const locClip = gl.getUniformLocation(program, 'u_projection_clipping_plane');
+                        if (locClip) gl.uniform4f(locClip, projData.clippingPlane[0], projData.clippingPlane[1], projData.clippingPlane[2], projData.clippingPlane[3]);
+                        const locTrans = gl.getUniformLocation(program, 'u_projection_transition');
+                        if (locTrans) gl.uniform1f(locTrans, projData.projectionTransition);
+                    } else if (matrix) {
+                        const scaledMatrix = new Float32Array(matrix);
+                        scaledMatrix[0] *= scaleX;
+                        scaledMatrix[5] *= scaleY;
+                        const locMat = gl.getUniformLocation(program, 'u_matrix');
+                        if (locMat) gl.uniformMatrix4fv(locMat, false, scaledMatrix);
                     }
 
                     gl.activeTexture(gl.TEXTURE0);
