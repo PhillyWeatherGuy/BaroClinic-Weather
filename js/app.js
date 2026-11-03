@@ -5,7 +5,7 @@ import { getViewerPreferences } from './core/viewerPreferences.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
-import { createEnsembleOverlayShader } from './shaders/ensembleShader.js'; // 🌟 NEW IMPORT
+import { createEnsembleOverlayShader } from './shaders/ensembleShader.js';
 import { initHubTransition } from './components/homeScreen.js';
 import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
 import { 
@@ -37,8 +37,8 @@ import { getPaletteForParameter as getLightPalette } from './config/palettes.js'
 import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.js';
 
 let customShaderLayer = null;
-let ensembleOverlayShader = null; // 🌟 Holds the new overlay
-let capturedMatrix = null;        // 🌟 Holds the matrix from MapLibre
+let ensembleOverlayShader = null; 
+let capturedMatrix = null;        
 
 let renderDebounceId = null;
 let activeRenderId = 0;
@@ -57,10 +57,16 @@ const map = new maplibregl.Map({
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
     keyboard: false,
-    preserveDrawingBuffer: true // 🌟 Needed for the 2D basemap copy
+    preserveDrawingBuffer: true 
 });
 
-// 🌟 Ensure the overlay canvas exists (creates it dynamically if missing from HTML)
+// 🌟 FORCE ENABLE MAP INTERACTIONS
+map.dragPan.enable();
+map.scrollZoom.enable();
+map.dragRotate.enable();
+map.touchZoomRotate.enable();
+
+// 🌟 Ensure the overlay canvas exists
 let overlayCanvas = document.getElementById('ensemble-overlay-canvas');
 if (!overlayCanvas) {
     overlayCanvas = document.createElement('canvas');
@@ -200,12 +206,15 @@ function syncEnsembleGrid() {
     
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
+    
+    // 🌟 FORCE CLICKS TO PASS THROUGH THE GRID
+    grid.style.pointerEvents = 'none';
     overlayCanvas.style.display = shouldShow ? 'block' : 'none';
+    overlayCanvas.style.pointerEvents = 'none';
     
     isDrawingEnsemble = shouldShow;
     
     if (shouldShow) {
-        // Add the matrix capture layer when we enter ensemble mode
         if (!map.getLayer('matrix-capture-layer')) {
             map.addLayer(matrixCaptureLayer);
         }
@@ -234,7 +243,8 @@ function drawEnsembleBoxes() {
             canvas.style.height = '100%';
             canvas.style.display = 'block';
             canvas.style.borderRadius = '6px';
-            canvas.style.pointerEvents = 'none'; // 🌟 FIX: Allow click-through for map zooming
+            // 🌟 FORCE CLICKS TO PASS THROUGH THE MINI-CANVASES
+            canvas.style.pointerEvents = 'none'; 
             card.appendChild(canvas);
         }
 
