@@ -212,7 +212,14 @@ function syncEnsembleGrid() {
     isDrawingEnsemble = shouldShow;
     
     if (shouldShow) {
+        // 🌟 Disable MapLibre default controls so they don't fight our custom grid controls
+        map.dragPan.disable();
+        map.scrollZoom.disable();
         setTimeout(drawEnsembleBoxes, 100);
+    } else {
+        // 🌟 Re-enable them when switching back to normal models
+        map.dragPan.enable();
+        map.scrollZoom.enable();
     }
 }
 
@@ -949,7 +956,7 @@ if (ensembleGrid) {
         activeCard = e.target.closest('.map-card');
         if (!activeCard) return;
         
-        // Stop MapLibre from panning the hidden map underneath
+        // 🌟 Stop MapLibre from panning the hidden map underneath
         e.stopPropagation(); 
         
         isDragging = true;
@@ -968,23 +975,26 @@ if (ensembleGrid) {
         lastX = e.clientX;
         lastY = e.clientY;
 
-        // Calculate how much the box is cropped so the drag speed matches the zoom level
-        const mapCanvas = map.getCanvas();
+        // 🌟 Use clientWidth/clientHeight (CSS pixels) for math, NOT mapCanvas.width (physical pixels)
+        const container = map.getContainer();
+        const cWidth = container.clientWidth;
+        const cHeight = container.clientHeight;
         const rect = activeCard.getBoundingClientRect();
-        const srcAspect = mapCanvas.width / mapCanvas.height;
+        
+        const srcAspect = cWidth / cHeight;
         const dstAspect = rect.width / rect.height;
         
-        let sWidth = mapCanvas.width;
-        let sHeight = mapCanvas.height;
+        let sWidth = cWidth;
+        let sHeight = cHeight;
         
         if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
+            sWidth = cHeight * dstAspect;
         } else {
-            sHeight = mapCanvas.width / dstAspect;
+            sHeight = cWidth / dstAspect;
         }
 
-        const scaleX = mapCanvas.width / sWidth;
-        const scaleY = mapCanvas.height / sHeight;
+        const scaleX = cWidth / sWidth;
+        const scaleY = cHeight / sHeight;
 
         // Instantly pan the main map by the adjusted amount
         map.panBy([-dx * scaleX, -dy * scaleY], { duration: 0 });
@@ -1012,7 +1022,10 @@ if (ensembleGrid) {
         const card = e.target.closest('.map-card');
         if (!card) return;
 
-        const mapCanvas = map.getCanvas();
+        // 🌟 Use clientWidth/clientHeight (CSS pixels) for math
+        const container = map.getContainer();
+        const cWidth = container.clientWidth;
+        const cHeight = container.clientHeight;
         const rect = card.getBoundingClientRect();
 
         // 1. Find where the mouse is inside the specific card (0 to 1)
@@ -1020,19 +1033,19 @@ if (ensembleGrid) {
         const relY = (e.clientY - rect.top) / rect.height;
 
         // 2. Re-calculate the crop bounds for this card
-        const srcAspect = mapCanvas.width / mapCanvas.height;
+        const srcAspect = cWidth / cHeight;
         const dstAspect = rect.width / rect.height;
-        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+        let sx = 0, sy = 0, sWidth = cWidth, sHeight = cHeight;
 
         if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
-            sx = (mapCanvas.width - sWidth) / 2;
+            sWidth = cHeight * dstAspect;
+            sx = (cWidth - sWidth) / 2;
         } else {
-            sHeight = mapCanvas.width / dstAspect;
-            sy = (mapCanvas.height - sHeight) / 2;
+            sHeight = cWidth / dstAspect;
+            sy = (cHeight - sHeight) / 2;
         }
 
-        // 3. Map the mouse position to the ORIGINAL uncropped map pixel
+        // 3. Map the mouse position to the ORIGINAL uncropped map pixel (in CSS pixels)
         const mapX = sx + (relX * sWidth);
         const mapY = sy + (relY * sHeight);
 
@@ -1041,6 +1054,7 @@ if (ensembleGrid) {
         
         // 5. Zoom around that exact coordinate!
         const deltaZoom = e.deltaY > 0 ? -0.5 : 0.5;
+        
         map.easeTo({
             zoom: Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), map.getZoom() + deltaZoom)),
             around: lngLat,
