@@ -369,11 +369,8 @@ export function createEnsembleShaderLayer(mapInstance) {
 
             const cards = document.querySelectorAll('.map-card');
             const dpr = window.devicePixelRatio || 1;
+            const canvasWidth = gl.canvas.width;
             const canvasHeight = gl.canvas.height;
-
-            // 🌟 Ensure the viewport is full screen before using scissor
-            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-            gl.enable(gl.SCISSOR_TEST);
 
             if (cards.length === 10) {
                 cards.forEach((card, index) => {
@@ -385,8 +382,25 @@ export function createEnsembleShaderLayer(mapInstance) {
                     const w = rect.width * dpr;
                     const h = rect.height * dpr;
 
-                    // 🌟 Use scissor to crop the drawing exactly to the box
-                    gl.scissor(x, y, w, h);
+                    gl.viewport(x, y, w, h);
+
+                    // 🌟 FIX: Calculate exact aspect ratio scale so the weather data fits the box perfectly
+                    const dstAspect = w / h;
+                    const srcAspect = canvasWidth / canvasHeight;
+                    let scaleX = 1.0, scaleY = 1.0;
+                    
+                    if (srcAspect > dstAspect) {
+                        scaleX = srcAspect / dstAspect; 
+                    } else {
+                        scaleY = dstAspect / srcAspect;
+                    }
+
+                    if (matrix) {
+                        const scaledMatrix = new Float32Array(matrix);
+                        scaledMatrix[0] *= scaleX;
+                        scaledMatrix[5] *= scaleY;
+                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_matrix'), false, scaledMatrix);
+                    }
 
                     gl.activeTexture(gl.TEXTURE0);
                     gl.bindTexture(gl.TEXTURE_2D, this.activeTextures[index]);
@@ -396,7 +410,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 });
             }
 
-            gl.disable(gl.SCISSOR_TEST);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
         }
     };
 }
