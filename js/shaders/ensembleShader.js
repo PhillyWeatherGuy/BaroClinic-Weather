@@ -370,7 +370,10 @@ export function createEnsembleShaderLayer(mapInstance) {
             const cards = document.querySelectorAll('.map-card');
             const dpr = window.devicePixelRatio || 1;
             const canvasHeight = gl.canvas.height;
-            const canvasWidth = gl.canvas.width;
+
+            // 🌟 Ensure the viewport is full screen before using scissor
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.enable(gl.SCISSOR_TEST);
 
             if (cards.length === 10) {
                 cards.forEach((card, index) => {
@@ -382,19 +385,8 @@ export function createEnsembleShaderLayer(mapInstance) {
                     const w = rect.width * dpr;
                     const h = rect.height * dpr;
 
-                    gl.viewport(x, y, w, h);
-
-                    // 🌟 FIX: Scale the projection matrix to fit the viewport aspect ratio
-                    const scaleX = w / canvasWidth;
-                    const scaleY = h / canvasHeight;
-                    const scale = Math.max(scaleX, scaleY);
-                    
-                    if (matrix) {
-                        const scaledMatrix = new Float32Array(matrix);
-                        scaledMatrix[0] *= scale;
-                        scaledMatrix[5] *= scale;
-                        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_matrix'), false, scaledMatrix);
-                    }
+                    // 🌟 Use scissor to crop the drawing exactly to the box
+                    gl.scissor(x, y, w, h);
 
                     gl.activeTexture(gl.TEXTURE0);
                     gl.bindTexture(gl.TEXTURE_2D, this.activeTextures[index]);
@@ -404,7 +396,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 });
             }
 
-            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.disable(gl.SCISSOR_TEST);
         }
     };
 }
