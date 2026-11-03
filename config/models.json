@@ -98,6 +98,15 @@
         "t400"
       ]
     },
+    "aifs_ens": {
+      "id": "aifs_ens",
+      "name": "EC-AIFS-ENS",
+      "category": "Global",
+      "resolution": "28km",
+      "supported_params": [
+        "2t"
+      ]
+    },
     "hrrr": {
       "id": "hrrr",
       "name": "HRRR",
