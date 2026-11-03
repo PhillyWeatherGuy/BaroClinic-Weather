@@ -212,14 +212,7 @@ function syncEnsembleGrid() {
     isDrawingEnsemble = shouldShow;
     
     if (shouldShow) {
-        // 🌟 Disable MapLibre default controls so they don't fight our custom grid controls
-        map.dragPan.disable();
-        map.scrollZoom.disable();
         setTimeout(drawEnsembleBoxes, 100);
-    } else {
-        // 🌟 Re-enable them when switching back to normal models
-        map.dragPan.enable();
-        map.scrollZoom.enable();
     }
 }
 
@@ -245,6 +238,7 @@ function drawEnsembleBoxes() {
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
+        // 🌟 FIX: Multiply by devicePixelRatio to make the canvas Retina-sharp
         const dpr = window.devicePixelRatio || 1;
         const width = Math.floor(rect.width * dpr);
         const height = Math.floor(rect.height * dpr);
@@ -257,6 +251,7 @@ function drawEnsembleBoxes() {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // 🌟 ASPECT RATIO MATH (Simulate object-fit: cover)
         const srcAspect = mapCanvas.width / mapCanvas.height;
         const dstAspect = canvas.width / canvas.height;
         
@@ -273,8 +268,8 @@ function drawEnsembleBoxes() {
         try {
             ctx.drawImage(
                 mapCanvas, 
-                sx, sy, sWidth, sHeight, 
-                0, 0, canvas.width, canvas.height 
+                sx, sy, sWidth, sHeight, // Source: Center-cropped map
+                0, 0, canvas.width, canvas.height // Destination: The box
             );
         } catch (err) {}
     });
@@ -316,7 +311,7 @@ export function updateBasemapStyle(styleUrl) {
     };
 
     map.once('style.load', onStyleReady);
-    setTimeout(onStyleReady, 2000);
+    setTimeout(onStyleReady, 2000); // Fail-safe
     map.setStyle(styleUrl);
 }
 
@@ -942,123 +937,3 @@ map.on('click', (e) => {
          .setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`)
          .addTo(map);
 });
-
-// 🌟 CUSTOM INTERACTION HANDLING FOR ENSEMBLE GRID
-const ensembleGrid = document.getElementById('ensemble-grid');
-if (ensembleGrid) {
-    let isDragging = false;
-    let lastX = 0;
-    let lastY = 0;
-    let activeCard = null;
-
-    ensembleGrid.addEventListener('pointerdown', (e) => {
-        if (!isDrawingEnsemble) return;
-        activeCard = e.target.closest('.map-card');
-        if (!activeCard) return;
-        
-        // 🌟 Stop MapLibre from panning the hidden map underneath
-        e.stopPropagation(); 
-        
-        isDragging = true;
-        lastX = e.clientX;
-        lastY = e.clientY;
-        
-        // Capture the pointer so dragging works even if you move fast
-        ensembleGrid.setPointerCapture(e.pointerId);
-    });
-
-    ensembleGrid.addEventListener('pointermove', (e) => {
-        if (!isDrawingEnsemble || !isDragging || !activeCard) return;
-        
-        const dx = e.clientX - lastX;
-        const dy = e.clientY - lastY;
-        lastX = e.clientX;
-        lastY = e.clientY;
-
-        // 🌟 Use clientWidth/clientHeight (CSS pixels) for math, NOT mapCanvas.width (physical pixels)
-        const container = map.getContainer();
-        const cWidth = container.clientWidth;
-        const cHeight = container.clientHeight;
-        const rect = activeCard.getBoundingClientRect();
-        
-        const srcAspect = cWidth / cHeight;
-        const dstAspect = rect.width / rect.height;
-        
-        let sWidth = cWidth;
-        let sHeight = cHeight;
-        
-        if (srcAspect > dstAspect) {
-            sWidth = cHeight * dstAspect;
-        } else {
-            sHeight = cWidth / dstAspect;
-        }
-
-        const scaleX = cWidth / sWidth;
-        const scaleY = cHeight / sHeight;
-
-        // Instantly pan the main map by the adjusted amount
-        map.panBy([-dx * scaleX, -dy * scaleY], { duration: 0 });
-    });
-
-    const stopDragging = (e) => {
-        isDragging = false;
-        activeCard = null;
-        if (ensembleGrid.hasPointerCapture(e.pointerId)) {
-            ensembleGrid.releasePointerCapture(e.pointerId);
-        }
-    };
-
-    ensembleGrid.addEventListener('pointerup', stopDragging);
-    ensembleGrid.addEventListener('pointercancel', stopDragging);
-    ensembleGrid.addEventListener('pointerleave', stopDragging);
-
-    ensembleGrid.addEventListener('wheel', (e) => {
-        if (!isDrawingEnsemble) return;
-        
-        // Stop the page from scrolling
-        e.preventDefault();
-        e.stopPropagation();
-
-        const card = e.target.closest('.map-card');
-        if (!card) return;
-
-        // 🌟 Use clientWidth/clientHeight (CSS pixels) for math
-        const container = map.getContainer();
-        const cWidth = container.clientWidth;
-        const cHeight = container.clientHeight;
-        const rect = card.getBoundingClientRect();
-
-        // 1. Find where the mouse is inside the specific card (0 to 1)
-        const relX = (e.clientX - rect.left) / rect.width;
-        const relY = (e.clientY - rect.top) / rect.height;
-
-        // 2. Re-calculate the crop bounds for this card
-        const srcAspect = cWidth / cHeight;
-        const dstAspect = rect.width / rect.height;
-        let sx = 0, sy = 0, sWidth = cWidth, sHeight = cHeight;
-
-        if (srcAspect > dstAspect) {
-            sWidth = cHeight * dstAspect;
-            sx = (cWidth - sWidth) / 2;
-        } else {
-            sHeight = cWidth / dstAspect;
-            sy = (cHeight - sHeight) / 2;
-        }
-
-        // 3. Map the mouse position to the ORIGINAL uncropped map pixel (in CSS pixels)
-        const mapX = sx + (relX * sWidth);
-        const mapY = sy + (relY * sHeight);
-
-        // 4. Convert that pixel to a real coordinate
-        const lngLat = map.unproject([mapX, mapY]);
-        
-        // 5. Zoom around that exact coordinate!
-        const deltaZoom = e.deltaY > 0 ? -0.5 : 0.5;
-        
-        map.easeTo({
-            zoom: Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), map.getZoom() + deltaZoom)),
-            around: lngLat,
-            duration: 150
-        });
-    }, { passive: false });
-}
