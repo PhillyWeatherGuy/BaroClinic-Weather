@@ -5,6 +5,7 @@ import { getViewerPreferences } from './core/viewerPreferences.js';
 import { createScalarShaderLayer } from './shaders/scalarShader.js';
 import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
+import { createEnsembleShaderLayer } from './shaders/ensembleShader.js'; // 🌟 NEW IMPORT
 import { initHubTransition } from './components/homeScreen.js';
 import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
 import { 
@@ -41,9 +42,8 @@ let customShaderLayer = null;
 let renderDebounceId = null;
 let activeRenderId = 0;
 let polarMapLoaded = false;
-let isFirstLoad = true; // 🌟 Forces default model/param on initial site load
+let isFirstLoad = true;
 
-// 🌟 Dedicated Atmosphere Canvas (Placed BEHIND MapLibre canvas for draw-order occlusion)
 let haloCanvas = null;
 let haloCtx = null;
 
@@ -56,13 +56,10 @@ const map = new maplibregl.Map({
     style: './config/style_default.json',
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
-    keyboard: false,
-    preserveDrawingBuffer: true // 🌟 Required for real-time canvas copying
+    keyboard: false
+    // 🌟 Removed preserveDrawingBuffer: true (No longer needed)
 });
 
-/**
- * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
- */
 function getGlobeScreenCircle(matrix, w, h) {
     if (!matrix) return null;
 
@@ -145,7 +142,6 @@ function initAtmosphereHaloCanvas() {
     haloCanvas.style.width = '100%';
     haloCanvas.style.height = '100%';
     haloCanvas.style.pointerEvents = 'none';
-    
     haloCanvas.style.zIndex = '0';
     haloCanvas.style.display = 'none';
 
@@ -199,85 +195,15 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ENSEMBLE GRID TOGGLE & REAL-TIME CANVAS COPY
-let isDrawingEnsemble = false;
-
+// 🌟 ENSEMBLE GRID TOGGLE
 function syncEnsembleGrid() {
     const grid = document.getElementById('ensemble-grid');
     if (!grid) return;
     
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
-    
-    isDrawingEnsemble = shouldShow;
-    
-    if (shouldShow) {
-        setTimeout(drawEnsembleBoxes, 100);
-    }
 }
 
-function drawEnsembleBoxes() {
-    if (!isDrawingEnsemble) return;
-
-    const mapCanvas = map.getCanvas();
-    if (!mapCanvas) return;
-
-    const cards = document.querySelectorAll('.map-card');
-    
-    cards.forEach((card) => {
-        let canvas = card.querySelector('canvas');
-        if (!canvas) {
-            canvas = document.createElement('canvas');
-            canvas.style.width = '100%';
-            canvas.style.height = '100%';
-            canvas.style.display = 'block';
-            canvas.style.borderRadius = '6px';
-            card.appendChild(canvas);
-        }
-
-        const rect = card.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
-
-        // 🌟 FIX: Multiply by devicePixelRatio to make the canvas Retina-sharp
-        const dpr = window.devicePixelRatio || 1;
-        const width = Math.floor(rect.width * dpr);
-        const height = Math.floor(rect.height * dpr);
-
-        if (canvas.width !== width || canvas.height !== height) {
-            canvas.width = width;
-            canvas.height = height;
-        }
-
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // 🌟 ASPECT RATIO MATH (Simulate object-fit: cover)
-        const srcAspect = mapCanvas.width / mapCanvas.height;
-        const dstAspect = canvas.width / canvas.height;
-        
-        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
-
-        if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
-            sx = (mapCanvas.width - sWidth) / 2;
-        } else {
-            sHeight = mapCanvas.width / dstAspect;
-            sy = (mapCanvas.height - sHeight) / 2;
-        }
-
-        try {
-            ctx.drawImage(
-                mapCanvas, 
-                sx, sy, sWidth, sHeight, // Source: Center-cropped map
-                0, 0, canvas.width, canvas.height // Destination: The box
-            );
-        } catch (err) {}
-    });
-}
-
-/**
- * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
- */
 export function updateBasemapStyle(styleUrl) {
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
@@ -311,13 +237,10 @@ export function updateBasemapStyle(styleUrl) {
     };
 
     map.once('style.load', onStyleReady);
-    setTimeout(onStyleReady, 2000); // Fail-safe
+    setTimeout(onStyleReady, 2000);
     map.setStyle(styleUrl);
 }
 
-/**
- * 🌟 ZERO-RELOAD RADAR THEME SWITCHER
- */
 function applyRadarTheme(theme) {
     if (!map || !map.isStyleLoaded()) return;
     const isDark = (theme === 'dark');
@@ -336,24 +259,16 @@ function applyRadarTheme(theme) {
 
     const outlineColor = isDark ? '#ffffff' : '#000000';
     const outlineLayers = [
-        'coastline_far',
-        'water_outline',
-        'boundary_county',
-        'boundary_state',
-        'boundary_country_z0-4',
-        'boundary_country_z5-'
+        'coastline_far', 'water_outline', 'boundary_county',
+        'boundary_state', 'boundary_country_z0-4', 'boundary_country_z5-'
     ];
     outlineLayers.forEach(id => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'line-color', outlineColor);
-        }
+        if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', outlineColor);
     });
 
     const fillLayers = ['landuse_residential', 'landcover_wood', 'landcover_ice_shelf', 'landcover_glacier', 'building', 'aeroway-area', 'road_area_pier'];
     fillLayers.forEach(id => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
-        }
+        if (map.getLayer(id)) map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
     });
     if (map.getLayer('landuse_park')) {
         map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : '#EDEDED');
@@ -387,9 +302,6 @@ function applyRadarTheme(theme) {
     });
 }
 
-/**
- * 🌟 NATIVE PROJECTION / VIEW SWITCHER
- */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
 
@@ -449,9 +361,6 @@ export function applyView(targetView) {
     }
 }
 
-/**
- * 🌟 CURSOR-CENTERED KEYBOARD ZOOM HANDLER
- */
 export function handleKeyboardZoom(direction, x, y) {
     const activeView = stateManager.activeView || '2d';
 
@@ -470,9 +379,6 @@ export function handleKeyboardZoom(direction, x, y) {
     }
 }
 
-/**
- * 🌟 DYNAMIC THEME APPLIER
- */
 export async function applyTheme(theme) {
     if (stateManager.activeMode === 'radar') {
         applyRadarTheme(theme);
@@ -517,6 +423,7 @@ export async function applyTheme(theme) {
         try { updatePolarPalette(newPalette); } catch (e) {}
     }
 }
+
 export function initLayer(shaderType = null) {
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
@@ -528,7 +435,10 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
+    // 🌟 USE THE NEW ENSEMBLE SHADER
+    if (stateManager.activeModel === 'aifs_ens') {
+        customShaderLayer = createEnsembleShaderLayer(map);
+    } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
         customShaderLayer = createPrecipTypeShaderLayer(map);
@@ -537,6 +447,7 @@ export function initLayer(shaderType = null) {
     } else {
         customShaderLayer = createScalarShaderLayer(map);
     }
+    
     setShaderLayerReference(customShaderLayer);
     
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
@@ -917,12 +828,6 @@ map.on('load', async () => {
     setBasemapLabelsVisibility(map, false);
     initAtmosphereHaloCanvas();
     try { initVectorContours(map); } catch (err) {}
-});
-
-map.on('render', () => {
-    if (isDrawingEnsemble) {
-        drawEnsembleBoxes();
-    }
 });
 
 map.on('click', (e) => {
