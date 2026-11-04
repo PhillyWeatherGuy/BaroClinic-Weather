@@ -119,104 +119,151 @@ function createPaletteTexture(gl, paletteHexArray) {
     return paletteTex;
 }
 
-function cropMatrix(m, sx, sy) {
-    const out = new Float32Array(m);
-    for (const i of [0, 4, 8, 12]) out[i] *= sx;
-    for (const i of [1, 5, 9, 13]) out[i] *= sy;
-    return out;
-}
+export function createEnsembleShaderLayer(mapInstance) {
+    const layer = {
+        // Same id as the other shaders so initLayer()/unloadActiveViewer() remove it correctly
+        id: 'weather-gpu-shader',
+        type: 'custom',
+        chunkTextures: {},
+        activeTextures: null,
+        paletteTex: null,
+        texResolution: [2880.0, 1442.0],
+        program: null,
+        uLoc: null,
+        vertexCount: 0,
+        lastMatrix: null,
+        canvas: null,
+        gl: null,
 
-export function createEnsembleOverlayShader(canvas) {
-    const gl = canvas.getContext('webgl2', { alpha: true, antialias: true, preserveDrawingBuffer: false });
-    if (!gl) return null;
+        // 🌟 Weather is drawn on its OWN canvas + GL context, stacked above the card canvases.
+        // MapLibre's canvas stays a clean basemap, so the cards never copy weather into themselves.
+        initOverlay: function() {
+            const canvas = document.createElement('canvas');
+            canvas.id = 'ensemble-weather-overlay';
+            canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
+            const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
+            if (!gl) {
+                console.warn('[Ensemble] WebGL2 unavailable for overlay canvas');
+                return;
+            }
+            this.canvas = canvas;
+            this.gl = gl;
+            (document.getElementById('ensemble-grid') || document.body).appendChild(canvas);
 
-    const gridData = createSubdividedGrid(-1.0, 2.0, 96, 48);
-    const vertexCount = gridData.length / 4;
-    const vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, gridData, gl.STATIC_DRAW);
+            const gridData = createSubdividedGrid(-1.0, 2.0, 96, 48);
+            this.vertexCount = gridData.length / 4;
+            this.vertexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, gridData, gl.STATIC_DRAW);
 
-    const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-    let paletteTex = createPaletteTexture(gl, paletteFunc(stateManager.activeParam || 'tp'));
+            const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+            this.paletteTex = createPaletteTexture(gl, paletteFunc(stateManager.activeParam || 'tp'));
+        },
 
-    const chunkTextures = {};
-    let activeTextures = null;
-    let texResolution = [2880.0, 1442.0];
+        clearTextures: function() {
+            if (!this.gl) return;
+            for (const key in this.chunkTextures) {
+                if (Array.isArray(this.chunkTextures[key])) {
+                    this.chunkTextures[key].forEach(tex => this.gl.deleteTexture(tex));
+                } else if (this.chunkTextures[key]) {
+                    this.gl.deleteTexture(this.chunkTextures[key]);
+                }
+            }
+            this.chunkTextures = {};
+            this.activeTextures = null;
+        },
 
-    const vsSource = `
-    attribute vec2 a_pos;
-    attribute vec2 a_uv;
-    varying vec2 v_uv;
-    uniform mat4 u_matrix;
-    void main() {
-        v_uv = a_uv;
-        if (a_pos.y < -5.0 || a_pos.y > 5.0) {
-            gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
-        } else {
-            gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
-        }
-    }`;
-    
-    const fsSource = `
-    precision highp float;
-    varying vec2 v_uv;
-    uniform sampler2D u_dataTexture;
-    uniform sampler2D u_paletteTexture;
-    uniform vec2 u_texResolution;
-    ${fragmentShaderBody.replace(/texture\(/g, 'texture2D(')}
-    void main() {
-        vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
-        float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
-        if (rawVal < 0.00001) discard;
-        float palU = (clamp(rawVal * 255.0, 0.0, 255.0) + 0.5) / 256.0;
-        vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
-        if (color.a == 0.0) discard;
-        gl_FragColor = vec4(color.rgb, color.a);
-    }`;
-
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs, vsSource);
-    gl.compileShader(vs);
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs, fsSource);
-    gl.compileShader(fs);
-    const program = gl.createProgram();
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-
-    const aPos = gl.getAttribLocation(program, 'a_pos');
-    const aUv = gl.getAttribLocation(program, 'a_uv');
-    const uMatrix = gl.getUniformLocation(program, 'u_matrix');
-    const uDataTexture = gl.getUniformLocation(program, 'u_dataTexture');
-    const uPaletteTexture = gl.getUniformLocation(program, 'u_paletteTexture');
-    const uTexResolution = gl.getUniformLocation(program, 'u_texResolution');
-
-    return {
         updatePalette: function(paramIdOrHexArray) {
+            if (!this.gl) return;
             let hexArray;
             if (Array.isArray(paramIdOrHexArray)) {
                 hexArray = paramIdOrHexArray;
             } else {
-                const paletteFn = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-                hexArray = paletteFn(paramIdOrHexArray || stateManager.activeParam || 'tp');
+                const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
+                hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam || 'tp');
             }
-            if (paletteTex) gl.deleteTexture(paletteTex);
-            paletteTex = createPaletteTexture(gl, hexArray);
+
+            if (this.paletteTex) {
+                this.gl.deleteTexture(this.paletteTex);
+            }
+            this.paletteTex = createPaletteTexture(this.gl, hexArray);
+            mapInstance.triggerRepaint();
         },
 
-        clearTextures: function() {
-            for (const key in chunkTextures) {
-                if (Array.isArray(chunkTextures[key])) {
-                    chunkTextures[key].forEach(tex => gl.deleteTexture(tex));
-                }
+        // MapLibre's GL context is intentionally unused
+        onAdd: function () {},
+
+        onRemove: function () {
+            if (this.canvas && this.canvas.parentNode) {
+                this.canvas.parentNode.removeChild(this.canvas);
             }
-            Object.keys(chunkTextures).forEach(k => delete chunkTextures[k]);
-            activeTextures = null;
+        },
+
+        getProgram: function(gl) {
+            if (this.program) return this.program;
+
+            // Mercator only: the overlay has its own context, so MapLibre's projection prelude isn't available
+            const vsSource = `#version 300 es
+            in vec2 a_pos;
+            in vec2 a_uv;
+            out vec2 v_uv;
+            uniform mat4 u_matrix;
+            void main() {
+                v_uv = a_uv;
+                if (a_pos.y < -5.0 || a_pos.y > 5.0) {
+                    gl_Position = vec4(0.0, 0.0, -2.0, 0.0);
+                } else {
+                    gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
+                }
+            }`;
+            const fsSource = `#version 300 es
+            precision highp float;
+            in vec2 v_uv;
+            out vec4 fragColor;
+            uniform sampler2D u_dataTexture;
+            uniform sampler2D u_paletteTexture;
+            uniform vec2 u_texResolution;
+            ${fragmentShaderBody}
+            void main() {
+                vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
+                float rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
+                if (rawVal < 0.00001) discard;
+                float palU = (clamp(rawVal * 255.0, 0.0, 255.0) + 0.5) / 256.0;
+                vec4 color = texture(u_paletteTexture, vec2(palU, 0.5));
+                if (color.a == 0.0) discard;
+                fragColor = vec4(color.rgb * color.a, color.a); // premultiplied for the overlay canvas
+            }`;
+
+            const vs = gl.createShader(gl.VERTEX_SHADER);
+            gl.shaderSource(vs, vsSource);
+            gl.compileShader(vs);
+            const fs = gl.createShader(gl.FRAGMENT_SHADER);
+            gl.shaderSource(fs, fsSource);
+            gl.compileShader(fs);
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                console.error('[Ensemble] shader error:', gl.getShaderInfoLog(vs), gl.getShaderInfoLog(fs), gl.getProgramInfoLog(prog));
+                return null;
+            }
+            this.uLoc = {
+                matrix: gl.getUniformLocation(prog, 'u_matrix'),
+                data: gl.getUniformLocation(prog, 'u_dataTexture'),
+                palette: gl.getUniformLocation(prog, 'u_paletteTexture'),
+                res: gl.getUniformLocation(prog, 'u_texResolution'),
+                aPos: gl.getAttribLocation(prog, 'a_pos'),
+                aUv: gl.getAttribLocation(prog, 'a_uv')
+            };
+            this.program = prog;
+            return prog;
         },
 
         preloadChunkTexture: function(chunkIndex, source) {
-            if (!source) return;
+            if (!this.gl || !source) return;
+            const gl = this.gl;
+
             const uploadSingle = (img) => {
                 const tex = gl.createTexture();
                 gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -230,91 +277,114 @@ export function createEnsembleOverlayShader(canvas) {
             };
 
             if (source.frames && Array.isArray(source.frames)) {
-                if (source.width && source.height) texResolution = [source.width, source.height];
+                if (source.width && source.height) {
+                    this.texResolution = [source.width, source.height];
+                }
+
                 source.frames.forEach((memberBitmaps, fIdx) => {
                     const key = `${chunkIndex}_${fIdx}`;
-                    if (memberBitmaps && Array.isArray(memberBitmaps) && !chunkTextures[key]) {
-                        chunkTextures[key] = memberBitmaps.map(bmp => uploadSingle(bmp));
+                    if (memberBitmaps && Array.isArray(memberBitmaps) && !this.chunkTextures[key]) {
+                        this.chunkTextures[key] = memberBitmaps.map(bmp => uploadSingle(bmp));
                     }
                 });
             }
         },
 
         updateFrame: function (frameState) {
-            if (!frameState) return;
+            if (!this.gl || !frameState) return;
             const cIdx = frameState.chunkIndex;
             const fIdx = frameState.frameIndex !== undefined ? frameState.frameIndex : (frameState.col || 0);
-            activeTextures = chunkTextures[`${cIdx}_${fIdx}`];
+
+            this.activeTextures = this.chunkTextures[`${cIdx}_${fIdx}`];
+            mapInstance.triggerRepaint();
         },
 
-        render: function (matrix) {
+        // MapLibre calls this every frame: just record the camera matrix, then draw on our own canvas
+        render: function (mapGl, matrixOrArgs) {
+            const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
+            const projData = isV5 ? matrixOrArgs.defaultProjectionData : null;
+            this.lastMatrix = isV5 ? (matrixOrArgs.modelViewProjectionMatrix || projData?.mainMatrix) : matrixOrArgs;
+            this.draw();
+        },
+
+        draw: function () {
+            const gl = this.gl;
+            if (!gl) return;
+
             const dpr = window.devicePixelRatio || 1;
-            const w = window.innerWidth;
-            const h = window.innerHeight;
-            if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-                canvas.width = w * dpr;
-                canvas.height = h * dpr;
+            const W = Math.round(window.innerWidth * dpr);
+            const H = Math.round(window.innerHeight * dpr);
+            if (this.canvas.width !== W || this.canvas.height !== H) {
+                this.canvas.width = W;
+                this.canvas.height = H;
             }
 
-            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.viewport(0, 0, W, H);
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
 
-            if (!activeTextures || activeTextures.length !== 10 || !matrix) return;
-
-            gl.useProgram(program);
-            gl.disable(gl.DEPTH_TEST);
-            gl.enable(gl.BLEND);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-            gl.uniform2f(uTexResolution, texResolution[0], texResolution[1]);
-            
-            gl.activeTexture(gl.TEXTURE1);
-            gl.bindTexture(gl.TEXTURE_2D, paletteTex);
-            gl.uniform1i(uPaletteTexture, 1);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-            gl.enableVertexAttribArray(aPos);
-            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
-            if (aUv !== -1) {
-                gl.enableVertexAttribArray(aUv);
-                gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
-            }
+            // Globe isn't supported on the overlay (needs the globe projection in our own shader)
+            if (!this.activeTextures || this.activeTextures.length !== 10 || !this.lastMatrix) return;
+            if (stateManager.activeView === '3d') return;
 
             const cards = document.querySelectorAll('.map-card');
-            
-            if (cards.length === 10) {
-                cards.forEach((card, index) => {
-                    const rect = card.getBoundingClientRect();
-                    if (rect.width === 0 || rect.height === 0) return;
+            if (cards.length !== 10) return;
 
-                    const x = rect.left * dpr;
-                    const y = (canvas.height - rect.bottom * dpr);
-                    const cw = rect.width * dpr;
-                    const ch = rect.height * dpr;
+            const program = this.getProgram(gl);
+            if (!program) return;
 
-                    gl.viewport(x, y, cw, ch);
+            gl.useProgram(program);
 
-                    const dstAspect = cw / ch;
-                    const srcAspect = canvas.width / canvas.height;
-                    let scaleX = 1.0, scaleY = 1.0;
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
+            gl.uniform1i(this.uLoc.palette, 1);
+            gl.uniform2f(this.uLoc.res, this.texResolution[0], this.texResolution[1]);
+            gl.uniform1i(this.uLoc.data, 0);
 
-                    if (srcAspect > dstAspect) {
-                        scaleX = srcAspect / dstAspect;
-                    } else {
-                        scaleY = dstAspect / srcAspect;
-                    }
-
-                    const scaledMatrix = cropMatrix(matrix, scaleX, scaleY);
-                    gl.uniformMatrix4fv(uMatrix, false, scaledMatrix);
-
-                    gl.activeTexture(gl.TEXTURE0);
-                    gl.bindTexture(gl.TEXTURE_2D, activeTextures[index]);
-                    gl.uniform1i(uDataTexture, 0);
-
-                    gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
-                });
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+            gl.enableVertexAttribArray(this.uLoc.aPos);
+            gl.vertexAttribPointer(this.uLoc.aPos, 2, gl.FLOAT, false, 16, 0);
+            if (this.uLoc.aUv !== -1) {
+                gl.enableVertexAttribArray(this.uLoc.aUv);
+                gl.vertexAttribPointer(this.uLoc.aUv, 2, gl.FLOAT, false, 16, 8);
             }
+
+            gl.disable(gl.DEPTH_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+            const mapCanvas = mapInstance.getCanvas();
+            const srcAspect = mapCanvas.width / mapCanvas.height;
+
+            cards.forEach((card, index) => {
+                const rect = card.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return;
+
+                const w = Math.round(rect.width * dpr);
+                const h = Math.round(rect.height * dpr);
+                gl.viewport(Math.round(rect.left * dpr), Math.round(H - rect.bottom * dpr), w, h);
+
+                // Same center-crop ("object-fit: cover") the basemap copy uses
+                const dstAspect = w / h;
+                let scaleX = 1.0, scaleY = 1.0;
+                if (srcAspect > dstAspect) scaleX = srcAspect / dstAspect;
+                else scaleY = dstAspect / srcAspect;
+
+                // Scale the whole clip-space x/y rows (incl. translation), not just the diagonal
+                const m = new Float32Array(this.lastMatrix);
+                for (const i of [0, 4, 8, 12]) m[i] *= scaleX;
+                for (const i of [1, 5, 9, 13]) m[i] *= scaleY;
+                gl.uniformMatrix4fv(this.uLoc.matrix, false, m);
+
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, this.activeTextures[index]);
+                gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
+            });
+
+            gl.viewport(0, 0, W, H);
         }
     };
+
+    layer.initOverlay();
+    return layer;
 }
