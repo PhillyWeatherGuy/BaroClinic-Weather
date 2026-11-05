@@ -7,6 +7,7 @@ import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
 import { initHubTransition } from './components/homeScreen.js';
 import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
+import { createEnsembleShaderLayer } from './shaders/ensembleShader.js'; // 🌟 Added
 import { 
     initViewerUI, 
     syncTimelineWithManifest, 
@@ -528,7 +529,10 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
+    // 🌟 ROUTE TO ENSEMBLE SHADER WHEN MODEL IS AIFS_ENS
+    if (stateManager.activeModel === 'aifs_ens') {
+        customShaderLayer = createEnsembleShaderLayer(map);
+    } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
         customShaderLayer = createPrecipTypeShaderLayer(map);
