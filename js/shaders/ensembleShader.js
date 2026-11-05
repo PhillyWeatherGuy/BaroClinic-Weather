@@ -1,5 +1,5 @@
 // js/shaders/ensembleShader.js
-import { getPaletteForParameter as getLightPalette } from '../config/palettes.js';
+import { getPaletteForParameter as getLightPalette, FRZR_PALETTE, SLEET_PALETTE, SNOW_PALETTE } from '../config/palettes.js';
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
@@ -113,14 +113,99 @@ const fragmentShaderBody = `
 
         return clamp(total, 0.0, 1.0);
     }
+
+    vec4 getPtypeColor(float code, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
+        if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
+            return texture(snowTex, vec2(palU, 0.5));
+        } else if (code == 3.0 || code == 4.0 || code == 12.0) {
+            return texture(frzrTex, vec2(palU, 0.5));
+        } else if (code == 7.0 || code == 8.0) {
+            return texture(sleetTex, vec2(palU, 0.5));
+        }
+        return texture(palTex, vec2(palU, 0.5));
+    }
+
+    vec4 sampleSmoothPtypeColor(sampler2D ptypeTex, vec2 uv, vec2 texRes, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
+        vec2 pos = uv * texRes - 0.5;
+        vec2 i = floor(pos);
+        vec2 f = fract(pos);
+        vec2 invTex = 1.0 / texRes;
+
+        // 🌟 5x5 Isotropic Gaussian Curvature Filter (sigma = 1.15)
+        const float invTwoSigmaSq = 0.378;
+
+        float wy[5];
+        for (int y = 0; y < 5; y++) {
+            float d = float(y - 2) - f.y;
+            wy[y] = exp(-d * d * invTwoSigmaSq);
+        }
+
+        float wx[5];
+        for (int x = 0; x < 5; x++) {
+            float d = float(x - 2) - f.x;
+            wx[x] = exp(-d * d * invTwoSigmaSq);
+        }
+
+        float wSnow = 0.0;
+        float wFrzr = 0.0;
+        float wSleet = 0.0;
+        float wRain = 0.0;
+
+        for (int dy = -2; dy <= 2; dy++) {
+            float yCoord = clamp((i.y + float(dy) + 0.5) * invTex.y, 0.0, 1.0);
+            float weightY = wy[dy + 2];
+
+            for (int dx = -2; dx <= 2; dx++) {
+                float xCoord = fract((i.x + float(dx) + 0.5) * invTex.x + 1.0);
+                float weight = weightY * wx[dx + 2];
+
+                // 🌟 Sample P-Type code from green channel
+                float code = floor(texture(ptypeTex, vec2(xCoord, yCoord)).g * 255.0 + 0.5);
+
+                if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
+                    wSnow += weight;
+                } else if (code == 3.0 || code == 4.0 || code == 12.0) {
+                    wFrzr += weight;
+                } else if (code == 7.0 || code == 8.0) {
+                    wSleet += weight;
+                } else if (code > 0.5) {
+                    wRain += weight;
+                }
+            }
+        }
+
+        float totalPrecip = wSnow + wFrzr + wSleet + wRain;
+        if (totalPrecip < 0.0001) {
+            return texture(palTex, vec2(palU, 0.5));
+        }
+
+        // Dominant consensus category selection
+        float maxW = max(max(wSnow, wSleet), max(wFrzr, wRain));
+
+        if (maxW == wFrzr) {
+            return texture(frzrTex, vec2(palU, 0.5));
+        } else if (maxW == wSleet) {
+            return texture(sleetTex, vec2(palU, 0.5));
+        } else if (maxW == wSnow) {
+            return texture(snowTex, vec2(palU, 0.5));
+        } else {
+            return texture(palTex, vec2(palU, 0.5));
+        }
+    }
 `;
 
-function createEnsemblePaletteTexture(gl, paletteHexArray) {
+function createEnsemblePaletteTexture(gl, paletteHexArray, transparentFirst = false) {
     const paletteTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, paletteTex);
     const paletteData = new Uint8Array(paletteHexArray.length * 4);
     
-    const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeParam?.startsWith('tp_') || stateManager.activeParam?.startsWith('asnow'));
+    const isPrecip = (
+        stateManager.activeParam === 'tp' || 
+        stateManager.activeParam?.startsWith('tp_') || 
+        stateManager.activeParam?.startsWith('asnow') || 
+        stateManager.activeParam === 'prate' ||
+        transparentFirst
+    );
 
     paletteHexArray.forEach((hex, i) => {
         if (hex === 'transparent' || !hex || (isPrecip && i === 0)) {
@@ -152,6 +237,9 @@ export function createEnsembleShaderLayer(mapInstance) {
         chunkTextures: {},
         activeTex: null,
         paletteTex: null,
+        frzrPaletteTex: null,
+        sleetPaletteTex: null,
+        snowPaletteTex: null,
         activeMember: 0,
         currentFrameState: null,
         isGridMode: false,
@@ -169,6 +257,10 @@ export function createEnsembleShaderLayer(mapInstance) {
             }
             this.chunkTextures = {};
             this.activeTex = null;
+            for (const key of ['frzrPaletteTex', 'sleetPaletteTex', 'snowPaletteTex']) {
+                if (this[key]) this.gl.deleteTexture(this[key]);
+                this[key] = null;
+            }
         },
 
         updatePalette: function(paramIdOrHexArray) {
@@ -184,7 +276,7 @@ export function createEnsembleShaderLayer(mapInstance) {
             if (this.paletteTex) {
                 this.gl.deleteTexture(this.paletteTex);
             }
-            this.paletteTex = createEnsemblePaletteTexture(this.gl, hexArray);
+            this.paletteTex = createEnsemblePaletteTexture(this.gl, hexArray, stateManager.activeParam === 'prate');
             mapInstance.triggerRepaint();
         },
         
@@ -200,7 +292,12 @@ export function createEnsembleShaderLayer(mapInstance) {
 
             const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
             const initialPalette = paletteFunc(stateManager.activeParam || '2t');
-            this.paletteTex = createEnsemblePaletteTexture(gl, initialPalette);
+            this.paletteTex = createEnsemblePaletteTexture(gl, initialPalette, stateManager.activeParam === 'prate');
+            
+            // 🌟 Initialize P-Type palettes
+            this.frzrPaletteTex = createEnsemblePaletteTexture(gl, FRZR_PALETTE, true);
+            this.sleetPaletteTex = createEnsemblePaletteTexture(gl, SLEET_PALETTE, true);
+            this.snowPaletteTex = createEnsemblePaletteTexture(gl, SNOW_PALETTE, true);
         },
 
         getProgram: function(gl, shaderData) {
@@ -260,6 +357,10 @@ export function createEnsembleShaderLayer(mapInstance) {
 
                 uniform sampler2D u_dataTexture;
                 uniform sampler2D u_paletteTexture;
+                uniform sampler2D u_frzrPalette;
+                uniform sampler2D u_sleetPalette;
+                uniform sampler2D u_snowPalette;
+                uniform float u_hasPtype;
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
                 uniform float u_isPixelated;
@@ -276,9 +377,18 @@ export function createEnsembleShaderLayer(mapInstance) {
                         rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
                     }
 
+                    if (rawVal < 0.00001) {
+                        discard;
+                    }
+
                     float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
                     float palU = (palIndex + 0.5) / 256.0;
                     vec4 color = texture(u_paletteTexture, vec2(palU, 0.5));
+
+                    // 🌟 Apply P-Type when enabled (for prate)
+                    if (u_hasPtype > 0.5) {
+                        color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
+                    }
                     
                     if (color.a == 0.0) {
                         discard;
@@ -309,6 +419,10 @@ export function createEnsembleShaderLayer(mapInstance) {
                 varying vec2 v_uv;
                 uniform sampler2D u_dataTexture;
                 uniform sampler2D u_paletteTexture;
+                uniform sampler2D u_frzrPalette;
+                uniform sampler2D u_sleetPalette;
+                uniform sampler2D u_snowPalette;
+                uniform float u_hasPtype;
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
                 uniform float u_isPixelated;
@@ -325,9 +439,18 @@ export function createEnsembleShaderLayer(mapInstance) {
                         rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
                     }
 
+                    if (rawVal < 0.00001) {
+                        discard;
+                    }
+
                     float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
                     float palU = (palIndex + 0.5) / 256.0;
                     vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
+
+                    // 🌟 Apply P-Type when enabled (for prate)
+                    if (u_hasPtype > 0.5) {
+                        color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
+                    }
                     
                     if (color.a == 0.0) {
                         discard;
@@ -467,6 +590,22 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
 
+            // 🌟 Bind P-Type Palettes
+            gl.activeTexture(gl.TEXTURE2);
+            gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 2);
+
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D, this.sleetPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_sleetPalette'), 3);
+
+            gl.activeTexture(gl.TEXTURE4);
+            gl.bindTexture(gl.TEXTURE_2D, this.snowPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
+
+            const hasPtype = (stateManager.activeParam === 'prate') ? 1.0 : 0.0;
+            gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), hasPtype);
+
             if (projData) {
                 const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
                 if (locMain) gl.uniformMatrix4fv(locMain, false, projData.mainMatrix);
@@ -557,6 +696,22 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.activeTexture(gl.TEXTURE1);
             gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
+
+            // 🌟 Bind P-Type Palettes
+            gl.activeTexture(gl.TEXTURE2);
+            gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 2);
+
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D, this.sleetPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_sleetPalette'), 3);
+
+            gl.activeTexture(gl.TEXTURE4);
+            gl.bindTexture(gl.TEXTURE_2D, this.snowPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
+
+            const hasPtype = (stateManager.activeParam === 'prate') ? 1.0 : 0.0;
+            gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), hasPtype);
 
             if (projData) {
                 const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
