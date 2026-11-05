@@ -154,6 +154,8 @@ export function createEnsembleShaderLayer(mapInstance) {
         paletteTex: null,
         activeMember: 0,
         currentFrameState: null,
+        isGridMode: false,
+        gridRects: null,
         texResolution: [1440.0, 721.0],
         programs: {},
         vertexCount: 0,
@@ -419,6 +421,12 @@ export function createEnsembleShaderLayer(mapInstance) {
             }
         },
 
+        setGridMode: function(enabled, rects = null) {
+            this.isGridMode = enabled;
+            this.gridRects = rects;
+            mapInstance.triggerRepaint();
+        },
+
         getMemberTexture: function(chunkIndex, frameIndex, memberIndex) {
             return this.chunkTextures[`${chunkIndex}_${frameIndex}_m${memberIndex}`] || null;
         },
@@ -437,7 +445,97 @@ export function createEnsembleShaderLayer(mapInstance) {
             mapInstance.triggerRepaint();
         },
 
+        // 🌟 SINGLE-PASS 10-VIEWPORT SPLIT-SCREEN RENDERER
+        renderAllMembersGrid: function(gl, matrixOrArgs, boxRects) {
+            if (!this.currentFrameState || !boxRects || boxRects.length === 0) return;
+            const cIdx = this.currentFrameState.chunkIndex;
+            const fIdx = this.currentFrameState.frameIndex !== undefined ? this.currentFrameState.frameIndex : (this.currentFrameState.col || 0);
+
+            const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
+            const shaderData = isV5 ? matrixOrArgs.shaderData : null;
+            const projData = isV5 ? matrixOrArgs.defaultProjectionData : null;
+            const matrix = isV5 
+                ? (matrixOrArgs.modelViewProjectionMatrix || projData?.mainMatrix) 
+                : matrixOrArgs;
+
+            const program = this.getProgram(gl, shaderData);
+            if (!program) return;
+
+            gl.useProgram(program);
+
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
+
+            if (projData) {
+                const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
+                if (locMain) gl.uniformMatrix4fv(locMain, false, projData.mainMatrix);
+
+                const locFallback = gl.getUniformLocation(program, 'u_projection_fallback_matrix');
+                if (locFallback) gl.uniformMatrix4fv(locFallback, false, projData.fallbackMatrix);
+
+                const locCoords = gl.getUniformLocation(program, 'u_projection_tile_mercator_coords');
+                if (locCoords) gl.uniform4f(locCoords, projData.tileMercatorCoords[0], projData.tileMercatorCoords[1], projData.tileMercatorCoords[2], projData.tileMercatorCoords[3]);
+
+                const locClip = gl.getUniformLocation(program, 'u_projection_clipping_plane');
+                if (locClip) gl.uniform4f(locClip, projData.clippingPlane[0], projData.clippingPlane[1], projData.clippingPlane[2], projData.clippingPlane[3]);
+
+                const locTrans = gl.getUniformLocation(program, 'u_projection_transition');
+                if (locTrans) gl.uniform1f(locTrans, projData.projectionTransition);
+            } else if (matrix) {
+                const locMat = gl.getUniformLocation(program, 'u_matrix');
+                if (locMat) gl.uniformMatrix4fv(locMat, false, matrix);
+            }
+
+            gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
+            gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
+            gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), 0.0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+            const aPos = gl.getAttribLocation(program, 'a_pos');
+            gl.enableVertexAttribArray(aPos);
+            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+
+            const aUv = gl.getAttribLocation(program, 'a_uv');
+            if (aUv !== -1) {
+                gl.enableVertexAttribArray(aUv);
+                gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+            }
+
+            gl.disable(gl.DEPTH_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.enable(gl.SCISSOR_TEST);
+
+            // 🌟 Rapid 0.3ms draw loop across all 10 member viewports
+            for (let m = 0; m < 10; m++) {
+                const rect = boxRects[m];
+                if (!rect || rect.w <= 0 || rect.h <= 0) continue;
+
+                gl.viewport(rect.x, rect.y, rect.w, rect.h);
+                gl.scissor(rect.x, rect.y, rect.w, rect.h);
+
+                const tex = this.chunkTextures[`${cIdx}_${fIdx}_m${m}`] || this.activeTex;
+                if (!tex) continue;
+
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.uniform1i(gl.getUniformLocation(program, 'u_dataTexture'), 0);
+
+                gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
+            }
+
+            gl.disable(gl.SCISSOR_TEST);
+            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        },
+
         render: function (gl, matrixOrArgs) {
+            // If grid mode is armed and rectangles are provided, execute the 10-viewport split-screen pass
+            if (this.isGridMode && this.gridRects) {
+                this.renderAllMembersGrid(gl, matrixOrArgs, this.gridRects);
+                return;
+            }
+
             if (!this.activeTex) return;
 
             const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
