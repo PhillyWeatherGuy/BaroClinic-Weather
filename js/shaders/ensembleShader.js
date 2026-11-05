@@ -30,7 +30,7 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
         vertices.push(
             x0, 0.0, x0, vTopEdge,
             x1, 0.0, x1, vTopEdge,
-            xMid, -10.0, xMid, 0.0 // v = 0.0 is exact North Pole
+            xMid, -10.0, xMid, 0.0
         );
     }
 
@@ -64,7 +64,7 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
 
         vertices.push(
             x0, 1.0, x0, vBottomEdge,
-            xMid, 10.0, xMid, 1.0, // v = 1.0 is exact South Pole
+            xMid, 10.0, xMid, 1.0,
             x1, 1.0, x1, vBottomEdge
         );
     }
@@ -123,7 +123,6 @@ function createEnsemblePaletteTexture(gl, paletteHexArray) {
     const isPrecip = (stateManager.activeParam === 'tp' || stateManager.activeParam?.startsWith('tp_') || stateManager.activeParam?.startsWith('asnow'));
 
     paletteHexArray.forEach((hex, i) => {
-        // Only force index 0 to transparent if it's explicitly transparent or a precip accumulation parameter
         if (hex === 'transparent' || !hex || (isPrecip && i === 0)) {
             paletteData[i * 4]     = 0;
             paletteData[i * 4 + 1] = 0;
@@ -153,7 +152,7 @@ export function createEnsembleShaderLayer(mapInstance) {
         chunkTextures: {},
         activeTex: null,
         paletteTex: null,
-        activeMember: 0, // Defaults to Member 0 (Member 01)
+        activeMember: 0,
         currentFrameState: null,
         texResolution: [1440.0, 721.0],
         programs: {},
@@ -380,21 +379,18 @@ export function createEnsembleShaderLayer(mapInstance) {
                 this.texResolution = [source.width, source.height];
             }
 
-            // 🌟 MULTI-MEMBER ENSEMBLE UNPACKING
+            // 🌟 Multi-Member Texture Preloading
             if (source.frames && Array.isArray(source.frames)) {
                 source.frames.forEach((frameItem, fIdx) => {
                     if (Array.isArray(frameItem)) {
-                        // Frame contains 10 member bitmaps: [m0_bmp, m1_bmp, ... m9_bmp]
                         frameItem.forEach((memberBmp, mIdx) => {
                             const key = `${chunkIndex}_${fIdx}_m${mIdx}`;
                             if (!this.chunkTextures[key] && memberBmp) {
                                 this.chunkTextures[key] = uploadSingle(memberBmp);
                             }
                         });
-                        // Default alias for the frame points to Member 0
                         this.chunkTextures[`${chunkIndex}_${fIdx}`] = this.chunkTextures[`${chunkIndex}_${fIdx}_m0`];
                     } else if (frameItem) {
-                        // Single bitmap fallback
                         const key = `${chunkIndex}_${fIdx}_m0`;
                         if (!this.chunkTextures[key]) {
                             this.chunkTextures[key] = uploadSingle(frameItem);
@@ -415,7 +411,11 @@ export function createEnsembleShaderLayer(mapInstance) {
         setActiveMember: function(memberIndex) {
             this.activeMember = Math.max(0, Math.min(9, memberIndex));
             if (this.currentFrameState) {
-                this.updateFrame(this.currentFrameState);
+                const cIdx = this.currentFrameState.chunkIndex;
+                const fIdx = this.currentFrameState.frameIndex !== undefined ? this.currentFrameState.frameIndex : (this.currentFrameState.col || 0);
+                this.activeTex = this.chunkTextures[`${cIdx}_${fIdx}_m${this.activeMember}`] 
+                              || this.chunkTextures[`${cIdx}_${fIdx}`] 
+                              || this.chunkTextures[cIdx];
             }
         },
 
