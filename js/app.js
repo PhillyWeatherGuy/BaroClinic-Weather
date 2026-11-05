@@ -200,9 +200,33 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ENSEMBLE GRID INSTANT SYNCHRONIZER & REAL-TIME CANVAS COPY
+// 🌟 OPTIMIZED ENSEMBLE GRID SYNCHRONIZER
 let isDrawingEnsemble = false;
 let isSynchronousCapturing = false;
+let ensembleDebounceTimer = null;
+
+// Pre-cached card canvas references to avoid repeated DOM lookups
+let cachedCardCanvases = null;
+
+function getCardCanvases() {
+    if (cachedCardCanvases && cachedCardCanvases.length === 10) {
+        return cachedCardCanvases;
+    }
+    const cards = document.querySelectorAll('.map-card');
+    cachedCardCanvases = Array.from(cards).map(card => {
+        let canvas = card.querySelector('canvas');
+        if (!canvas) {
+            canvas = document.createElement('canvas');
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            canvas.style.display = 'block';
+            canvas.style.borderRadius = '6px';
+            card.appendChild(canvas);
+        }
+        return { card, canvas, ctx: canvas.getContext('2d') };
+    });
+    return cachedCardCanvases;
+}
 
 export function updateAllEnsembleCardsSync() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
@@ -211,22 +235,54 @@ export function updateAllEnsembleCardsSync() {
     isSynchronousCapturing = true;
 
     try {
-        // 🌟 Render & copy all 10 members in a single synchronous tick
+        const cardList = getCardCanvases();
+        const mapCanvas = map.getCanvas();
+        if (!mapCanvas || cardList.length === 0) return;
+
+        // Measure once before loop to avoid layout thrashing
+        const dpr = window.devicePixelRatio || 1;
+        const rect = cardList[0].card.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
+        const targetW = Math.floor(rect.width * dpr);
+        const targetH = Math.floor(rect.height * dpr);
+
+        const srcAspect = mapCanvas.width / mapCanvas.height;
+        const dstAspect = targetW / targetH;
+        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+
+        if (srcAspect > dstAspect) {
+            sWidth = mapCanvas.height * dstAspect;
+            sx = (mapCanvas.width - sWidth) / 2;
+        } else {
+            sHeight = mapCanvas.width / dstAspect;
+            sy = (mapCanvas.height - sHeight) / 2;
+        }
+
+        // 🌟 Synchronous member cycle
         for (let m = 0; m < 10; m++) {
             customShaderLayer.setActiveMember(m);
             if (typeof map._render === 'function') {
                 map._render();
             }
-            drawEnsembleBoxes(m);
+
+            const item = cardList[m];
+            if (!item) continue;
+            const cvs = item.canvas;
+            if (cvs.width !== targetW || cvs.height !== targetH) {
+                cvs.width = targetW;
+                cvs.height = targetH;
+            }
+            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
         }
 
-        // Restore active member to 0 for master map
+        // Restore Member 0 on master map
         customShaderLayer.setActiveMember(0);
         if (typeof map._render === 'function') {
             map._render();
         }
     } catch (err) {
-        console.warn("[Ensemble] Sync render error:", err);
+        console.warn("[Ensemble] Render error:", err);
     } finally {
         isSynchronousCapturing = false;
     }
@@ -240,9 +296,10 @@ function syncEnsembleGrid() {
     grid.style.display = shouldShow ? 'grid' : 'none';
     
     isDrawingEnsemble = shouldShow;
+    cachedCardCanvases = null;
     
     if (shouldShow) {
-        setTimeout(updateAllEnsembleCardsSync, 100);
+        setTimeout(updateAllEnsembleCardsSync, 80);
     }
 }
 
@@ -252,55 +309,39 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
     const mapCanvas = map.getCanvas();
     if (!mapCanvas) return;
 
-    const cards = document.querySelectorAll('.map-card');
-    
-    cards.forEach((card, idx) => {
+    const cardList = getCardCanvases();
+    if (cardList.length === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = cardList[0].card.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const targetW = Math.floor(rect.width * dpr);
+    const targetH = Math.floor(rect.height * dpr);
+
+    const srcAspect = mapCanvas.width / mapCanvas.height;
+    const dstAspect = targetW / targetH;
+    let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+
+    if (srcAspect > dstAspect) {
+        sWidth = mapCanvas.height * dstAspect;
+        sx = (mapCanvas.width - sWidth) / 2;
+    } else {
+        sHeight = mapCanvas.width / dstAspect;
+        sy = (mapCanvas.height - sHeight) / 2;
+    }
+
+    cardList.forEach((item, idx) => {
         if (targetMemberIndex !== null && idx !== targetMemberIndex) return;
 
-        let canvas = card.querySelector('canvas');
-        if (!canvas) {
-            canvas = document.createElement('canvas');
-            canvas.style.width = '100%';
-            canvas.style.height = '100%';
-            canvas.style.display = 'block';
-            canvas.style.borderRadius = '6px';
-            card.appendChild(canvas);
-        }
-
-        const rect = card.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
-
-        const dpr = window.devicePixelRatio || 1;
-        const width = Math.floor(rect.width * dpr);
-        const height = Math.floor(rect.height * dpr);
-
-        if (canvas.width !== width || canvas.height !== height) {
-            canvas.width = width;
-            canvas.height = height;
-        }
-
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const srcAspect = mapCanvas.width / mapCanvas.height;
-        const dstAspect = canvas.width / canvas.height;
-        
-        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
-
-        if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
-            sx = (mapCanvas.width - sWidth) / 2;
-        } else {
-            sHeight = mapCanvas.width / dstAspect;
-            sy = (mapCanvas.height - sHeight) / 2;
+        const cvs = item.canvas;
+        if (cvs.width !== targetW || cvs.height !== targetH) {
+            cvs.width = targetW;
+            cvs.height = targetH;
         }
 
         try {
-            ctx.drawImage(
-                mapCanvas, 
-                sx, sy, sWidth, sHeight,
-                0, 0, canvas.width, canvas.height
-            );
+            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
         } catch (err) {}
     });
 }
@@ -674,9 +715,15 @@ async function renderFrame(globalIdx) {
         updatePolarFrame(stateManager.activeFrameState);
     }
 
-    // 🌟 Instantly update all 10 cards simultaneously on step change
+    // 🌟 SMART TIMELINE SCRUBBING:
+    // Update live preview immediately (60 FPS), then snap all 10 cards simultaneously when paused (~50ms)
     if (isDrawingEnsemble) {
-        updateAllEnsembleCardsSync();
+        drawEnsembleBoxes(0); // Card 01 updates live with zero lag
+
+        if (ensembleDebounceTimer) clearTimeout(ensembleDebounceTimer);
+        ensembleDebounceTimer = setTimeout(() => {
+            updateAllEnsembleCardsSync();
+        }, 50);
     }
 }
 
@@ -960,13 +1007,13 @@ map.on('load', async () => {
 map.on('render', () => {
     if (!isDrawingEnsemble || isSynchronousCapturing) return;
 
-    // 🌟 When user pans or zooms, keep cards tracking live
+    // 🌟 Smooth live pan/zoom: update live preview without locking the main thread
     if (map.isMoving()) {
-        drawEnsembleBoxes();
+        drawEnsembleBoxes(0);
     }
 });
 
-// 🌟 When camera finishes moving, immediately lock in all 10 members
+// 🌟 When camera finishes moving, lock in all 10 members simultaneously
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
         updateAllEnsembleCardsSync();
