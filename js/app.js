@@ -200,13 +200,12 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 OPTIMIZED ENSEMBLE GRID SYNCHRONIZER
+// 🌟 DOUBLE-BUFFERED ENSEMBLE CAPTURE SYSTEM
 let isDrawingEnsemble = false;
-let isSynchronousCapturing = false;
+let ensembleCaptureIdx = -1; // -1 = idle; 0 to 9 = background capturing
 let ensembleDebounceTimer = null;
-
-// Pre-cached card canvas references to avoid repeated DOM lookups
 let cachedCardCanvases = null;
+let offscreenBuffers = []; // Hidden scratch canvases for double-buffering
 
 function getCardCanvases() {
     if (cachedCardCanvases && cachedCardCanvases.length === 10) {
@@ -228,64 +227,76 @@ function getCardCanvases() {
     return cachedCardCanvases;
 }
 
-export function updateAllEnsembleCardsSync() {
-    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
-    if (isSynchronousCapturing) return;
+function getOffscreenBuffer(index, width, height) {
+    if (!offscreenBuffers[index]) {
+        offscreenBuffers[index] = document.createElement('canvas');
+    }
+    const cvs = offscreenBuffers[index];
+    if (cvs.width !== width || cvs.height !== height) {
+        cvs.width = width;
+        cvs.height = height;
+    }
+    return cvs;
+}
 
-    isSynchronousCapturing = true;
+export function triggerEnsembleSequence() {
+    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
+    ensembleCaptureIdx = 0;
+    customShaderLayer.setActiveMember(0);
+    map.triggerRepaint();
+}
+
+function drawToOffscreenBuffer(memberIndex) {
+    const mapCanvas = map.getCanvas();
+    if (!mapCanvas) return;
+
+    const cardList = getCardCanvases();
+    if (cardList.length === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = cardList[0].card.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const targetW = Math.floor(rect.width * dpr);
+    const targetH = Math.floor(rect.height * dpr);
+
+    const offscreen = getOffscreenBuffer(memberIndex, targetW, targetH);
+    const ctx = offscreen.getContext('2d');
+    ctx.clearRect(0, 0, targetW, targetH);
+
+    const srcAspect = mapCanvas.width / mapCanvas.height;
+    const dstAspect = targetW / targetH;
+    let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+
+    if (srcAspect > dstAspect) {
+        sWidth = mapCanvas.height * dstAspect;
+        sx = (mapCanvas.width - sWidth) / 2;
+    } else {
+        sHeight = mapCanvas.width / dstAspect;
+        sy = (mapCanvas.height - sHeight) / 2;
+    }
 
     try {
-        const cardList = getCardCanvases();
-        const mapCanvas = map.getCanvas();
-        if (!mapCanvas || cardList.length === 0) return;
+        ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+    } catch (err) {}
+}
 
-        // Measure once before loop to avoid layout thrashing
-        const dpr = window.devicePixelRatio || 1;
-        const rect = cardList[0].card.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
+function flipOffscreenToVisible() {
+    const cardList = getCardCanvases();
+    if (!cardList || cardList.length === 0) return;
 
-        const targetW = Math.floor(rect.width * dpr);
-        const targetH = Math.floor(rect.height * dpr);
+    cardList.forEach((item, idx) => {
+        const offscreen = offscreenBuffers[idx];
+        if (!offscreen || offscreen.width === 0) return;
 
-        const srcAspect = mapCanvas.width / mapCanvas.height;
-        const dstAspect = targetW / targetH;
-        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
-
-        if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
-            sx = (mapCanvas.width - sWidth) / 2;
-        } else {
-            sHeight = mapCanvas.width / dstAspect;
-            sy = (mapCanvas.height - sHeight) / 2;
+        const cvs = item.canvas;
+        if (cvs.width !== offscreen.width || cvs.height !== offscreen.height) {
+            cvs.width = offscreen.width;
+            cvs.height = offscreen.height;
         }
-
-        // 🌟 Synchronous member cycle
-        for (let m = 0; m < 10; m++) {
-            customShaderLayer.setActiveMember(m);
-            if (typeof map._render === 'function') {
-                map._render();
-            }
-
-            const item = cardList[m];
-            if (!item) continue;
-            const cvs = item.canvas;
-            if (cvs.width !== targetW || cvs.height !== targetH) {
-                cvs.width = targetW;
-                cvs.height = targetH;
-            }
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-        }
-
-        // Restore Member 0 on master map
-        customShaderLayer.setActiveMember(0);
-        if (typeof map._render === 'function') {
-            map._render();
-        }
-    } catch (err) {
-        console.warn("[Ensemble] Render error:", err);
-    } finally {
-        isSynchronousCapturing = false;
-    }
+        item.ctx.clearRect(0, 0, cvs.width, cvs.height);
+        item.ctx.drawImage(offscreen, 0, 0);
+    });
 }
 
 function syncEnsembleGrid() {
@@ -299,7 +310,9 @@ function syncEnsembleGrid() {
     cachedCardCanvases = null;
     
     if (shouldShow) {
-        setTimeout(updateAllEnsembleCardsSync, 80);
+        setTimeout(triggerEnsembleSequence, 80);
+    } else {
+        ensembleCaptureIdx = -1;
     }
 }
 
@@ -716,14 +729,14 @@ async function renderFrame(globalIdx) {
     }
 
     // 🌟 SMART TIMELINE SCRUBBING:
-    // Update live preview immediately (60 FPS), then snap all 10 cards simultaneously when paused (~50ms)
+    // Update live preview immediately (60 FPS), then flip all 10 cards simultaneously when paused (~40ms)
     if (isDrawingEnsemble) {
-        drawEnsembleBoxes(0); // Card 01 updates live with zero lag
+        drawEnsembleBoxes(0); // Card 01 updates live at 60 FPS with zero lag
 
         if (ensembleDebounceTimer) clearTimeout(ensembleDebounceTimer);
         ensembleDebounceTimer = setTimeout(() => {
-            updateAllEnsembleCardsSync();
-        }, 50);
+            triggerEnsembleSequence();
+        }, 40);
     }
 }
 
@@ -1005,18 +1018,40 @@ map.on('load', async () => {
 });
 
 map.on('render', () => {
-    if (!isDrawingEnsemble || isSynchronousCapturing) return;
+    if (!isDrawingEnsemble) return;
 
-    // 🌟 Smooth live pan/zoom: update live preview without locking the main thread
+    // 🌟 BACKGROUND DOUBLE-BUFFER CAPTURE:
+    // Captures members into hidden scratch buffers so visible cards never ripple
+    if (ensembleCaptureIdx >= 0 && ensembleCaptureIdx < 10) {
+        drawToOffscreenBuffer(ensembleCaptureIdx);
+        ensembleCaptureIdx++;
+
+        if (ensembleCaptureIdx < 10) {
+            if (customShaderLayer?.setActiveMember) {
+                customShaderLayer.setActiveMember(ensembleCaptureIdx);
+                map.triggerRepaint();
+            }
+        } else {
+            // All 10 members captured in background! FLIP ALL 10 CARDS SIMULTANEOUSLY!
+            ensembleCaptureIdx = -1;
+            flipOffscreenToVisible();
+            if (customShaderLayer?.setActiveMember) {
+                customShaderLayer.setActiveMember(0);
+            }
+        }
+        return;
+    }
+
+    // 🌟 Live camera sync: when dragging, keep cards updating live with Member 01
     if (map.isMoving()) {
         drawEnsembleBoxes(0);
     }
 });
 
-// 🌟 When camera finishes moving, lock in all 10 members simultaneously
+// 🌟 When camera movement finishes, lock in all 10 members simultaneously
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
-        updateAllEnsembleCardsSync();
+        triggerEnsembleSequence();
     }
 });
 
