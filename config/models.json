@@ -104,7 +104,8 @@
       "category": "Ensemble",
       "resolution": "28km",
       "supported_params": [
-        "2t"
+        "2t",
+        "prate"
       ]
     },
     "hrrr": {
