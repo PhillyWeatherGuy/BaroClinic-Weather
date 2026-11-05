@@ -1352,8 +1352,20 @@ body.globe-view #map {
 }
 
 /* ==========================================
-   ENSEMBLE 10-MAP GRID
+   ENSEMBLE 10-MAP GRID & SINGLE WEBGL CANVAS
    ========================================== */
+#ensemble-canvas {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    right: 0;
+    bottom: 50px;
+    width: 100%;
+    z-index: 4;    /* sits directly behind #ensemble-grid (z-index: 5) */
+    pointer-events: none;
+    display: none;
+}
+
 #ensemble-grid {
     position: absolute;
     top: 50px;     /* below #top-nav */
@@ -1366,7 +1378,7 @@ body.globe-view #map {
     gap: 6px;
     padding: 6px;
     box-sizing: border-box;
-    z-index: 5;    /* above #map (≈1), below #timeline (10) and #top-nav (30) */
+    z-index: 5;    /* above #ensemble-canvas (4), below #timeline (10) and #top-nav (30) */
     pointer-events: none; /* lets pan/zoom events reach the master map behind */
 }
 
@@ -1394,9 +1406,13 @@ body.globe-view #map {
 }
 
 @media (max-width: 1023px) {
+    #ensemble-canvas,
+    #ensemble-grid {
+        bottom: 84px; /* matches the taller mobile #timeline-container */
+    }
+
     #ensemble-grid {
         grid-template-columns: repeat(2, 1fr);
         grid-template-rows: repeat(5, 1fr);
-        bottom: 84px; /* matches the taller mobile #timeline-container */
     }
 }
