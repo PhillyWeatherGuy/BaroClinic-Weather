@@ -200,8 +200,16 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ENSEMBLE GRID TOGGLE & REAL-TIME CANVAS COPY
+// 🌟 ENSEMBLE GRID SEQUENCER & REAL-TIME CANVAS COPY
 let isDrawingEnsemble = false;
+let ensembleCaptureIdx = -1; // -1 = idle; 0 to 9 = active member capturing
+
+export function triggerEnsembleSequence() {
+    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
+    ensembleCaptureIdx = 0;
+    customShaderLayer.setActiveMember(0);
+    map.triggerRepaint();
+}
 
 function syncEnsembleGrid() {
     const grid = document.getElementById('ensemble-grid');
@@ -213,11 +221,13 @@ function syncEnsembleGrid() {
     isDrawingEnsemble = shouldShow;
     
     if (shouldShow) {
-        setTimeout(drawEnsembleBoxes, 100);
+        setTimeout(triggerEnsembleSequence, 100);
+    } else {
+        ensembleCaptureIdx = -1;
     }
 }
 
-function drawEnsembleBoxes() {
+function drawEnsembleBoxes(targetMemberIndex = null) {
     if (!isDrawingEnsemble) return;
 
     const mapCanvas = map.getCanvas();
@@ -225,7 +235,10 @@ function drawEnsembleBoxes() {
 
     const cards = document.querySelectorAll('.map-card');
     
-    cards.forEach((card) => {
+    cards.forEach((card, idx) => {
+        // If targeting a specific member in the sequence, skip all other cards
+        if (targetMemberIndex !== null && idx !== targetMemberIndex) return;
+
         let canvas = card.querySelector('canvas');
         if (!canvas) {
             canvas = document.createElement('canvas');
@@ -239,7 +252,7 @@ function drawEnsembleBoxes() {
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        // 🌟 FIX: Multiply by devicePixelRatio to make the canvas Retina-sharp
+        // 🌟 Multiply by devicePixelRatio to make the canvas Retina-sharp
         const dpr = window.devicePixelRatio || 1;
         const width = Math.floor(rect.width * dpr);
         const height = Math.floor(rect.height * dpr);
@@ -644,6 +657,11 @@ async function renderFrame(globalIdx) {
     } else if (activeView === 'polar' && polarMapLoaded) {
         updatePolarFrame(stateManager.activeFrameState);
     }
+
+    // 🌟 When a new forecast step renders in ensemble mode, trigger sequence for all 10 cards
+    if (isDrawingEnsemble) {
+        triggerEnsembleSequence();
+    }
 }
 
 export async function preloadRemainingChunks(currentGen) {
@@ -924,8 +942,38 @@ map.on('load', async () => {
 });
 
 map.on('render', () => {
-    if (isDrawingEnsemble) {
+    if (!isDrawingEnsemble) return;
+
+    // 🌟 SEQUENTIAL CAPTURE: If stepping through members, capture card m and request next frame
+    if (ensembleCaptureIdx >= 0 && ensembleCaptureIdx < 10) {
+        drawEnsembleBoxes(ensembleCaptureIdx);
+        ensembleCaptureIdx++;
+
+        if (ensembleCaptureIdx < 10) {
+            if (customShaderLayer?.setActiveMember) {
+                customShaderLayer.setActiveMember(ensembleCaptureIdx);
+                map.triggerRepaint();
+            }
+        } else {
+            // Finished capturing all 10 members! Reset to Member 0 for main map
+            ensembleCaptureIdx = -1;
+            if (customShaderLayer?.setActiveMember) {
+                customShaderLayer.setActiveMember(0);
+            }
+        }
+        return;
+    }
+
+    // 🌟 Live camera sync: when dragging, keep cards updating live
+    if (map.isMoving()) {
         drawEnsembleBoxes();
+    }
+});
+
+// 🌟 When camera movement finishes, re-capture all 10 members for the new view
+map.on('moveend', () => {
+    if (isDrawingEnsemble) {
+        triggerEnsembleSequence();
     }
 });
 
