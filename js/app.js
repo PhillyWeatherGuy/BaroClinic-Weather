@@ -200,11 +200,12 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 DOUBLE-BUFFERED ENSEMBLE GRID SYNCHRONIZER (ZERO LAG, SIMULTANEOUS FLIP)
+// 🌟 DOUBLE-BUFFERED ENSEMBLE CAPTURE SYSTEM
 let isDrawingEnsemble = false;
-let ensembleCaptureIdx = -1; // -1 = idle; 0..9 = capturing to offscreen scratch
+let ensembleCaptureIdx = -1; // -1 = idle; 0 to 9 = background capturing
 let ensembleDebounceTimer = null;
 let cachedCardCanvases = null;
+let offscreenBuffers = []; // Hidden scratch canvases for double-buffering
 
 function getCardCanvases() {
     if (cachedCardCanvases && cachedCardCanvases.length === 10) {
@@ -221,16 +222,21 @@ function getCardCanvases() {
             canvas.style.borderRadius = '6px';
             card.appendChild(canvas);
         }
-        const scratchCanvas = document.createElement('canvas');
-        return { 
-            card, 
-            canvas, 
-            ctx: canvas.getContext('2d'),
-            scratchCanvas,
-            scratchCtx: scratchCanvas.getContext('2d')
-        };
+        return { card, canvas, ctx: canvas.getContext('2d') };
     });
     return cachedCardCanvases;
+}
+
+function getOffscreenBuffer(index, width, height) {
+    if (!offscreenBuffers[index]) {
+        offscreenBuffers[index] = document.createElement('canvas');
+    }
+    const cvs = offscreenBuffers[index];
+    if (cvs.width !== width || cvs.height !== height) {
+        cvs.width = width;
+        cvs.height = height;
+    }
+    return cvs;
 }
 
 export function triggerEnsembleSequence() {
@@ -240,25 +246,23 @@ export function triggerEnsembleSequence() {
     map.triggerRepaint();
 }
 
-function captureToScratch(memberIndex) {
+function drawToOffscreenBuffer(memberIndex) {
     const mapCanvas = map.getCanvas();
     if (!mapCanvas) return;
 
     const cardList = getCardCanvases();
-    const item = cardList[memberIndex];
-    if (!item) return;
+    if (cardList.length === 0) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const rect = item.card.getBoundingClientRect();
+    const rect = cardList[0].card.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
 
     const targetW = Math.floor(rect.width * dpr);
     const targetH = Math.floor(rect.height * dpr);
 
-    if (item.scratchCanvas.width !== targetW || item.scratchCanvas.height !== targetH) {
-        item.scratchCanvas.width = targetW;
-        item.scratchCanvas.height = targetH;
-    }
+    const offscreen = getOffscreenBuffer(memberIndex, targetW, targetH);
+    const ctx = offscreen.getContext('2d');
+    ctx.clearRect(0, 0, targetW, targetH);
 
     const srcAspect = mapCanvas.width / mapCanvas.height;
     const dstAspect = targetW / targetH;
@@ -273,24 +277,26 @@ function captureToScratch(memberIndex) {
     }
 
     try {
-        item.scratchCtx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+        ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
     } catch (err) {}
 }
 
-function commitScratchToVisible() {
+function flipOffscreenToVisible() {
     const cardList = getCardCanvases();
-    for (let i = 0; i < cardList.length; i++) {
-        const item = cardList[i];
-        const w = item.scratchCanvas.width;
-        const h = item.scratchCanvas.height;
-        if (w === 0 || h === 0) continue;
+    if (!cardList || cardList.length === 0) return;
 
-        if (item.canvas.width !== w || item.canvas.height !== h) {
-            item.canvas.width = w;
-            item.canvas.height = h;
+    cardList.forEach((item, idx) => {
+        const offscreen = offscreenBuffers[idx];
+        if (!offscreen || offscreen.width === 0) return;
+
+        const cvs = item.canvas;
+        if (cvs.width !== offscreen.width || cvs.height !== offscreen.height) {
+            cvs.width = offscreen.width;
+            cvs.height = offscreen.height;
         }
-        item.ctx.drawImage(item.scratchCanvas, 0, 0);
-    }
+        item.ctx.clearRect(0, 0, cvs.width, cvs.height);
+        item.ctx.drawImage(offscreen, 0, 0);
+    });
 }
 
 function syncEnsembleGrid() {
@@ -723,12 +729,14 @@ async function renderFrame(globalIdx) {
     }
 
     // 🌟 SMART TIMELINE SCRUBBING:
-    // Scrubs at 60 FPS with zero lag, then captures in background & flips all 10 cards simultaneously
+    // Update live preview immediately (60 FPS), then flip all 10 cards simultaneously when paused (~40ms)
     if (isDrawingEnsemble) {
+        drawEnsembleBoxes(0); // Card 01 updates live at 60 FPS with zero lag
+
         if (ensembleDebounceTimer) clearTimeout(ensembleDebounceTimer);
         ensembleDebounceTimer = setTimeout(() => {
             triggerEnsembleSequence();
-        }, 60);
+        }, 40);
     }
 }
 
@@ -1012,9 +1020,10 @@ map.on('load', async () => {
 map.on('render', () => {
     if (!isDrawingEnsemble) return;
 
-    // 🌟 Background sequence capture to offscreen scratch canvases
+    // 🌟 BACKGROUND DOUBLE-BUFFER CAPTURE:
+    // Captures members into hidden scratch buffers so visible cards never ripple
     if (ensembleCaptureIdx >= 0 && ensembleCaptureIdx < 10) {
-        captureToScratch(ensembleCaptureIdx);
+        drawToOffscreenBuffer(ensembleCaptureIdx);
         ensembleCaptureIdx++;
 
         if (ensembleCaptureIdx < 10) {
@@ -1023,9 +1032,9 @@ map.on('render', () => {
                 map.triggerRepaint();
             }
         } else {
-            // All 10 captured! Flip all 10 visible cards simultaneously
+            // All 10 members captured in background! FLIP ALL 10 CARDS SIMULTANEOUSLY!
             ensembleCaptureIdx = -1;
-            commitScratchToVisible();
+            flipOffscreenToVisible();
             if (customShaderLayer?.setActiveMember) {
                 customShaderLayer.setActiveMember(0);
             }
@@ -1033,14 +1042,13 @@ map.on('render', () => {
         return;
     }
 
-    // 🌟 Live camera pan/zoom
+    // 🌟 Live camera sync: when dragging, keep cards updating live with Member 01
     if (map.isMoving()) {
-        ensembleCaptureIdx = -1;
-        drawEnsembleBoxes();
+        drawEnsembleBoxes(0);
     }
 });
 
-// 🌟 When camera finishes moving, capture & flip all 10 members simultaneously
+// 🌟 When camera movement finishes, lock in all 10 members simultaneously
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
         triggerEnsembleSequence();
