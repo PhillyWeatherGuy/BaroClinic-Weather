@@ -7,7 +7,7 @@ import { createPrecipShaderLayer } from './shaders/precipShader.js';
 import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
 import { initHubTransition } from './components/homeScreen.js';
 import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
-import { createEnsembleShaderLayer } from './shaders/ensembleShader.js'; // 🌟 Added
+import { createEnsembleShaderLayer } from './shaders/ensembleShader.js';
 import { 
     initViewerUI, 
     syncTimelineWithManifest, 
@@ -200,15 +200,36 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ENSEMBLE GRID SEQUENCER & REAL-TIME CANVAS COPY
+// 🌟 ENSEMBLE GRID INSTANT SYNCHRONIZER & REAL-TIME CANVAS COPY
 let isDrawingEnsemble = false;
-let ensembleCaptureIdx = -1; // -1 = idle; 0 to 9 = active member capturing
+let isSynchronousCapturing = false;
 
-export function triggerEnsembleSequence() {
+export function updateAllEnsembleCardsSync() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
-    ensembleCaptureIdx = 0;
-    customShaderLayer.setActiveMember(0);
-    map.triggerRepaint();
+    if (isSynchronousCapturing) return;
+
+    isSynchronousCapturing = true;
+
+    try {
+        // 🌟 Render & copy all 10 members in a single synchronous tick
+        for (let m = 0; m < 10; m++) {
+            customShaderLayer.setActiveMember(m);
+            if (typeof map._render === 'function') {
+                map._render();
+            }
+            drawEnsembleBoxes(m);
+        }
+
+        // Restore active member to 0 for master map
+        customShaderLayer.setActiveMember(0);
+        if (typeof map._render === 'function') {
+            map._render();
+        }
+    } catch (err) {
+        console.warn("[Ensemble] Sync render error:", err);
+    } finally {
+        isSynchronousCapturing = false;
+    }
 }
 
 function syncEnsembleGrid() {
@@ -221,9 +242,7 @@ function syncEnsembleGrid() {
     isDrawingEnsemble = shouldShow;
     
     if (shouldShow) {
-        setTimeout(triggerEnsembleSequence, 100);
-    } else {
-        ensembleCaptureIdx = -1;
+        setTimeout(updateAllEnsembleCardsSync, 100);
     }
 }
 
@@ -236,7 +255,6 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
     const cards = document.querySelectorAll('.map-card');
     
     cards.forEach((card, idx) => {
-        // If targeting a specific member in the sequence, skip all other cards
         if (targetMemberIndex !== null && idx !== targetMemberIndex) return;
 
         let canvas = card.querySelector('canvas');
@@ -252,7 +270,6 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         const rect = card.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        // 🌟 Multiply by devicePixelRatio to make the canvas Retina-sharp
         const dpr = window.devicePixelRatio || 1;
         const width = Math.floor(rect.width * dpr);
         const height = Math.floor(rect.height * dpr);
@@ -265,7 +282,6 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 🌟 ASPECT RATIO MATH (Simulate object-fit: cover)
         const srcAspect = mapCanvas.width / mapCanvas.height;
         const dstAspect = canvas.width / canvas.height;
         
@@ -282,8 +298,8 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         try {
             ctx.drawImage(
                 mapCanvas, 
-                sx, sy, sWidth, sHeight, // Source: Center-cropped map
-                0, 0, canvas.width, canvas.height // Destination: The box
+                sx, sy, sWidth, sHeight,
+                0, 0, canvas.width, canvas.height
             );
         } catch (err) {}
     });
@@ -531,6 +547,7 @@ export async function applyTheme(theme) {
         try { updatePolarPalette(newPalette); } catch (e) {}
     }
 }
+
 export function initLayer(shaderType = null) {
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
@@ -542,7 +559,6 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    // 🌟 ROUTE TO ENSEMBLE SHADER WHEN MODEL IS AIFS_ENS
     if (stateManager.activeModel === 'aifs_ens') {
         customShaderLayer = createEnsembleShaderLayer(map);
     } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
@@ -658,9 +674,9 @@ async function renderFrame(globalIdx) {
         updatePolarFrame(stateManager.activeFrameState);
     }
 
-    // 🌟 When a new forecast step renders in ensemble mode, trigger sequence for all 10 cards
+    // 🌟 Instantly update all 10 cards simultaneously on step change
     if (isDrawingEnsemble) {
-        triggerEnsembleSequence();
+        updateAllEnsembleCardsSync();
     }
 }
 
@@ -942,38 +958,18 @@ map.on('load', async () => {
 });
 
 map.on('render', () => {
-    if (!isDrawingEnsemble) return;
+    if (!isDrawingEnsemble || isSynchronousCapturing) return;
 
-    // 🌟 SEQUENTIAL CAPTURE: If stepping through members, capture card m and request next frame
-    if (ensembleCaptureIdx >= 0 && ensembleCaptureIdx < 10) {
-        drawEnsembleBoxes(ensembleCaptureIdx);
-        ensembleCaptureIdx++;
-
-        if (ensembleCaptureIdx < 10) {
-            if (customShaderLayer?.setActiveMember) {
-                customShaderLayer.setActiveMember(ensembleCaptureIdx);
-                map.triggerRepaint();
-            }
-        } else {
-            // Finished capturing all 10 members! Reset to Member 0 for main map
-            ensembleCaptureIdx = -1;
-            if (customShaderLayer?.setActiveMember) {
-                customShaderLayer.setActiveMember(0);
-            }
-        }
-        return;
-    }
-
-    // 🌟 Live camera sync: when dragging, keep cards updating live
+    // 🌟 When user pans or zooms, keep cards tracking live
     if (map.isMoving()) {
         drawEnsembleBoxes();
     }
 });
 
-// 🌟 When camera movement finishes, re-capture all 10 members for the new view
+// 🌟 When camera finishes moving, immediately lock in all 10 members
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
-        triggerEnsembleSequence();
+        updateAllEnsembleCardsSync();
     }
 });
 
