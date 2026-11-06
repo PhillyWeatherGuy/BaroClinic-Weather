@@ -224,6 +224,7 @@ export function createEnsembleShaderLayer(mapInstance) {
         id: 'weather-gpu-shader',
         type: 'custom',
         chunkTextures: {},
+        loadedChunkIndices: [],
         activeTex: null,
         paletteTex: null,
         frzrPaletteTex: null,
@@ -245,6 +246,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 }
             }
             this.chunkTextures = {};
+            this.loadedChunkIndices = [];
             this.activeTex = null;
             for (const key of ['frzrPaletteTex', 'sleetPaletteTex', 'snowPaletteTex']) {
                 if (this[key]) this.gl.deleteTexture(this[key]);
@@ -469,16 +471,36 @@ export function createEnsembleShaderLayer(mapInstance) {
             if (!this.gl || !source) return;
             const gl = this.gl;
 
-            const uploadSingle = (img) => {
-                if (!img) return null;
+            const w = source.width || 1440;
+            const h = source.height || 721;
+
+            // 🌟 Option 2: Uploads 1-byte R8 for scalar parameters, 2-byte RG8 for ptype
+            const uploadSingle = (item) => {
+                if (!item) return null;
                 const tex = gl.createTexture();
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
-                gl.texImage2D(
-                    gl.TEXTURE_2D, 0, gl.RGBA, 
-                    gl.RGBA, gl.UNSIGNED_BYTE, img
-                );
+                // Zero-copy raw byte slice from dataLoader
+                if (item.data && item.data instanceof Uint8Array) {
+                    if (item.ptype && item.ptype instanceof Uint8Array) {
+                        const total = w * h;
+                        const rg = new Uint8Array(total * 2);
+                        const d = item.data;
+                        const p = item.ptype;
+                        for (let i = 0; i < total; i++) {
+                            rg[i * 2]     = d[i];
+                            rg[i * 2 + 1] = p[i];
+                        }
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, w, h, 0, gl.RG, gl.UNSIGNED_BYTE, rg);
+                    } else {
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, w, h, 0, gl.RED, gl.UNSIGNED_BYTE, item.data);
+                    }
+                } 
+                // Legacy ImageBitmap / canvas fallback
+                else {
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, item);
+                }
                 
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -486,6 +508,26 @@ export function createEnsembleShaderLayer(mapInstance) {
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 return tex;
             };
+
+            // 🌟 Option 1: Texture Pool Management (Evict distant chunks so VRAM stays under ~100MB)
+            if (!this.loadedChunkIndices) this.loadedChunkIndices = [];
+            if (!this.loadedChunkIndices.includes(chunkIndex)) {
+                this.loadedChunkIndices.push(chunkIndex);
+            }
+
+            while (this.loadedChunkIndices.length > 2) {
+                const oldChunkIdx = this.loadedChunkIndices.shift();
+                if (oldChunkIdx === chunkIndex) continue;
+
+                for (const key in this.chunkTextures) {
+                    if (key.startsWith(`${oldChunkIdx}_`) || key === String(oldChunkIdx)) {
+                        if (this.chunkTextures[key]) {
+                            gl.deleteTexture(this.chunkTextures[key]);
+                        }
+                        delete this.chunkTextures[key];
+                    }
+                }
+            }
 
             if (source.width && source.height) {
                 this.texResolution = [source.width, source.height];
