@@ -73,6 +73,7 @@ function themeContourFeatures(featureCollection, masterData) {
     }
 
     // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
+    // 🌟 UPDATED: Added w10 and gust10 to receive the MSLP styling
     const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || activeParam === 'w10' || activeParam === 'gust10' || masterData?.parameter === 'prate';
     if (isPrate) {
         const isDark = stateManager.currentTheme === 'dark';
@@ -158,6 +159,7 @@ function themeContourFeatures(featureCollection, masterData) {
         const isDarkTheme = stateManager.currentTheme === 'dark';
         const isW250 = (activeParam === 'w250' || activeParam === 'z250');
 
+        // 🌟 250mb Wind gets crisp Ice Silver (#E0F2FE) with a subtle dark casing
         const contourColor = isW250
             ? (isDarkTheme ? '#E0F2FE' : '#000000')
             : getPvaContourThemeColor();
@@ -697,7 +699,10 @@ function packColor(str, alpha, fallback = '#ffffff') {
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const SUBDIVISIONS = isMobile ? 1 : 3;
+    const isEnsemble = stateManager.activeModel === 'aifs_ens';
+    
+    // 🌟 Force 1 subdivision in ensemble mode (cards are too small to need high-res splines)
+    const SUBDIVISIONS = (isMobile || isEnsemble) ? 1 : 3;
 
     let maxSegs = 0;
     const items = [];
@@ -767,7 +772,8 @@ function prepareStep(featureCollection) {
                 prev = cur;
             }
 
-            if (!isMobile && name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
+            // 🌟 Skip constructing text label points in ensemble mode
+            if (!isMobile && !isEnsemble && name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
                 const mid = len >> 1;
                 const a = line[mid];
                 const b = line[mid + 1];
@@ -815,7 +821,6 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
     const prepared = prepareStep(themed);
     
     if (prepared.count > 0 || !masterData.binary) {
-        // 🌟 Bounded LRU cache: 8 on mobile, 40 on desktop (4 complete steps x 10 members) keeps RAM capped
         const maxCacheSize = isMobile ? 8 : 40;
         if (stepCache.size > maxCacheSize) {
             const oldestKey = stepCache.keys().next().value;
@@ -868,6 +873,10 @@ function ensureLayers() {
 
 function setLabels(fc) {
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+    
+    // 🌟 Disable slow GeoJSON worker loop in ensemble mode
+    if (stateManager.activeModel === 'aifs_ens') return;
+
     const src = mapInstance && mapInstance.getSource(LABEL_SOURCE_ID);
     if (src) src.setData(fc || EMPTY_GEOJSON);
 }
@@ -1100,13 +1109,6 @@ async function decodeContourBinary(buffer, coordinateScale = 1000) {
             features.push({ type: 'Feature', geometry: { type: 'MultiLineString', coordinates: lines } });
         }
         steps.set(String(step), features);
-        if (step >= 1000) {
-            const sNum = Math.floor(step / 1000);
-            const mNum = step % 1000;
-            steps.set(`${sNum}_m${mNum}`, features);
-        } else if (step < 10) {
-            steps.set(`0_m${step}`, features);
-        }
     }
     return steps;
 }
@@ -1178,12 +1180,16 @@ function decodeContourV2(view, coordinateScale) {
 
         if (offset !== payloadEnd) return null;
         steps.set(String(step), features);
+        
+        // 🌟 Map packed member integer (step * 1000 + member) to string keys
         if (step >= 1000) {
             const sNum = Math.floor(step / 1000);
             const mNum = step % 1000;
             steps.set(`${sNum}_m${mNum}`, features);
+            steps.set(`${sNum}_${mNum}`, features);
         } else if (step < 10) {
             steps.set(`0_m${step}`, features);
+            steps.set(`0_${step}`, features);
         }
     }
     return steps;
