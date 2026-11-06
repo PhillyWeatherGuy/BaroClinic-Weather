@@ -126,6 +126,11 @@ const fragmentShaderBody = `
     }
 
     vec4 sampleSmoothPtypeColor(sampler2D ptypeTex, vec2 uv, vec2 texRes, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
+        // 🌟 Check if ptype data is missing by sampling the blue channel
+        if (texture(ptypeTex, vec2(fract(uv.x), uv.y)).b > 0.01) {
+            return texture(palTex, vec2(palU, 0.5));
+        }
+
         vec2 pos = uv * texRes - 0.5;
         vec2 i = floor(pos);
         vec2 f = fract(pos);
