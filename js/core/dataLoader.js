@@ -326,8 +326,14 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                         const srcStart = (m * memberSizeBytes) + (f * frameSize);
                         const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
                         
+                        // 🌟 Extract P-Type data for this specific member
+                        let ptypeSlice = null;
+                        if (ptypeBytes) {
+                            ptypeSlice = ptypeBytes.subarray(srcStart, srcStart + frameSize);
+                        }
+                        
                         // Create the bitmap for this specific member and frame
-                        const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale, null);
+                        const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale, ptypeSlice);
                         memberBitmaps.push(bitmap);
                     }
                     outFrames.push(memberBitmaps);
