@@ -200,10 +200,9 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ULTRA-FAST 60 FPS 10-MEMBER SYNCHRONIZED RENDER ENGINE
+// 🌟 ULTRA-FAST TIME-SLICED ENSEMBLE RENDER ENGINE
 let isDrawingEnsemble = false;
-let isRenderingEnsemble = false;
-let pendingEnsembleStep = null;
+let currentEnsembleRenderId = 0; // Tracks the active scrub cycle
 let cachedCardCanvases = null;
 let cachedTargetSize = null;
 
@@ -241,16 +240,13 @@ function updateCachedDimensions() {
     return cachedTargetSize;
 }
 
-// 🌟 Non-blocking 60 FPS multi-member capture loop
+// 🌟 DRASTIC IMPROVEMENT: Asynchronous Time-Slicing
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
-    if (isRenderingEnsemble) {
-        pendingEnsembleStep = true;
-        return;
-    }
 
-    isRenderingEnsemble = true;
-    pendingEnsembleStep = false;
+    // Increment render ID to instantly abort any previously running loops (silky smooth scrubbing)
+    currentEnsembleRenderId++;
+    const myRenderId = currentEnsembleRenderId;
 
     try {
         const cardList = getCardCanvases();
@@ -275,8 +271,12 @@ export async function renderAllEnsembleMembers() {
             sy = (mapCanvas.height - sHeight) / 2;
         }
 
-        // 🌟 Cycles through all 10 members in ~12ms without blocking the browser
+        // 🌟 TIME SLICING: Yield to the browser between member renders
+        // This ensures the main thread NEVER locks up, keeping slider and UI at 60 FPS
         for (let m = 0; m < 10; m++) {
+            // Abort instantly if the user scrubbed to a new step
+            if (currentEnsembleRenderId !== myRenderId) return;
+
             customShaderLayer.setActiveMember(m);
             if (typeof setContourActiveMember === 'function') {
                 setContourActiveMember(m);
@@ -286,29 +286,31 @@ export async function renderAllEnsembleMembers() {
             }
 
             const item = cardList[m];
-            if (!item) continue;
-            const cvs = item.canvas;
-            if (cvs.width !== targetW || cvs.height !== targetH) {
-                cvs.width = targetW;
-                cvs.height = targetH;
+            if (item) {
+                const cvs = item.canvas;
+                if (cvs.width !== targetW || cvs.height !== targetH) {
+                    cvs.width = targetW;
+                    cvs.height = targetH;
+                }
+                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
             }
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+
+            // Yield control back to the browser's render pipeline (prevent CPU freeze)
+            await new Promise(resolve => requestAnimationFrame(resolve));
         }
 
-        // Restore active member to 0
-        customShaderLayer.setActiveMember(0);
-        if (typeof setContourActiveMember === 'function') {
-            setContourActiveMember(0);
+        // Restore active member to 0 only if this loop wasn't aborted
+        if (currentEnsembleRenderId === myRenderId) {
+            customShaderLayer.setActiveMember(0);
+            if (typeof setContourActiveMember === 'function') {
+                setContourActiveMember(0);
+            }
+            if (typeof map._render === 'function') {
+                map._render();
+            }
         }
-        if (typeof map._render === 'function') {
-            map._render();
-        }
-    } finally {
-        isRenderingEnsemble = false;
-        // If user scrubbed while this frame was drawing, immediately draw the newest frame
-        if (pendingEnsembleStep) {
-            requestAnimationFrame(() => renderAllEnsembleMembers());
-        }
+    } catch (e) {
+        console.warn("Ensemble render error:", e);
     }
 }
 
@@ -1028,15 +1030,14 @@ map.on('load', async () => {
 });
 
 map.on('render', () => {
-    if (!isDrawingEnsemble || isRenderingEnsemble) return;
+    if (!isDrawingEnsemble) return;
 
-    // 🌟 When user pans or zooms, update cards smoothly
-    if (map.isMoving()) {
-        drawEnsembleBoxes(0);
+    // 🌟 Allow time-slicing to naturally update cards on pan/zoom without weird freezes
+    if (map.isMoving() && !isRenderingEnsemble) {
+        renderAllEnsembleMembers();
     }
 });
 
-// 🌟 When camera finishes moving, immediately update all 10 members
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
         updateCachedDimensions();
