@@ -47,6 +47,7 @@ let isFirstLoad = true; // 🌟 Forces default model/param on initial site load
 // 🌟 Dedicated Atmosphere Canvas (Placed BEHIND MapLibre canvas for draw-order occlusion)
 let haloCanvas = null;
 let haloCtx = null;
+let lastGlobeMatrix = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -275,6 +276,17 @@ export async function renderAllEnsembleMembers() {
             sy = (mapCanvas.height - sHeight) / 2;
         }
 
+        const bgColor = stateManager.currentTheme === 'light' ? '#ffffff' : '#000000';
+        let circle = null;
+        if (stateManager.activeView === '3d' && lastGlobeMatrix) {
+            circle = getGlobeScreenCircle(lastGlobeMatrix, mapCanvas.width, mapCanvas.height);
+        }
+        const scaleX = targetW / sWidth;
+        const scaleY = targetH / sHeight;
+        const cardCx = circle ? (circle.cx - sx) * scaleX : 0;
+        const cardCy = circle ? (circle.cy - sy) * scaleY : 0;
+        const cardR = circle ? circle.r * scaleX : 0;
+
         // 🌟 Cycles through all 10 members in ~12ms without blocking the browser
         for (let m = 0; m < 10; m++) {
             customShaderLayer.setActiveMember(m);
@@ -292,7 +304,20 @@ export async function renderAllEnsembleMembers() {
                 cvs.width = targetW;
                 cvs.height = targetH;
             }
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+
+            item.ctx.fillStyle = bgColor;
+            item.ctx.fillRect(0, 0, targetW, targetH);
+
+            if (circle && cardR > 5) {
+                item.ctx.save();
+                item.ctx.beginPath();
+                item.ctx.arc(cardCx, cardCy, cardR, 0, Math.PI * 2);
+                item.ctx.clip();
+                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+                item.ctx.restore();
+            } else {
+                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            }
         }
 
         // Restore active member to 0
@@ -356,6 +381,17 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         sy = (mapCanvas.height - sHeight) / 2;
     }
 
+    const bgColor = stateManager.currentTheme === 'light' ? '#ffffff' : '#000000';
+    let circle = null;
+    if (stateManager.activeView === '3d' && lastGlobeMatrix) {
+        circle = getGlobeScreenCircle(lastGlobeMatrix, mapCanvas.width, mapCanvas.height);
+    }
+    const scaleX = targetW / sWidth;
+    const scaleY = targetH / sHeight;
+    const cardCx = circle ? (circle.cx - sx) * scaleX : 0;
+    const cardCy = circle ? (circle.cy - sy) * scaleY : 0;
+    const cardR = circle ? circle.r * scaleX : 0;
+
     cardList.forEach((item, idx) => {
         if (targetMemberIndex !== null && idx !== targetMemberIndex) return;
 
@@ -366,7 +402,19 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         }
 
         try {
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            item.ctx.fillStyle = bgColor;
+            item.ctx.fillRect(0, 0, targetW, targetH);
+
+            if (circle && cardR > 5) {
+                item.ctx.save();
+                item.ctx.beginPath();
+                item.ctx.arc(cardCx, cardCy, cardR, 0, Math.PI * 2);
+                item.ctx.clip();
+                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+                item.ctx.restore();
+            } else {
+                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            }
         } catch (err) {}
     });
 }
@@ -670,6 +718,7 @@ export function initLayer(shaderType = null) {
             const matrix = isV5 
                 ? (matrixOrArgs.modelViewProjectionMatrix || projData?.mainMatrix) 
                 : matrixOrArgs;
+            lastGlobeMatrix = matrix;
             updateAtmosphereHalo(matrix);
         }
     };
