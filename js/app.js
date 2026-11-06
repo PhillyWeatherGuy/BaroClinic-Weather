@@ -28,7 +28,7 @@ import {
     destroyCityOverlay,
     setBasemapLabelsVisibility 
 } from './layers/cityOverlay.js'; 
-import { initVectorContours, updateVectorContours, preloadAllContours } from './layers/vectorContours.js';
+import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
 
 // 🛰️ Real-Time Radar Engine
@@ -278,6 +278,9 @@ export async function renderAllEnsembleMembers() {
         // 🌟 Cycles through all 10 members in ~12ms without blocking the browser
         for (let m = 0; m < 10; m++) {
             customShaderLayer.setActiveMember(m);
+            if (typeof setContourActiveMember === 'function') {
+                setContourActiveMember(m);
+            }
             if (typeof map._render === 'function') {
                 map._render();
             }
@@ -294,6 +297,9 @@ export async function renderAllEnsembleMembers() {
 
         // Restore active member to 0
         customShaderLayer.setActiveMember(0);
+        if (typeof setContourActiveMember === 'function') {
+            setContourActiveMember(0);
+        }
         if (typeof map._render === 'function') {
             map._render();
         }
@@ -718,13 +724,14 @@ async function renderFrame(globalIdx) {
     const activeView = stateManager.activeView || '2d';
 
     if (activeView === '2d' || activeView === '3d') {
-        // 🌟 In ensemble mode, skip heavy vector contours and city overlays for speed
+        // 🌟 Load and update vector contours for ALL models (including AIFS-ENS)
+        try { initVectorContours(map); } catch (e) {}
+        await updateVectorContours(frameInfo.step);
+
+        if (renderId !== activeRenderId) return;
+
+        // Skip heavy city text overlay in ensemble mode for speed
         if (stateManager.activeModel !== 'aifs_ens') {
-            try { initVectorContours(map); } catch (e) {}
-            await updateVectorContours(frameInfo.step);
-
-            if (renderId !== activeRenderId) return;
-
             try {
                 updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
             } catch (e) {}
