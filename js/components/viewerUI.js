@@ -464,6 +464,7 @@ export function initThemeToggle() {
     const themeBtn = document.getElementById('btn-theme-toggle');
     if (!themeBtn) return;
 
+    document.body.classList.toggle('light-mode', stateManager.currentTheme === 'light');
     if (stateManager.currentTheme === 'light') {
         themeBtn.classList.add('light-mode');
     } else {
@@ -475,6 +476,7 @@ export function initThemeToggle() {
         const newTheme = stateManager.currentTheme === 'light' ? 'dark' : 'light';
         stateManager.currentTheme = newTheme;
 
+        document.body.classList.toggle('light-mode', newTheme === 'light');
         if (newTheme === 'light') {
             themeBtn.classList.add('light-mode');
         } else {

@@ -570,6 +570,8 @@ export function handleKeyboardZoom(direction, x, y) {
  * 🌟 DYNAMIC THEME APPLIER
  */
 export async function applyTheme(theme) {
+    document.body.classList.toggle('light-mode', theme === 'light');
+
     if (stateManager.activeMode === 'radar') {
         applyRadarTheme(theme);
         return;
