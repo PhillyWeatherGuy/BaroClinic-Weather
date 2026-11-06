@@ -54,12 +54,12 @@ export async function fetchManifest(run = null, model = null, param = null) {
 
     for (const url of urlsToTry) {
         try {
-            // 🌟 Turn off caching for aifs_ens manifests
+            // 🌟 Standard caching enabled for manifests
             const fetchOptions = {
                 signal: stateManager.activeFetchController?.signal,
-                cache: activeModel === 'aifs_ens' ? 'no-store' : 'default'
+                cache: 'default'
             };
-            const resp = await fetch(url + `?t=${Date.now()}`, fetchOptions);
+            const resp = await fetch(url, fetchOptions);
             if (resp.ok) {
                 fetchedData = await resp.json();
                 console.log(`✅ Loaded manifest from: ${url}`);
@@ -199,15 +199,12 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         const chunk = stateManager.manifest?.chunks?.[chunkIndex];
         if (!chunk) throw new Error(`Chunk index ${chunkIndex} missing from manifest`);
 
-        const rawChunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
+        const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
         
-        // 🌟 TURN OFF CACHING FOR AIFS-ENS CHUNKS
-        const isEnsemble = stateManager.activeModel === 'aifs_ens';
-        const chunkUrl = rawChunkUrl + (isEnsemble ? `?t=${Date.now()}` : '');
-        
+        // 🌟 Standard caching enabled for chunks
         const imgResp = await fetch(chunkUrl, { 
             signal: stateManager.activeFetchController?.signal,
-            cache: isEnsemble ? 'no-store' : 'default'
+            cache: 'default'
         });
         if (!imgResp.ok) throw new Error(`Failed to load chunk asset: ${imgResp.status}`);
 
@@ -258,10 +255,10 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
             let ptypeBytes = null;
             if (chunk.ptype_file) {
                 try {
-                    const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}` + (isEnsemble ? `?t=${Date.now()}` : '');
+                    const ptypeUrl = `${stateManager.BASE_URL}${chunk.ptype_file}`;
                     const ptypeResp = await fetch(ptypeUrl, { 
                         signal: stateManager.activeFetchController?.signal,
-                        cache: isEnsemble ? 'no-store' : 'default'
+                        cache: 'default'
                     });
                     if (ptypeResp.ok) {
                         const ptypeBuffer = await ptypeResp.arrayBuffer();
