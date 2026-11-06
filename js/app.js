@@ -19,7 +19,7 @@ import {
     hideToast 
 } from './components/viewerUI.js';
 
-// 🌟 Universal overlays
+// 🌟 Universal overlay
 import { 
     initCityOverlay, 
     updateCityCallouts, 
