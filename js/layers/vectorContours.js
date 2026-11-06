@@ -840,8 +840,9 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
     
     // Only cache if binary has loaded or geometry was actually present
     if (prepared.count > 0 || !masterData.binary) {
-        // 🌟 On mobile, keep only the 8 most recent steps in memory so 85-step runs don't exceed RAM
-        if (isMobile && stepCache.size > 8) {
+        // 🌟 Bounded LRU cache: 8 on mobile, 40 on desktop (4 complete steps x 10 members) keeps RAM capped
+        const maxCacheSize = isMobile ? 8 : 40;
+        if (stepCache.size > maxCacheSize) {
             const oldestKey = stepCache.keys().next().value;
             stepCache.delete(oldestKey);
         }
