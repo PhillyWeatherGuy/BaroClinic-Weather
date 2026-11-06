@@ -114,23 +114,7 @@ const fragmentShaderBody = `
         return clamp(total, 0.0, 1.0);
     }
 
-    vec4 getPtypeColor(float code, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
-        if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
-            return texture(snowTex, vec2(palU, 0.5));
-        } else if (code == 3.0 || code == 4.0 || code == 12.0) {
-            return texture(frzrTex, vec2(palU, 0.5));
-        } else if (code == 7.0 || code == 8.0) {
-            return texture(sleetTex, vec2(palU, 0.5));
-        }
-        return texture(palTex, vec2(palU, 0.5));
-    }
-
     vec4 sampleSmoothPtypeColor(sampler2D ptypeTex, vec2 uv, vec2 texRes, float palU, sampler2D palTex, sampler2D frzrTex, sampler2D sleetTex, sampler2D snowTex) {
-        // 🌟 Check if ptype data is missing by sampling the blue channel
-        if (texture(ptypeTex, vec2(fract(uv.x), uv.y)).b > 0.01) {
-            return texture(palTex, vec2(palU, 0.5));
-        }
-
         vec2 pos = uv * texRes - 0.5;
         vec2 i = floor(pos);
         vec2 f = fract(pos);
@@ -164,7 +148,7 @@ const fragmentShaderBody = `
                 float xCoord = fract((i.x + float(dx) + 0.5) * invTex.x + 1.0);
                 float weight = weightY * wx[dx + 2];
 
-                // 🌟 Sample P-Type code from green channel
+                // 🌟 P-Type code is sampled directly from the green channel
                 float code = floor(texture(ptypeTex, vec2(xCoord, yCoord)).g * 255.0 + 0.5);
 
                 if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) {
@@ -184,7 +168,7 @@ const fragmentShaderBody = `
             return texture(palTex, vec2(palU, 0.5));
         }
 
-        // Dominant consensus category selection
+        // Dominant category selection with clean solid colors
         float maxW = max(max(wSnow, wSleet), max(wFrzr, wRain));
 
         if (maxW == wFrzr) {
@@ -299,7 +283,7 @@ export function createEnsembleShaderLayer(mapInstance) {
             const initialPalette = paletteFunc(stateManager.activeParam || '2t');
             this.paletteTex = createEnsemblePaletteTexture(gl, initialPalette, stateManager.activeParam === 'prate');
             
-            // 🌟 Initialize P-Type palettes
+            // 🌟 Load P-Type Palettes
             this.frzrPaletteTex = createEnsemblePaletteTexture(gl, FRZR_PALETTE, true);
             this.sleetPaletteTex = createEnsemblePaletteTexture(gl, SLEET_PALETTE, true);
             this.snowPaletteTex = createEnsemblePaletteTexture(gl, SNOW_PALETTE, true);
@@ -390,7 +374,6 @@ export function createEnsembleShaderLayer(mapInstance) {
                     float palU = (palIndex + 0.5) / 256.0;
                     vec4 color = texture(u_paletteTexture, vec2(palU, 0.5));
 
-                    // 🌟 Apply P-Type when enabled (for prate)
                     if (u_hasPtype > 0.5) {
                         color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
@@ -452,7 +435,6 @@ export function createEnsembleShaderLayer(mapInstance) {
                     float palU = (palIndex + 0.5) / 256.0;
                     vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
 
-                    // 🌟 Apply P-Type when enabled (for prate)
                     if (u_hasPtype > 0.5) {
                         color = sampleSmoothPtypeColor(u_dataTexture, uv, u_texResolution, palU, u_paletteTexture, u_frzrPalette, u_sleetPalette, u_snowPalette);
                     }
@@ -509,7 +491,6 @@ export function createEnsembleShaderLayer(mapInstance) {
                 this.texResolution = [source.width, source.height];
             }
 
-            // 🌟 Multi-Member Texture Preloading
             if (source.frames && Array.isArray(source.frames)) {
                 source.frames.forEach((frameItem, fIdx) => {
                     if (Array.isArray(frameItem)) {
@@ -573,7 +554,6 @@ export function createEnsembleShaderLayer(mapInstance) {
             mapInstance.triggerRepaint();
         },
 
-        // 🌟 SINGLE-PASS 10-VIEWPORT SPLIT-SCREEN RENDERER
         renderAllMembersGrid: function(gl, matrixOrArgs, boxRects) {
             if (!this.currentFrameState || !boxRects || boxRects.length === 0) return;
             const cIdx = this.currentFrameState.chunkIndex;
@@ -595,7 +575,6 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
 
-            // 🌟 Bind P-Type Palettes
             gl.activeTexture(gl.TEXTURE2);
             gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 2);
@@ -608,7 +587,9 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.snowPaletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
 
-            const hasPtype = (stateManager.activeParam === 'prate') ? 1.0 : 0.0;
+            // 🌟 Protect against rainbow glitch: only use P-Type if the file actually exists on this chunk
+            const chunkManifest = stateManager.manifest?.chunks?.[cIdx];
+            const hasPtype = (stateManager.activeParam === 'prate' && chunkManifest?.ptype_file) ? 1.0 : 0.0;
             gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), hasPtype);
 
             if (projData) {
@@ -651,7 +632,6 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
             gl.enable(gl.SCISSOR_TEST);
 
-            // 🌟 Rapid 0.3ms draw loop across all 10 member viewports
             for (let m = 0; m < 10; m++) {
                 const rect = boxRects[m];
                 if (!rect || rect.w <= 0 || rect.h <= 0) continue;
@@ -674,7 +654,6 @@ export function createEnsembleShaderLayer(mapInstance) {
         },
 
         render: function (gl, matrixOrArgs) {
-            // If grid mode is armed and rectangles are provided, execute the 10-viewport split-screen pass
             if (this.isGridMode && this.gridRects) {
                 this.renderAllMembersGrid(gl, matrixOrArgs, this.gridRects);
                 return;
@@ -702,7 +681,6 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
 
-            // 🌟 Bind P-Type Palettes
             gl.activeTexture(gl.TEXTURE2);
             gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 2);
@@ -715,7 +693,10 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.bindTexture(gl.TEXTURE_2D, this.snowPaletteTex);
             gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
 
-            const hasPtype = (stateManager.activeParam === 'prate') ? 1.0 : 0.0;
+            // 🌟 Protect against rainbow glitch: only use P-Type if the file actually exists on this chunk
+            const cIdx = this.currentFrameState ? this.currentFrameState.chunkIndex : 0;
+            const chunkManifest = stateManager.manifest?.chunks?.[cIdx];
+            const hasPtype = (stateManager.activeParam === 'prate' && chunkManifest?.ptype_file) ? 1.0 : 0.0;
             gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), hasPtype);
 
             if (projData) {
