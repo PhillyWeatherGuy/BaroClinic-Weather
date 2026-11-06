@@ -49,6 +49,10 @@ let haloCanvas = null;
 let haloCtx = null;
 let lastGlobeMatrix = null;
 
+// 🌟 THE "FROZEN BASEMAP" SANDWICH CACHE
+let staticBasemapCanvas = null;
+let isBasemapCaptured = false;
+
 const popup = new maplibregl.Popup({ closeButton: false });
 
 const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -242,6 +246,48 @@ function updateCachedDimensions() {
     return cachedTargetSize;
 }
 
+// 🌟 NEW: Snapshot the static basemap without the weather
+function captureBasemap() {
+    if (!map || !map.isStyleLoaded()) return;
+    const mapCanvas = map.getCanvas();
+    if (!staticBasemapCanvas) {
+        staticBasemapCanvas = document.createElement('canvas');
+    }
+    staticBasemapCanvas.width = mapCanvas.width;
+    staticBasemapCanvas.height = mapCanvas.height;
+
+    // Temporarily hide our weather/contours to take a clean snapshot of the basemap
+    const toggleWeather = (show) => {
+        const vis = show ? 'visible' : 'none';
+        if (map.style._layers['weather-gpu-shader']) map.style._layers['weather-gpu-shader'].visibility = vis;
+        if (map.style._layers['contour-gpu-layer']) map.style._layers['contour-gpu-layer'].visibility = vis;
+        if (map.style._layers['contour-master-label-layer']) map.style._layers['contour-master-label-layer'].visibility = vis;
+    };
+
+    toggleWeather(false);
+    map._render(); 
+    
+    const ctx = staticBasemapCanvas.getContext('2d');
+    ctx.drawImage(mapCanvas, 0, 0);
+    
+    toggleWeather(true);
+    isBasemapCaptured = true;
+}
+
+// 🌟 NEW: Turn on/off MapLibre's internal basemap layers bypassing style diffing
+function toggleBasemapLayers(show) {
+    if (!map || !map.isStyleLoaded()) return;
+    const vis = show ? 'visible' : 'none';
+    const layers = map.getStyle().layers;
+    layers.forEach(l => {
+        if (l.id !== 'weather-gpu-shader' && l.id !== 'contour-gpu-layer' && l.id !== 'contour-master-label-layer') {
+            if (map.style._layers[l.id]) {
+                map.style._layers[l.id].visibility = vis;
+            }
+        }
+    });
+}
+
 // 🌟 Non-blocking 60 FPS multi-member capture loop
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
@@ -276,25 +322,22 @@ export async function renderAllEnsembleMembers() {
             sy = (mapCanvas.height - sHeight) / 2;
         }
 
-        const bgColor = stateManager.currentTheme === 'light' ? '#ffffff' : '#000000';
-        let circle = null;
-        if (stateManager.activeView === '3d' && lastGlobeMatrix) {
-            circle = getGlobeScreenCircle(lastGlobeMatrix, mapCanvas.width, mapCanvas.height);
+        // 🌟 1. CAPTURE FROZEN BASEMAP (Only happens once when map stops moving)
+        if (!isBasemapCaptured) {
+            captureBasemap();
         }
-        const scaleX = targetW / sWidth;
-        const scaleY = targetH / sHeight;
-        const cardCx = circle ? (circle.cx - sx) * scaleX : 0;
-        const cardCy = circle ? (circle.cy - sy) * scaleY : 0;
-        const cardR = circle ? circle.r * scaleX : 0;
 
-        // 🌟 Cycles through all 10 members in ~12ms without blocking the browser
+        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS
+        toggleBasemapLayers(false);
+
+        // 🌟 Cycles through all 10 members seamlessly (MapLibre basemap is sleeping!)
         for (let m = 0; m < 10; m++) {
             customShaderLayer.setActiveMember(m);
             if (typeof setContourActiveMember === 'function') {
                 setContourActiveMember(m);
             }
             if (typeof map._render === 'function') {
-                map._render();
+                map._render(); // Lightning fast now, ONLY draws transparent weather
             }
 
             const item = cardList[m];
@@ -305,20 +348,17 @@ export async function renderAllEnsembleMembers() {
                 cvs.height = targetH;
             }
 
-            item.ctx.fillStyle = bgColor;
-            item.ctx.fillRect(0, 0, targetW, targetH);
-
-            if (circle && cardR > 5) {
-                item.ctx.save();
-                item.ctx.beginPath();
-                item.ctx.arc(cardCx, cardCy, cardR, 0, Math.PI * 2);
-                item.ctx.clip();
-                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-                item.ctx.restore();
-            } else {
-                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            // 🌟 3. ASSEMBLE THE SANDWICH
+            // Paint the crisp, frozen basemap into the card
+            if (staticBasemapCanvas) {
+                item.ctx.drawImage(staticBasemapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
             }
+            // Overlay the live, transparent weather on top
+            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
         }
+
+        // 🌟 4. RESTORE BASEMAP
+        toggleBasemapLayers(true);
 
         // Restore active member to 0
         customShaderLayer.setActiveMember(0);
@@ -326,7 +366,7 @@ export async function renderAllEnsembleMembers() {
             setContourActiveMember(0);
         }
         if (typeof map._render === 'function') {
-            map._render();
+            map._render(); // Final redraw to put the main map back to normal
         }
     } finally {
         isRenderingEnsemble = false;
@@ -381,17 +421,6 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         sy = (mapCanvas.height - sHeight) / 2;
     }
 
-    const bgColor = stateManager.currentTheme === 'light' ? '#ffffff' : '#000000';
-    let circle = null;
-    if (stateManager.activeView === '3d' && lastGlobeMatrix) {
-        circle = getGlobeScreenCircle(lastGlobeMatrix, mapCanvas.width, mapCanvas.height);
-    }
-    const scaleX = targetW / sWidth;
-    const scaleY = targetH / sHeight;
-    const cardCx = circle ? (circle.cx - sx) * scaleX : 0;
-    const cardCy = circle ? (circle.cy - sy) * scaleY : 0;
-    const cardR = circle ? circle.r * scaleX : 0;
-
     cardList.forEach((item, idx) => {
         if (targetMemberIndex !== null && idx !== targetMemberIndex) return;
 
@@ -402,19 +431,7 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         }
 
         try {
-            item.ctx.fillStyle = bgColor;
-            item.ctx.fillRect(0, 0, targetW, targetH);
-
-            if (circle && cardR > 5) {
-                item.ctx.save();
-                item.ctx.beginPath();
-                item.ctx.arc(cardCx, cardCy, cardR, 0, Math.PI * 2);
-                item.ctx.clip();
-                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-                item.ctx.restore();
-            } else {
-                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-            }
+            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
         } catch (err) {}
     });
 }
@@ -1045,6 +1062,7 @@ document.querySelectorAll('.mode-nav-btn').forEach((button) => {
 
 initViewerUI(
     (stepIndex) => {
+        // 🌟 Restored to instant 60 FPS slider! 
         if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
         renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
     },
@@ -1081,13 +1099,12 @@ map.on('load', async () => {
 map.on('render', () => {
     if (!isDrawingEnsemble || isRenderingEnsemble) return;
 
-    // 🌟 When user pans or zooms, update cards smoothly
     if (map.isMoving()) {
+        isBasemapCaptured = false; // 🌟 Force a fresh clean snapshot next time we stop
         drawEnsembleBoxes(0);
     }
 });
 
-// 🌟 When camera finishes moving, immediately update all 10 members
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
         updateCachedDimensions();
