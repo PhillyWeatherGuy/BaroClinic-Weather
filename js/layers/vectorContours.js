@@ -635,7 +635,7 @@ function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
             const h11 = t3 - t2;
 
             const x = h00 * p1[0] + h10 * t1x + h01 * p2[0] + h11 * t2x;
-            const y = h00 * p1[1] + h10 * t1y + h01 * p2[1] + h11 * t2y;
+            const y = h00 * p1[1] + h10 * t1y + h01 * p2[0] + h11 * t2y;
             smoothed.push([x, y]);
         }
     }
@@ -1169,6 +1169,15 @@ async function decodeContourBinary(buffer, coordinateScale = 1000) {
             features.push({ type: 'Feature', geometry: { type: 'MultiLineString', coordinates: lines } });
         }
         steps.set(String(step), features);
+        if (step >= 1000) {
+            const sNum = Math.floor(step / 1000);
+            const mNum = step % 1000;
+            steps.set(`${sNum}_m${mNum}`, features);
+            steps.set(`${sNum}_${mNum}`, features);
+        } else if (step < 10) {
+            steps.set(`0_m${step}`, features);
+            steps.set(`0_${step}`, features);
+        }
     }
     return steps;
 }
@@ -1252,6 +1261,7 @@ function binaryStepToGeoJson(step, masterData, member = currentMember) {
     // 🌟 Support member-specific binary step keys
     const features = activeContourBinary?.get(`${stepKey}_m${member}`) ||
                      activeContourBinary?.get(`${stepKey}_${member}`) ||
+                     activeContourBinary?.get(String(stepNum * 1000 + member)) ||
                      activeContourBinary?.get(stepKey) || 
                      activeContourBinary?.get(String(step)) ||
                      activeContourBinary?.get(stepKey.padStart(3, '0'));
