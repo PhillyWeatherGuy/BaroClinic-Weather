@@ -40,8 +40,6 @@ import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.
 
 let customShaderLayer = null;
 let renderDebounceId = null;
-let ensembleTimeoutId = null;   // 🌟 Added for ensemble slider throttle
-let lastEnsembleRenderTime = 0; // 🌟 Added for ensemble slider throttle
 let activeRenderId = 0;
 let polarMapLoaded = false;
 let isFirstLoad = true; // 🌟 Forces default model/param on initial site load
@@ -994,37 +992,10 @@ document.querySelectorAll('.mode-nav-btn').forEach((button) => {
     button.addEventListener('click', () => switchAppMode(button.dataset.mode));
 });
 
-// 🌟 THROTLED SLIDER LISTENER 
 initViewerUI(
     (stepIndex) => {
-        if (stateManager.activeModel === 'aifs_ens') {
-            if (renderDebounceId) {
-                cancelAnimationFrame(renderDebounceId);
-                renderDebounceId = null;
-            }
-            const now = Date.now();
-            
-            // Limit ensemble slider scrubs to once every 300ms (typical auto-play speed)
-            if (now - lastEnsembleRenderTime < 300) {
-                if (ensembleTimeoutId) clearTimeout(ensembleTimeoutId);
-                ensembleTimeoutId = setTimeout(() => {
-                    lastEnsembleRenderTime = Date.now();
-                    renderFrame(stepIndex);
-                }, 300 - (now - lastEnsembleRenderTime));
-                return;
-            }
-            lastEnsembleRenderTime = now;
-            if (ensembleTimeoutId) clearTimeout(ensembleTimeoutId);
-            renderFrame(stepIndex);
-        } else {
-            // Normal models stay at instant 60 FPS
-            if (ensembleTimeoutId) {
-                clearTimeout(ensembleTimeoutId);
-                ensembleTimeoutId = null;
-            }
-            if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
-            renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
-        }
+        if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
+        renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
     },
     (newTheme) => { applyTheme(newTheme); },
     (newView) => { applyView(newView); },
@@ -1059,13 +1030,13 @@ map.on('load', async () => {
 map.on('render', () => {
     if (!isDrawingEnsemble || isRenderingEnsemble) return;
 
-    // When user pans or zooms, update cards smoothly without full render re-triggers
+    // 🌟 When user pans or zooms, update cards smoothly
     if (map.isMoving()) {
         drawEnsembleBoxes(0);
     }
 });
 
-// When camera finishes moving, immediately update all 10 members
+// 🌟 When camera finishes moving, immediately update all 10 members
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
         updateCachedDimensions();
