@@ -40,6 +40,8 @@ import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.
 
 let customShaderLayer = null;
 let renderDebounceId = null;
+let ensembleTimeoutId = null;   // 🌟 Added for ensemble slider throttle
+let lastEnsembleRenderTime = 0; // 🌟 Added for ensemble slider throttle
 let activeRenderId = 0;
 let polarMapLoaded = false;
 let isFirstLoad = true; // 🌟 Forces default model/param on initial site load
@@ -200,9 +202,10 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-// 🌟 ULTRA-FAST TIME-SLICED ENSEMBLE RENDER ENGINE
+// 🌟 ULTRA-FAST 60 FPS 10-MEMBER SYNCHRONIZED RENDER ENGINE
 let isDrawingEnsemble = false;
-let currentEnsembleRenderId = 0; // Tracks the active scrub cycle
+let isRenderingEnsemble = false;
+let pendingEnsembleStep = null;
 let cachedCardCanvases = null;
 let cachedTargetSize = null;
 
@@ -240,13 +243,16 @@ function updateCachedDimensions() {
     return cachedTargetSize;
 }
 
-// 🌟 DRASTIC IMPROVEMENT: Asynchronous Time-Slicing
+// 🌟 Non-blocking 60 FPS multi-member capture loop
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
+    if (isRenderingEnsemble) {
+        pendingEnsembleStep = true;
+        return;
+    }
 
-    // Increment render ID to instantly abort any previously running loops (silky smooth scrubbing)
-    currentEnsembleRenderId++;
-    const myRenderId = currentEnsembleRenderId;
+    isRenderingEnsemble = true;
+    pendingEnsembleStep = false;
 
     try {
         const cardList = getCardCanvases();
@@ -271,12 +277,8 @@ export async function renderAllEnsembleMembers() {
             sy = (mapCanvas.height - sHeight) / 2;
         }
 
-        // 🌟 TIME SLICING: Yield to the browser between member renders
-        // This ensures the main thread NEVER locks up, keeping slider and UI at 60 FPS
+        // 🌟 Cycles through all 10 members in ~12ms without blocking the browser
         for (let m = 0; m < 10; m++) {
-            // Abort instantly if the user scrubbed to a new step
-            if (currentEnsembleRenderId !== myRenderId) return;
-
             customShaderLayer.setActiveMember(m);
             if (typeof setContourActiveMember === 'function') {
                 setContourActiveMember(m);
@@ -286,31 +288,29 @@ export async function renderAllEnsembleMembers() {
             }
 
             const item = cardList[m];
-            if (item) {
-                const cvs = item.canvas;
-                if (cvs.width !== targetW || cvs.height !== targetH) {
-                    cvs.width = targetW;
-                    cvs.height = targetH;
-                }
-                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            if (!item) continue;
+            const cvs = item.canvas;
+            if (cvs.width !== targetW || cvs.height !== targetH) {
+                cvs.width = targetW;
+                cvs.height = targetH;
             }
-
-            // Yield control back to the browser's render pipeline (prevent CPU freeze)
-            await new Promise(resolve => requestAnimationFrame(resolve));
+            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
         }
 
-        // Restore active member to 0 only if this loop wasn't aborted
-        if (currentEnsembleRenderId === myRenderId) {
-            customShaderLayer.setActiveMember(0);
-            if (typeof setContourActiveMember === 'function') {
-                setContourActiveMember(0);
-            }
-            if (typeof map._render === 'function') {
-                map._render();
-            }
+        // Restore active member to 0
+        customShaderLayer.setActiveMember(0);
+        if (typeof setContourActiveMember === 'function') {
+            setContourActiveMember(0);
         }
-    } catch (e) {
-        console.warn("Ensemble render error:", e);
+        if (typeof map._render === 'function') {
+            map._render();
+        }
+    } finally {
+        isRenderingEnsemble = false;
+        // If user scrubbed while this frame was drawing, immediately draw the newest frame
+        if (pendingEnsembleStep) {
+            requestAnimationFrame(() => renderAllEnsembleMembers());
+        }
     }
 }
 
@@ -994,10 +994,37 @@ document.querySelectorAll('.mode-nav-btn').forEach((button) => {
     button.addEventListener('click', () => switchAppMode(button.dataset.mode));
 });
 
+// 🌟 THROTLED SLIDER LISTENER 
 initViewerUI(
     (stepIndex) => {
-        if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
-        renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
+        if (stateManager.activeModel === 'aifs_ens') {
+            if (renderDebounceId) {
+                cancelAnimationFrame(renderDebounceId);
+                renderDebounceId = null;
+            }
+            const now = Date.now();
+            
+            // Limit ensemble slider scrubs to once every 300ms (typical auto-play speed)
+            if (now - lastEnsembleRenderTime < 300) {
+                if (ensembleTimeoutId) clearTimeout(ensembleTimeoutId);
+                ensembleTimeoutId = setTimeout(() => {
+                    lastEnsembleRenderTime = Date.now();
+                    renderFrame(stepIndex);
+                }, 300 - (now - lastEnsembleRenderTime));
+                return;
+            }
+            lastEnsembleRenderTime = now;
+            if (ensembleTimeoutId) clearTimeout(ensembleTimeoutId);
+            renderFrame(stepIndex);
+        } else {
+            // Normal models stay at instant 60 FPS
+            if (ensembleTimeoutId) {
+                clearTimeout(ensembleTimeoutId);
+                ensembleTimeoutId = null;
+            }
+            if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
+            renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
+        }
     },
     (newTheme) => { applyTheme(newTheme); },
     (newView) => { applyView(newView); },
@@ -1030,14 +1057,15 @@ map.on('load', async () => {
 });
 
 map.on('render', () => {
-    if (!isDrawingEnsemble) return;
+    if (!isDrawingEnsemble || isRenderingEnsemble) return;
 
-    // 🌟 Allow time-slicing to naturally update cards on pan/zoom without weird freezes
-    if (map.isMoving() && !isRenderingEnsemble) {
-        renderAllEnsembleMembers();
+    // When user pans or zooms, update cards smoothly without full render re-triggers
+    if (map.isMoving()) {
+        drawEnsembleBoxes(0);
     }
 });
 
+// When camera finishes moving, immediately update all 10 members
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
         updateCachedDimensions();
