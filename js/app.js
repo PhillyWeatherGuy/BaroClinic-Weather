@@ -243,75 +243,43 @@ function updateCachedDimensions() {
     return cachedTargetSize;
 }
 
-// 🌟 Ultra-Fast 10-Member Basemap + Weather Synchronized Renderer
-export async function renderAllEnsembleMembers() {
-    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
-    if (isRenderingEnsemble) {
-        pendingEnsembleStep = true;
-        return;
+// 🌟 Single-Pass WebGL Scissor Grid — zero CPU copy, full GPU speed
+export function renderAllEnsembleMembers() {
+    if (!customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
+
+    const cards = document.querySelectorAll('.map-card');
+    if (!cards || cards.length === 0) return;
+
+    const mapCanvas = map.getCanvas();
+    if (!mapCanvas) return;
+    const mapRect = mapCanvas.getBoundingClientRect();
+    const dpr = (mapCanvas.width / mapRect.width) || window.devicePixelRatio || 1;
+
+    const rects = Array.from(cards).map(card => {
+        const cr = card.getBoundingClientRect();
+        return {
+            x: Math.round((cr.left - mapRect.left) * dpr),
+            // WebGL Y is flipped: 0 = bottom of canvas
+            y: Math.round((mapRect.bottom - cr.bottom) * dpr),
+            w: Math.round(cr.width * dpr),
+            h: Math.round(cr.height * dpr)
+        };
+    });
+
+    customShaderLayer.setGridMode(true, rects);
+    if (stateManager.activeFrameState) {
+        customShaderLayer.updateFrame(stateManager.activeFrameState);
     }
-
-    isRenderingEnsemble = true;
-    pendingEnsembleStep = false;
-
-    try {
-        const cardList = getCardCanvases();
-        const mapCanvas = map.getCanvas();
-        if (!mapCanvas || cardList.length === 0) return;
-
-        let size = cachedTargetSize || updateCachedDimensions();
-        if (!size) return;
-
-        const targetW = size.w;
-        const targetH = size.h;
-
-        const srcAspect = mapCanvas.width / mapCanvas.height;
-        const dstAspect = targetW / targetH;
-        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
-
-        if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
-            sx = (mapCanvas.width - sWidth) / 2;
-        } else {
-            sHeight = mapCanvas.width / dstAspect;
-            sy = (mapCanvas.height - sHeight) / 2;
-        }
-
-        const bgColor = stateManager.currentTheme === 'light' ? '#ffffff' : '#000000';
-
-        // 🌟 Cycles through all 10 members and paints basemap + member weather to each card
-        for (let m = 0; m < 10; m++) {
-            customShaderLayer.setActiveMember(m);
-            if (typeof map._render === 'function') {
-                map._render();
-            }
-
-            const item = cardList[m];
-            if (!item) continue;
-            const cvs = item.canvas;
-            if (cvs.width !== targetW || cvs.height !== targetH) {
-                cvs.width = targetW;
-                cvs.height = targetH;
-            }
-
-            item.ctx.imageSmoothingQuality = 'low';
-            item.ctx.fillStyle = bgColor;
-            item.ctx.fillRect(0, 0, targetW, targetH);
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-        }
-
-        // Restore active member to 0
-        customShaderLayer.setActiveMember(0);
-        if (typeof map._render === 'function') {
-            map._render();
-        }
-    } finally {
-        isRenderingEnsemble = false;
-        if (pendingEnsembleStep) {
-            requestAnimationFrame(() => renderAllEnsembleMembers());
-        }
-    }
+    map.triggerRepaint();
 }
+
+window.addEventListener('resize', () => {
+    if (stateManager.activeModel === 'aifs_ens') {
+        renderAllEnsembleMembers();
+    }
+});
+
+
 
 function syncEnsembleGrid() {
     const grid = document.getElementById('ensemble-grid');
@@ -320,16 +288,13 @@ function syncEnsembleGrid() {
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
     isDrawingEnsemble = shouldShow;
-    cachedCardCanvases = null;
-    cachedTargetSize = null;
 
-    if (customShaderLayer && typeof customShaderLayer.setGridMode === 'function') {
-        customShaderLayer.setGridMode(false, null);
-    }
-    
     if (shouldShow) {
-        updateCachedDimensions();
-        setTimeout(renderAllEnsembleMembers, 80);
+        // small delay so the DOM has laid out the cards before we measure their rects
+        setTimeout(renderAllEnsembleMembers, 50);
+    } else if (customShaderLayer && typeof customShaderLayer.setGridMode === 'function') {
+        customShaderLayer.setGridMode(false, null);
+        map.triggerRepaint();
     }
 }
 
