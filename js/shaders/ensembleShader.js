@@ -685,6 +685,9 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.disable(gl.DEPTH_TEST);
             gl.enable(gl.SCISSOR_TEST);
 
+            // Canvas aspect ratio — the projection matrix was computed for this
+            const canvasAspect = W / H;
+
             // ─── Step 3: Per-member render loop ───
             for (let m = 0; m < 10; m++) {
                 const rect = boxRects[m];
@@ -693,10 +696,28 @@ export function createEnsembleShaderLayer(mapInstance) {
                 const tex = this.chunkTextures[`${cIdx}_${fIdx}_m${m}`] || this.activeTex;
                 if (!tex) continue;
 
-                // Scissor to this card's region only
-                gl.scissor(rect.x, rect.y, rect.w, rect.h);
+                // ── Letterbox: fit canvas aspect into card, keeping same map view ──
+                const cardAspect = rect.w / rect.h;
+                let vpW, vpH, vpX, vpY;
+                if (cardAspect > canvasAspect) {
+                    // Card is wider than canvas → pillarbox (pad sides)
+                    vpH = rect.h;
+                    vpW = Math.round(rect.h * canvasAspect);
+                    vpX = rect.x + Math.round((rect.w - vpW) / 2);
+                    vpY = rect.y;
+                } else {
+                    // Card is taller than canvas → letterbox (pad top/bottom)
+                    vpW = rect.w;
+                    vpH = Math.round(rect.w / canvasAspect);
+                    vpX = rect.x;
+                    vpY = rect.y + Math.round((rect.h - vpH) / 2);
+                }
 
-                // ── Blit the basemap into this card region ──
+                // Both viewport AND scissor on the aspect-correct sub-rect
+                gl.viewport(vpX, vpY, vpW, vpH);
+                gl.scissor(vpX, vpY, vpW, vpH);
+
+                // ── Blit the basemap (same view for every card) ──
                 gl.useProgram(this.blitProgram);
                 gl.bindBuffer(gl.ARRAY_BUFFER, this.blitBuffer);
                 const blitPos = gl.getAttribLocation(this.blitProgram, 'a_pos');
@@ -709,7 +730,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 gl.drawArrays(gl.TRIANGLES, 0, 6);
                 gl.disableVertexAttribArray(blitPos);
 
-                // ── Draw weather layer for member m on top ──
+                // ── Draw weather for member m (projection matrix unchanged = same view) ──
                 gl.useProgram(program);
                 gl.activeTexture(gl.TEXTURE1);
                 gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
@@ -768,7 +789,8 @@ export function createEnsembleShaderLayer(mapInstance) {
             }
 
             gl.disable(gl.SCISSOR_TEST);
-            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+            gl.viewport(0, 0, W, H);
+
         },
 
 
