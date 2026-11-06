@@ -303,12 +303,12 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                 return volumeObj;
             }
 
-            // 🌟 NEW PATH: ENSEMBLE CHUNKED (10 members bundled together)
+            // 🌟 OPTIMIZED PATH: ENSEMBLE CHUNKED (Zero-copy raw byte slices for 10 members)
             if (stateManager.manifest.type === 'ensemble_chunked') {
                 const numMembers = stateManager.manifest.members || 10;
                 const memberSizeBytes = chunk.member_size_bytes || (numFrames * frameSize);
                 
-                const outFrames = []; // Array of arrays: [ [m1_bmp, m2_bmp...m10_bmp], [m1_bmp...m10_bmp] ]
+                const outFrames = []; // Array of arrays: [ [m0, m1...m9], [m0, m1...m9] ]
 
                 for (let f = 0; f < numFrames; f++) {
                     const stepVal = (chunk.forecast_steps || [])[f];
@@ -317,36 +317,36 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                         continue;
                     }
 
-                    const memberBitmaps = [];
+                    const memberFrames = [];
                     for (let m = 0; m < numMembers; m++) {
                         // Offset formula: (Member Index * Total Size of Member Block) + (Frame Index * Size of One Frame)
                         const srcStart = (m * memberSizeBytes) + (f * frameSize);
                         const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
                         
-                        // 🌟 Extract P-Type data for this specific member
-                        let ptypeSlice = null;
-                        if (ptypeBytes) {
-                            ptypeSlice = ptypeBytes.subarray(srcStart, srcStart + frameSize);
-                        }
+                        // Extract P-Type data for this specific member
+                        const ptypeSlice = ptypeBytes ? ptypeBytes.subarray(srcStart, srcStart + frameSize) : null;
                         
-                        // Create the bitmap for this specific member and frame
-                        const bitmap = await frameToBitmap(frameBytes, frameW, frameH, shouldUpscale, ptypeSlice);
-                        memberBitmaps.push(bitmap);
+                        // 🌟 Zero-copy raw slices (Bypasses slow 32-bit canvas ImageBitmap allocation)
+                        memberFrames.push({
+                            data: frameBytes,
+                            ptype: ptypeSlice
+                        });
                     }
-                    outFrames.push(memberBitmaps);
+                    outFrames.push(memberFrames);
                 }
 
                 if (currentGen !== null && currentGen !== stateManager.loadGeneration) {
-                    outFrames.forEach(mArr => { if(mArr) mArr.forEach(b => { if (b && typeof b.close === 'function') b.close(); }); });
                     throw new Error("Load cancelled");
                 }
 
                 const volumeObj = {
                     frames: outFrames,
-                    width: shouldUpscale ? frameW * 2 : frameW,
-                    height: shouldUpscale ? frameH * 2 : frameH,
+                    width: frameW,
+                    height: frameH,
                     isVolume: true,
-                    isEnsemble: true
+                    isEnsemble: true,
+                    isRaw: true,
+                    hasPtype: Boolean(ptypeBytes)
                 };
 
                 stateManager.loadedChunkBitmaps[chunkIndex] = volumeObj;
