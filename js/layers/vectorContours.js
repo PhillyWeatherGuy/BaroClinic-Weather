@@ -1249,6 +1249,17 @@ function decodeContourV2(view, coordinateScale) {
 
         if (offset !== payloadEnd) return null;
         steps.set(String(step), features);
+        
+        // 🌟 Map packed member integer (step * 1000 + member) to string keys
+        if (step >= 1000) {
+            const sNum = Math.floor(step / 1000);
+            const mNum = step % 1000;
+            steps.set(`${sNum}_m${mNum}`, features);
+            steps.set(`${sNum}_${mNum}`, features);
+        } else if (step < 10) {
+            steps.set(`0_m${step}`, features);
+            steps.set(`0_${step}`, features);
+        }
     }
     return steps;
 }
@@ -1258,7 +1269,7 @@ function binaryStepToGeoJson(step, masterData, member = currentMember) {
     const stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     const stepKey = String(stepNum);
 
-    // 🌟 Support member-specific binary step keys
+    // 🌟 Support member-specific binary step keys with raw integer fallback
     const features = activeContourBinary?.get(`${stepKey}_m${member}`) ||
                      activeContourBinary?.get(`${stepKey}_${member}`) ||
                      activeContourBinary?.get(String(stepNum * 1000 + member)) ||
@@ -1268,6 +1279,7 @@ function binaryStepToGeoJson(step, masterData, member = currentMember) {
 
     const stepObj = masterData.steps[`${stepKey}_m${member}`] ||
                     masterData.steps[`${stepKey}_${member}`] ||
+                    masterData.steps[String(stepNum * 1000 + member)] ||
                     masterData.steps[stepKey] ||
                     masterData.steps[stepKey.padStart(3, '0')] ||
                     masterData.steps[`F${stepKey.padStart(3, '0')}`] ||
