@@ -10,6 +10,7 @@ let activeMasterKey = null;
 let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
+let currentMember = 0; // 🌟 Tracks the active ensemble member (0-9)
 
 let displayedStep = null;
 let pendingApply = null;
@@ -72,7 +73,6 @@ function themeContourFeatures(featureCollection, masterData) {
     }
 
     // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
-    // 🌟 UPDATED: Added w10 and gust10 to receive the MSLP styling
     const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || activeParam === 'w10' || activeParam === 'gust10' || masterData?.parameter === 'prate';
     if (isPrate) {
         const isDark = stateManager.currentTheme === 'dark';
@@ -158,7 +158,6 @@ function themeContourFeatures(featureCollection, masterData) {
         const isDarkTheme = stateManager.currentTheme === 'dark';
         const isW250 = (activeParam === 'w250' || activeParam === 'z250');
 
-        // 🌟 250mb Wind gets crisp Ice Silver (#E0F2FE) with a subtle dark casing
         const contourColor = isW250
             ? (isDarkTheme ? '#E0F2FE' : '#000000')
             : getPvaContourThemeColor();
@@ -717,7 +716,6 @@ function packColor(str, alpha, fallback = '#ffffff') {
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    // 🌟 On mobile screens, 1 subdivision cuts vertex memory by 60% with zero visible loss on Retina
     const SUBDIVISIONS = isMobile ? 1 : 3;
 
     let maxSegs = 0;
@@ -788,7 +786,6 @@ function prepareStep(featureCollection) {
                 }
             }
 
-            // 🌟 On mobile, skip constructing text label points to preserve memory & CPU
             if (!isMobile && name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
                 const mid = len >> 1;
                 const a = line[mid];
@@ -818,27 +815,71 @@ function prepareStep(featureCollection) {
     return { bytes, count: n, labels: { type: 'FeatureCollection', features: labelFeatures } };
 }
 
-function getStepData(stepNum, masterData, rawStep = stepNum) {
+// 🌟 Ensemble-aware step lookup supporting multiple members (0-9)
+function getStepData(stepNum, masterData, rawStep = stepNum, member = currentMember) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const cacheKey = `${stepNum}_${stateManager.currentTheme || 'light'}`;
+    const isEnsemble = (
+        stateManager.manifest?.type === 'ensemble_chunked' || 
+        stateManager.activeModel === 'aifs_ens' || 
+        masterData?.type === 'ensemble' || 
+        Boolean(masterData?.members)
+    );
+
+    const memberSuffix = isEnsemble ? `_m${member}` : '';
+    const cacheKey = `${stepNum}${memberSuffix}_${stateManager.currentTheme || 'light'}`;
     if (stepCache.has(cacheKey)) return stepCache.get(cacheKey);
 
-    const stepData = masterData.steps[String(stepNum)] ||
-                     masterData.steps[String(stepNum).padStart(3, '0')] ||
-                     masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
-                     masterData.steps[stepNum] ||
-                     masterData.steps[rawStep];
-    if (!stepData) return null;
+    const stepKey = String(stepNum);
+    const stepKeyPadded = stepKey.padStart(3, '0');
 
-    const decoded = binaryStepToGeoJson(stepNum, masterData) ||
-                    { ...stepData, features: (stepData.features || []).slice() };
+    // 1. Check if step entries are keyed with member suffix (e.g., "0_m0", "0_0")
+    let rawEntry = masterData.steps[`${stepKey}_m${member}`] ||
+                   masterData.steps[`${stepKeyPadded}_m${member}`] ||
+                   masterData.steps[`${stepKey}_${member}`] ||
+                   masterData.steps[`${stepKeyPadded}_${member}`];
+
+    // 2. Check base step container
+    if (!rawEntry) {
+        rawEntry = masterData.steps[stepKey] ||
+                   masterData.steps[stepKeyPadded] ||
+                   masterData.steps[`F${stepKeyPadded}`] ||
+                   masterData.steps[stepNum] ||
+                   masterData.steps[rawStep];
+    }
+    if (!rawEntry) return null;
+
+    let memberStepData = rawEntry;
+
+    // 3. Handle arrays of member objects: [ { features: [...] }, ... ]
+    if (Array.isArray(rawEntry)) {
+        memberStepData = rawEntry[member] || rawEntry[0];
+    } 
+    // 4. Handle member container objects: { members: { "0": ... } or [ ... ] }
+    else if (rawEntry.members) {
+        memberStepData = Array.isArray(rawEntry.members)
+            ? (rawEntry.members[member] || rawEntry.members[0])
+            : (rawEntry.members[String(member)] || rawEntry.members[member] || rawEntry);
+    }
+
+    // 5. Binary or GeoJSON decoding
+    const decoded = binaryStepToGeoJson(stepNum, masterData, member) ||
+                    (memberStepData ? { 
+                        ...memberStepData, 
+                        features: (
+                            // Filter features if they are tagged with a specific member property
+                            (isEnsemble && memberStepData.features?.some(f => f?.properties?.member !== undefined))
+                                ? memberStepData.features.filter(f => Number(f.properties.member) === member)
+                                : (memberStepData.features || [])
+                        ).slice() 
+                    } : null);
+
+    if (!decoded) return null;
+
     const themed = themeContourFeatures(decoded, masterData);
     const prepared = prepareStep(themed);
     
-    // Only cache if binary has loaded or geometry was actually present
     if (prepared.count > 0 || !masterData.binary) {
-        // 🌟 On mobile, keep only the 8 most recent steps in memory so 85-step runs don't exceed RAM
-        if (isMobile && stepCache.size > 8) {
+        if (isMobile && stepCache.size > 16) {
             const oldestKey = stepCache.keys().next().value;
             stepCache.delete(oldestKey);
         }
@@ -888,18 +929,16 @@ function ensureLayers() {
 }
 
 function setLabels(fc) {
-    // 🌟 On mobile, bypass MapLibre source.setData() to prevent Worker thrashing during scrubbing
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
-
     const src = mapInstance && mapInstance.getSource(LABEL_SOURCE_ID);
     if (src) src.setData(fc || EMPTY_GEOJSON);
 }
 
-function applyStep(stepNum, masterData, rawStep, force) {
+function applyStep(stepNum, masterData, rawStep, force, member = currentMember) {
     if (!mapInstance) return;
     if (!ensureLayers()) return;
 
-    const data = getStepData(stepNum, masterData, rawStep);
+    const data = getStepData(stepNum, masterData, rawStep, member);
 
     if (!data || data.count === 0) {
         setActiveData(null);
@@ -908,27 +947,27 @@ function applyStep(stepNum, masterData, rawStep, force) {
         return;
     }
 
-    if (displayedStep !== stepNum || force) {
+    const stepMemberKey = `${stepNum}_m${member}`;
+    if (displayedStep !== stepMemberKey || force) {
         setActiveData(data);
         setLabels(data.labels);
     }
-    displayedStep = stepNum;
+    displayedStep = stepMemberKey;
 }
 
-function scheduleApply(stepNum, rawStep, force) {
-    pendingApply = { stepNum, rawStep, force: !!(force || pendingApply?.force) };
+function scheduleApply(stepNum, rawStep, force, member = currentMember) {
+    pendingApply = { stepNum, rawStep, force: !!(force || pendingApply?.force), member };
     if (applyQueued) return;
     applyQueued = true;
     requestAnimationFrame(() => {
         applyQueued = false;
         const p = pendingApply;
         pendingApply = null;
-        if (p && activeMasterContours?.steps) applyStep(p.stepNum, activeMasterContours, p.rawStep, p.force);
+        if (p && activeMasterContours?.steps) applyStep(p.stepNum, activeMasterContours, p.rawStep, p.force, p.member);
     });
 }
 
 function startPreload(masterData, aroundStep) {
-    // 🌟 On mobile, do not churn through and allocate all 85 steps in the background
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     if (isMobile) return;
 
@@ -943,12 +982,20 @@ function startPreload(masterData, aroundStep) {
     const next = () => {
         if (run !== preloadRun || !mapInstance || activeMasterContours !== masterData) return;
         const currentTheme = stateManager.currentTheme || 'light';
-        while (idx < nums.length && stepCache.has(`${nums[idx]}_${currentTheme}`)) idx++;
+        while (idx < nums.length && stepCache.has(`${nums[idx]}_m${currentMember}_${currentTheme}`)) idx++;
         if (idx >= nums.length) return;
-        getStepData(nums[idx++], masterData);
+        getStepData(nums[idx++], masterData, undefined, currentMember);
         setTimeout(next, PRELOAD_INTERVAL_MS);
     };
     setTimeout(next, 0);
+}
+
+// 🌟 Switches the active member buffer synchronously during multi-member rendering
+export function setContourActiveMember(memberIndex) {
+    currentMember = Math.max(0, Math.min(9, memberIndex));
+    if (activeMasterContours && currentVisibleStep !== null) {
+        applyStep(currentVisibleStep, activeMasterContours, currentVisibleStep, true, currentMember);
+    }
 }
 
 export function initVectorContours(map) {
@@ -976,6 +1023,7 @@ export function clearVectorContours() {
     activeContourBinary = null;
     activeMasterKey = null;
     fetchPromise = null;
+    currentMember = 0;
 
     preloadRun++;
     preloadStartedFor = null;
@@ -1016,20 +1064,28 @@ async function loadMasterContourFile() {
     activeMasterKey = key;
 
     const urlsToTry = [];
+    // 🌟 Matches both {run}z and {run} (e.g. 00z and 00)
+    const cycleWithZ = runCycle ? (runCycle.endsWith('z') ? runCycle : `${runCycle}z`) : '';
+    const cycleNoZ = runCycle ? runCycle.replace(/z$/, '') : '';
+
     if (param === 'pva' || param === 'z500_anom') {
         if (targetDate && runCycle) {
-            urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+            if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${cycleWithZ}_contours.json?v=${Date.now()}`);
+            if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${cycleNoZ}_contours.json?v=${Date.now()}`);
         }
         urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
     } else if (param.startsWith('w')) {
         const zParam = param.replace('w', 'z');
         if (targetDate && runCycle) {
-            urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+            if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${cycleWithZ}_contours.json?v=${Date.now()}`);
+            if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${cycleNoZ}_contours.json?v=${Date.now()}`);
         }
         urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_contours.json?v=${Date.now()}`);
     }
+
     if (targetDate && runCycle) {
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${runCycle}_contours.json?v=${Date.now()}`);
+        if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleWithZ}_contours.json?v=${Date.now()}`);
+        if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleNoZ}_contours.json?v=${Date.now()}`);
     }
     urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?v=${Date.now()}`);
     if (param === '2t' || param.includes('temp')) {
@@ -1037,15 +1093,20 @@ async function loadMasterContourFile() {
     }
 
     fetchPromise = (async () => {
+        const isEnsemble = model === 'aifs_ens';
+        const fetchOptions = {
+            cache: 'default'
+        };
+
         for (const contourUrl of urlsToTry) {
             try {
-                const resp = await fetch(contourUrl).catch(() => null);
+                const resp = await fetch(contourUrl, fetchOptions).catch(() => null);
                 if (resp && resp.ok) {
                     const data = await resp.json().catch(() => null);
                     if (data && data.steps) {
                         activeMasterContours = data;
                         if (data.binary?.file && typeof DecompressionStream !== 'undefined') {
-                            const binaryResp = await fetch(`${stateManager.BASE_URL}${data.binary.file}?v=${Date.now()}`).catch(() => null);
+                            const binaryResp = await fetch(`${stateManager.BASE_URL}${data.binary.file}?v=${Date.now()}`, fetchOptions).catch(() => null);
                             if (binaryResp?.ok) {
                                 activeContourBinary = await decodeContourBinary(
                                     await binaryResp.arrayBuffer(),
@@ -1183,22 +1244,38 @@ function decodeContourV2(view, coordinateScale) {
     return steps;
 }
 
-function binaryStepToGeoJson(step, masterData) {
+function binaryStepToGeoJson(step, masterData, member = currentMember) {
     if (!masterData?.steps) return null;
     const stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     const stepKey = String(stepNum);
 
-    const features = activeContourBinary?.get(stepKey) || 
+    // 🌟 Support member-specific binary step keys
+    const features = activeContourBinary?.get(`${stepKey}_m${member}`) ||
+                     activeContourBinary?.get(`${stepKey}_${member}`) ||
+                     activeContourBinary?.get(stepKey) || 
                      activeContourBinary?.get(String(step)) ||
                      activeContourBinary?.get(stepKey.padStart(3, '0'));
 
-    const stepObj = masterData.steps[stepKey] ||
+    const stepObj = masterData.steps[`${stepKey}_m${member}`] ||
+                    masterData.steps[`${stepKey}_${member}`] ||
+                    masterData.steps[stepKey] ||
                     masterData.steps[stepKey.padStart(3, '0')] ||
                     masterData.steps[`F${stepKey.padStart(3, '0')}`] ||
                     masterData.steps[step] ||
                     masterData.steps[String(step)];
 
-    const metadata = stepObj?.features?.map(feature => feature.properties) || [];
+    let metadata = [];
+    if (Array.isArray(stepObj)) {
+        metadata = (stepObj[member] || stepObj[0])?.features?.map(f => f.properties) || [];
+    } else if (stepObj?.members) {
+        const mObj = Array.isArray(stepObj.members)
+            ? (stepObj.members[member] || stepObj.members[0])
+            : (stepObj.members[String(member)] || stepObj);
+        metadata = mObj?.features?.map(f => f.properties) || [];
+    } else {
+        metadata = stepObj?.features?.map(feature => feature.properties) || [];
+    }
+
     if (!features) return null;
     return {
         type: 'FeatureCollection',
@@ -1223,7 +1300,7 @@ export async function updateVectorContours(step, forceUpdate = false) {
         preloadStartedFor = null;
     }
 
-    scheduleApply(stepNum, step, forceUpdate);
+    scheduleApply(stepNum, step, forceUpdate, currentMember);
     if (preloadStartedFor !== masterData) startPreload(masterData, stepNum);
 }
 
