@@ -608,191 +608,92 @@ export function createEnsembleShaderLayer(mapInstance) {
                 ? (matrixOrArgs.modelViewProjectionMatrix || projData?.mainMatrix) 
                 : matrixOrArgs;
 
-            const W = gl.drawingBufferWidth;
-            const H = gl.drawingBufferHeight;
-
-            // ─── Step 1: Snapshot the basemap from the current framebuffer (GPU→GPU, <0.1ms) ───
-            if (!this.basemapTex) {
-                this.basemapTex = gl.createTexture();
-            }
-            gl.activeTexture(gl.TEXTURE5);
-            gl.bindTexture(gl.TEXTURE_2D, this.basemapTex);
-            // Reallocate if canvas size changed
-            if (this.basemapTexW !== W || this.basemapTexH !== H) {
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-                this.basemapTexW = W;
-                this.basemapTexH = H;
-            }
-            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, W, H);
-
-            // ─── Step 2: Init the blit program once ───
-            if (!this.blitProgram) {
-                const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
-                const blitVS = isWebGL2 ? `#version 300 es
-                    in vec2 a_pos;
-                    out vec2 v_uv;
-                    void main() {
-                        // a_pos is in [-1,1] clip space; map to [0,1] UV
-                        v_uv = a_pos * 0.5 + 0.5;
-                        v_uv.y = 1.0 - v_uv.y; // flip Y (WebGL framebuffer is bottom-up)
-                        gl_Position = vec4(a_pos, 0.0, 1.0);
-                    }` : `
-                    attribute vec2 a_pos;
-                    varying vec2 v_uv;
-                    void main() {
-                        v_uv = a_pos * 0.5 + 0.5;
-                        v_uv.y = 1.0 - v_uv.y;
-                        gl_Position = vec4(a_pos, 0.0, 1.0);
-                    }`;
-                const blitFS = isWebGL2 ? `#version 300 es
-                    precision mediump float;
-                    in vec2 v_uv;
-                    uniform sampler2D u_tex;
-                    out vec4 fragColor;
-                    void main() { fragColor = texture(u_tex, v_uv); }` : `
-                    precision mediump float;
-                    varying vec2 v_uv;
-                    uniform sampler2D u_tex;
-                    void main() { gl_FragColor = texture2D(u_tex, v_uv); }`;
-                const makeShader = (type, src) => {
-                    const s = gl.createShader(type);
-                    gl.shaderSource(s, src);
-                    gl.compileShader(s);
-                    return s;
-                };
-                const p = gl.createProgram();
-                gl.attachShader(p, makeShader(gl.VERTEX_SHADER, blitVS));
-                gl.attachShader(p, makeShader(gl.FRAGMENT_SHADER, blitFS));
-                gl.linkProgram(p);
-                this.blitProgram = p;
-
-                // Fullscreen quad [-1,-1] to [1,1]
-                this.blitBuffer = gl.createBuffer();
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.blitBuffer);
-                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-                    -1, -1,  1, -1,  -1, 1,
-                    -1,  1,  1, -1,   1, 1
-                ]), gl.STATIC_DRAW);
-            }
-
             const program = this.getProgram(gl, shaderData);
             if (!program) return;
 
+            gl.useProgram(program);
+
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
+
+            gl.activeTexture(gl.TEXTURE2);
+            gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 2);
+
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D, this.sleetPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_sleetPalette'), 3);
+
+            gl.activeTexture(gl.TEXTURE4);
+            gl.bindTexture(gl.TEXTURE_2D, this.snowPaletteTex);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
+
+            // 🌟 Protect against rainbow glitch: only use P-Type if the file actually exists on this chunk
+            const chunkManifest = stateManager.manifest?.chunks?.[cIdx];
+            const hasPtype = (stateManager.activeParam === 'prate' && chunkManifest?.ptype_file) ? 1.0 : 0.0;
+            gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), hasPtype);
+
+            if (projData) {
+                const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
+                if (locMain) gl.uniformMatrix4fv(locMain, false, projData.mainMatrix);
+
+                const locFallback = gl.getUniformLocation(program, 'u_projection_fallback_matrix');
+                if (locFallback) gl.uniformMatrix4fv(locFallback, false, projData.fallbackMatrix);
+
+                const locCoords = gl.getUniformLocation(program, 'u_projection_tile_mercator_coords');
+                if (locCoords) gl.uniform4f(locCoords, projData.tileMercatorCoords[0], projData.tileMercatorCoords[1], projData.tileMercatorCoords[2], projData.tileMercatorCoords[3]);
+
+                const locClip = gl.getUniformLocation(program, 'u_projection_clipping_plane');
+                if (locClip) gl.uniform4f(locClip, projData.clippingPlane[0], projData.clippingPlane[1], projData.clippingPlane[2], projData.clippingPlane[3]);
+
+                const locTrans = gl.getUniformLocation(program, 'u_projection_transition');
+                if (locTrans) gl.uniform1f(locTrans, projData.projectionTransition);
+            } else if (matrix) {
+                const locMat = gl.getUniformLocation(program, 'u_matrix');
+                if (locMat) gl.uniformMatrix4fv(locMat, false, matrix);
+            }
+
+            gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
+            gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
+            gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), 0.0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+            const aPos = gl.getAttribLocation(program, 'a_pos');
+            gl.enableVertexAttribArray(aPos);
+            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+
+            const aUv = gl.getAttribLocation(program, 'a_uv');
+            if (aUv !== -1) {
+                gl.enableVertexAttribArray(aUv);
+                gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+            }
+
             gl.disable(gl.DEPTH_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
             gl.enable(gl.SCISSOR_TEST);
 
-            // Canvas aspect ratio — the projection matrix was computed for this
-            const canvasAspect = W / H;
-
-            // ─── Step 3: Per-member render loop ───
             for (let m = 0; m < 10; m++) {
                 const rect = boxRects[m];
                 if (!rect || rect.w <= 0 || rect.h <= 0) continue;
 
+                gl.viewport(rect.x, rect.y, rect.w, rect.h);
+                gl.scissor(rect.x, rect.y, rect.w, rect.h);
+
                 const tex = this.chunkTextures[`${cIdx}_${fIdx}_m${m}`] || this.activeTex;
                 if (!tex) continue;
-
-                // ── Letterbox: fit canvas aspect into card, keeping same map view ──
-                const cardAspect = rect.w / rect.h;
-                let vpW, vpH, vpX, vpY;
-                if (cardAspect > canvasAspect) {
-                    // Card is wider than canvas → pillarbox (pad sides)
-                    vpH = rect.h;
-                    vpW = Math.round(rect.h * canvasAspect);
-                    vpX = rect.x + Math.round((rect.w - vpW) / 2);
-                    vpY = rect.y;
-                } else {
-                    // Card is taller than canvas → letterbox (pad top/bottom)
-                    vpW = rect.w;
-                    vpH = Math.round(rect.w / canvasAspect);
-                    vpX = rect.x;
-                    vpY = rect.y + Math.round((rect.h - vpH) / 2);
-                }
-
-                // Both viewport AND scissor on the aspect-correct sub-rect
-                gl.viewport(vpX, vpY, vpW, vpH);
-                gl.scissor(vpX, vpY, vpW, vpH);
-
-                // ── Blit the basemap (same view for every card) ──
-                gl.useProgram(this.blitProgram);
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.blitBuffer);
-                const blitPos = gl.getAttribLocation(this.blitProgram, 'a_pos');
-                gl.enableVertexAttribArray(blitPos);
-                gl.vertexAttribPointer(blitPos, 2, gl.FLOAT, false, 8, 0);
-                gl.activeTexture(gl.TEXTURE5);
-                gl.bindTexture(gl.TEXTURE_2D, this.basemapTex);
-                gl.uniform1i(gl.getUniformLocation(this.blitProgram, 'u_tex'), 5);
-                gl.disable(gl.BLEND);
-                gl.drawArrays(gl.TRIANGLES, 0, 6);
-                gl.disableVertexAttribArray(blitPos);
-
-                // ── Draw weather for member m (projection matrix unchanged = same view) ──
-                gl.useProgram(program);
-                gl.activeTexture(gl.TEXTURE1);
-                gl.bindTexture(gl.TEXTURE_2D, this.paletteTex);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_paletteTexture'), 1);
-                gl.activeTexture(gl.TEXTURE2);
-                gl.bindTexture(gl.TEXTURE_2D, this.frzrPaletteTex);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_frzrPalette'), 2);
-                gl.activeTexture(gl.TEXTURE3);
-                gl.bindTexture(gl.TEXTURE_2D, this.sleetPaletteTex);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_sleetPalette'), 3);
-                gl.activeTexture(gl.TEXTURE4);
-                gl.bindTexture(gl.TEXTURE_2D, this.snowPaletteTex);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_snowPalette'), 4);
-
-                const chunkManifest = stateManager.manifest?.chunks?.[cIdx];
-                const hasPtype = (stateManager.activeParam === 'prate' && chunkManifest?.ptype_file) ? 1.0 : 0.0;
-                gl.uniform1f(gl.getUniformLocation(program, 'u_hasPtype'), hasPtype);
-
-                if (projData) {
-                    const locMain = gl.getUniformLocation(program, 'u_projection_matrix');
-                    if (locMain) gl.uniformMatrix4fv(locMain, false, projData.mainMatrix);
-                    const locFallback = gl.getUniformLocation(program, 'u_projection_fallback_matrix');
-                    if (locFallback) gl.uniformMatrix4fv(locFallback, false, projData.fallbackMatrix);
-                    const locCoords = gl.getUniformLocation(program, 'u_projection_tile_mercator_coords');
-                    if (locCoords) gl.uniform4f(locCoords, projData.tileMercatorCoords[0], projData.tileMercatorCoords[1], projData.tileMercatorCoords[2], projData.tileMercatorCoords[3]);
-                    const locClip = gl.getUniformLocation(program, 'u_projection_clipping_plane');
-                    if (locClip) gl.uniform4f(locClip, projData.clippingPlane[0], projData.clippingPlane[1], projData.clippingPlane[2], projData.clippingPlane[3]);
-                    const locTrans = gl.getUniformLocation(program, 'u_projection_transition');
-                    if (locTrans) gl.uniform1f(locTrans, projData.projectionTransition);
-                } else if (matrix) {
-                    const locMat = gl.getUniformLocation(program, 'u_matrix');
-                    if (locMat) gl.uniformMatrix4fv(locMat, false, matrix);
-                }
-
-                gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
-                gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), 0.0);
-
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-                const aPos = gl.getAttribLocation(program, 'a_pos');
-                gl.enableVertexAttribArray(aPos);
-                gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
-                const aUv = gl.getAttribLocation(program, 'a_uv');
-                if (aUv !== -1) {
-                    gl.enableVertexAttribArray(aUv);
-                    gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
-                }
 
                 gl.activeTexture(gl.TEXTURE0);
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.uniform1i(gl.getUniformLocation(program, 'u_dataTexture'), 0);
 
-                gl.enable(gl.BLEND);
-                gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
                 gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
             }
 
             gl.disable(gl.SCISSOR_TEST);
-            gl.viewport(0, 0, W, H);
-
+            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         },
-
 
         render: function (gl, matrixOrArgs) {
             if (this.isGridMode && this.gridRects) {
