@@ -73,7 +73,6 @@ function themeContourFeatures(featureCollection, masterData) {
     }
 
     // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
-    // 🌟 UPDATED: Added w10 and gust10 to receive the MSLP styling
     const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || activeParam === 'w10' || activeParam === 'gust10' || masterData?.parameter === 'prate';
     if (isPrate) {
         const isDark = stateManager.currentTheme === 'dark';
@@ -159,7 +158,6 @@ function themeContourFeatures(featureCollection, masterData) {
         const isDarkTheme = stateManager.currentTheme === 'dark';
         const isW250 = (activeParam === 'w250' || activeParam === 'z250');
 
-        // 🌟 250mb Wind gets crisp Ice Silver (#E0F2FE) with a subtle dark casing
         const contourColor = isW250
             ? (isDarkTheme ? '#E0F2FE' : '#000000')
             : getPvaContourThemeColor();
@@ -196,7 +194,8 @@ function themeContourFeatures(featureCollection, masterData) {
 
 // ───────────────────────── GPU line layer ─────────────────────────
 
-const INSTANCE_STRIDE = 28;
+// 🌟 32-byte instance stride [p0(8), p1(8), width(4), color(4), outline(4), dist(4)]
+const INSTANCE_STRIDE = 32;
 
 const WIDTH_STOPS = [
     [1.5,  0.45, 1.6, 0.25],
@@ -215,6 +214,8 @@ layout(location=2) in vec2 a_p1;
 layout(location=3) in float a_width;
 layout(location=4) in vec4 a_color;
 layout(location=5) in vec4 a_outline;
+layout(location=6) in float a_dist;
+
 uniform vec2 u_viewport;
 uniform float u_offsetX;
 uniform float u_pass;
@@ -222,7 +223,11 @@ uniform float u_scale;
 uniform float u_glow;
 uniform float u_alpha;
 uniform float u_dpr;
+
 out vec4 v_color;
+out float v_dist;
+out float v_dashed;
+
 void main() {
     vec4 c0 = PROJECT(vec2(a_p0.x + u_offsetX, a_p0.y));
     vec4 c1 = PROJECT(vec2(a_p1.x + u_offsetX, a_p1.y));
@@ -231,14 +236,17 @@ void main() {
     vec2 s1 = c1.xy / c1.w * hv;
 
     bool outlined = a_outline.a > 0.0;
-    float w = a_width;
+    bool isDashed = a_width < 0.0;
+    float rawWidth = abs(a_width);
+
+    float w = rawWidth;
     vec4 col = a_color;
     if (u_pass > 0.5) {
         if (!outlined) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); v_color = vec4(0.0); return; }
-        w = a_width * u_scale + u_glow;
+        w = rawWidth * u_scale + u_glow;
         col = a_outline;
     } else {
-        w = a_width * u_scale;
+        w = rawWidth * u_scale;
     }
     w *= u_dpr;
 
@@ -252,6 +260,11 @@ void main() {
     gl_Position = vec4(pos / hv * wv, zv, wv);
     
     v_color = vec4(col.rgb, col.a * u_alpha);
+    v_dashed = isDashed ? 1.0 : 0.0;
+    
+    // Pass cumulative Mercator distance along the line segment
+    float segMercLen = length(a_p1 - a_p0);
+    v_dist = a_dist + (a_corner.x * segMercLen);
 }`;
 
 const MERCATOR_VERT = `#version 300 es
@@ -267,11 +280,22 @@ function makeGlobeVert(sd, preludeFirst) {
     return `#version 300 es\n${inject}\n#define PROJECT(p) projectTile(p)\n#define USE_PROJ_Z 1\n` + VERT_BODY;
 }
 
+// 🌟 GPU Fragment Dashing: Gaps are discarded instantly in hardware (0.00ms CPU time)
 const FRAG_SRC = `#version 300 es
 precision mediump float;
+
 in vec4 v_color;
+in float v_dist;
+in float v_dashed;
 out vec4 outColor;
+
 void main() {
+    if (v_dashed > 0.5) {
+        // Exact 0.0030 dash / 0.0020 gap ratio matching meteorological thickness standard
+        if (fract(v_dist / 0.0050) > 0.60) {
+            discard;
+        }
+    }
     outColor = vec4(v_color.rgb * v_color.a, v_color.a);
 }`;
 
@@ -415,6 +439,7 @@ const gpuLayer = {
         gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, S, 16); gl.vertexAttribDivisor(3, 1);
         gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, S, 20); gl.vertexAttribDivisor(4, 1);
         gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, S, 24); gl.vertexAttribDivisor(5, 1);
+        gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 1, gl.FLOAT, false, S, 28); gl.vertexAttribDivisor(6, 1);
 
         gl.bindVertexArray(null);
         gpu.ready = true;
@@ -651,52 +676,6 @@ function smoothMercatorLine(rawCoords, subdivisions = 3, tension = 0.32) {
     return smoothed;
 }
 
-function emitDashedSegments(line, dashLen, gapLen, onSegment) {
-    let isDrawing = true;
-    let remainingInPhase = dashLen;
-
-    let p0 = line[0];
-    for (let i = 1; i < line.length; i++) {
-        const p1 = line[i];
-        const segDx = p1[0] - p0[0];
-        const segDy = p1[1] - p0[1];
-
-        if (Math.abs(segDx) > 0.4) {
-            p0 = p1;
-            isDrawing = true;
-            remainingInPhase = dashLen;
-            continue;
-        }
-
-        const segLen = Math.hypot(segDx, segDy);
-        if (segLen < 1e-7) continue;
-
-        let curT = 0;
-        while (curT < 1.0) {
-            const distAvail = (1.0 - curT) * segLen;
-            if (distAvail <= remainingInPhase) {
-                if (isDrawing) {
-                    const startPt = [p0[0] + curT * segDx, p0[1] + curT * segDy];
-                    onSegment(startPt, p1);
-                }
-                remainingInPhase -= distAvail;
-                curT = 1.0;
-            } else {
-                const tNext = curT + (remainingInPhase / segLen);
-                const endPt = [p0[0] + tNext * segDx, p0[1] + tNext * segDy];
-                if (isDrawing) {
-                    const startPt = [p0[0] + curT * segDx, p0[1] + curT * segDy];
-                    onSegment(startPt, endPt);
-                }
-                isDrawing = !isDrawing;
-                remainingInPhase = isDrawing ? dashLen : gapLen;
-                curT = tNext;
-            }
-        }
-        p0 = p1;
-    }
-}
-
 function packColor(str, alpha, fallback = '#ffffff') {
     const s = String(str || fallback).trim();
     let r = 255, g = 255, b = 255;
@@ -718,7 +697,6 @@ function packColor(str, alpha, fallback = '#ffffff') {
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    // 🌟 On mobile screens, 1 subdivision cuts vertex memory by 60% with zero visible loss on Retina
     const SUBDIVISIONS = isMobile ? 1 : 3;
 
     let maxSegs = 0;
@@ -744,7 +722,12 @@ function prepareStep(featureCollection) {
 
     for (const { props, lines } of items) {
         const hasOutline = props.outlineColor !== undefined && props.outlineColor !== null;
-        const width = Number(props.width) > 0 ? Number(props.width) : 2.0;
+        const rawWidth = Number(props.width) > 0 ? Number(props.width) : 2.0;
+        
+        // 🌟 Negative width flags dashed lines for the GPU fragment shader (0 memory cost)
+        const isDashed = Boolean(props.dotted);
+        const width = isDashed ? -rawWidth : rawWidth;
+
         const color = packColor(props.color || props.stroke, props.opacity ?? 0.95, '#4169E1');
         const outline = hasOutline ? packColor(props.outlineColor, props.outlineOpacity ?? 0.8) : 0;
         const name = props.name;
@@ -756,40 +739,34 @@ function prepareStep(featureCollection) {
             const len = line.length;
             if (len < 2) continue;
 
-            if (props.dotted) {
-                emitDashedSegments(line, 0.0030, 0.0020, (pA, pB) => {
-                    if (n * 7 + 6 >= f32.length) return;
-                    const o = n * 7;
-                    f32[o]     = pA[0]; 
-                    f32[o + 1] = pA[1];
-                    f32[o + 2] = pB[0];  
-                    f32[o + 3] = pB[1];
+            let prev = line[0];
+            let cumDist = 0.0;
+
+            // 🌟 Single fast loop: emitDashedSegments CPU chopping deleted!
+            for (let i = 1; i < len; i++) {
+                const cur = line[i];
+                const dx = cur[0] - prev[0];
+                const dy = cur[1] - prev[1];
+
+                if (Math.abs(dx) < 0.5) {
+                    if (n * 8 + 7 >= f32.length) break;
+                    const o = n * 8;
+                    f32[o]     = prev[0]; 
+                    f32[o + 1] = prev[1];
+                    f32[o + 2] = cur[0];  
+                    f32[o + 3] = cur[1];
                     f32[o + 4] = width;
                     u32[o + 5] = color;
                     u32[o + 6] = outline;
+                    f32[o + 7] = cumDist;
                     n++;
-                });
-            } else {
-                let prev = line[0];
-                for (let i = 1; i < len; i++) {
-                    const cur = line[i];
-                    if (Math.abs(cur[0] - prev[0]) < 0.5) {
-                        if (n * 7 + 6 >= f32.length) break;
-                        const o = n * 7;
-                        f32[o]     = prev[0]; 
-                        f32[o + 1] = prev[1];
-                        f32[o + 2] = cur[0];  
-                        f32[o + 3] = cur[1];
-                        f32[o + 4] = width;
-                        u32[o + 5] = color;
-                        u32[o + 6] = outline;
-                        n++;
-                    }
-                    prev = cur;
+                    cumDist += Math.hypot(dx, dy);
+                } else {
+                    cumDist = 0.0; // Seam crossing reset
                 }
+                prev = cur;
             }
 
-            // 🌟 On mobile, skip constructing text label points to preserve memory & CPU
             if (!isMobile && name !== undefined && name !== null && len >= (6 * SUBDIVISIONS)) {
                 const mid = len >> 1;
                 const a = line[mid];
@@ -821,7 +798,6 @@ function prepareStep(featureCollection) {
 
 function getStepData(stepNum, masterData, rawStep = stepNum) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    // 🌟 Cache key includes currentMember so ensemble members don't share identical caches
     const cacheKey = `${stepNum}_m${currentMember}_${stateManager.currentTheme || 'light'}`;
     if (stepCache.has(cacheKey)) return stepCache.get(cacheKey);
 
@@ -838,7 +814,6 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
     const themed = themeContourFeatures(decoded, masterData);
     const prepared = prepareStep(themed);
     
-    // Only cache if binary has loaded or geometry was actually present
     if (prepared.count > 0 || !masterData.binary) {
         // 🌟 Bounded LRU cache: 8 on mobile, 40 on desktop (4 complete steps x 10 members) keeps RAM capped
         const maxCacheSize = isMobile ? 8 : 40;
@@ -892,9 +867,7 @@ function ensureLayers() {
 }
 
 function setLabels(fc) {
-    // 🌟 On mobile, bypass MapLibre source.setData() to prevent Worker thrashing during scrubbing
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
-
     const src = mapInstance && mapInstance.getSource(LABEL_SOURCE_ID);
     if (src) src.setData(fc || EMPTY_GEOJSON);
 }
@@ -933,7 +906,6 @@ function scheduleApply(stepNum, rawStep, force) {
 }
 
 function startPreload(masterData, aroundStep) {
-    // 🌟 On mobile, do not churn through and allocate all 85 steps in the background
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     if (isMobile) return;
 
