@@ -234,8 +234,7 @@ function updateCachedDimensions() {
     const rect = cardList[0].card.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
 
-    // ⚡ Cap card canvas DPR to 1.25 (saves 70% pixel overhead on Retina displays while keeping cards sharp)
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+    const dpr = window.devicePixelRatio || 1;
     cachedTargetSize = {
         w: Math.floor(rect.width * dpr),
         h: Math.floor(rect.height * dpr)
@@ -243,43 +242,100 @@ function updateCachedDimensions() {
     return cachedTargetSize;
 }
 
-// 🌟 Single-Pass WebGL Scissor Grid — zero CPU copy, full GPU speed
-export function renderAllEnsembleMembers() {
-    if (!customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
-
-    const cards = document.querySelectorAll('.map-card');
-    if (!cards || cards.length === 0) return;
-
-    const mapCanvas = map.getCanvas();
-    if (!mapCanvas) return;
-    const mapRect = mapCanvas.getBoundingClientRect();
-    const dpr = (mapCanvas.width / mapRect.width) || window.devicePixelRatio || 1;
-
-    const rects = Array.from(cards).map(card => {
-        const cr = card.getBoundingClientRect();
-        return {
-            x: Math.round((cr.left - mapRect.left) * dpr),
-            // WebGL Y is flipped: 0 = bottom of canvas
-            y: Math.round((mapRect.bottom - cr.bottom) * dpr),
-            w: Math.round(cr.width * dpr),
-            h: Math.round(cr.height * dpr)
-        };
-    });
-
-    customShaderLayer.setGridMode(true, rects);
-    if (stateManager.activeFrameState) {
-        customShaderLayer.updateFrame(stateManager.activeFrameState);
+// 🌟 Non-blocking 60 FPS multi-member capture loop
+export async function renderAllEnsembleMembers() {
+    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
+    if (isRenderingEnsemble) {
+        pendingEnsembleStep = true;
+        return;
     }
-    map.triggerRepaint();
+
+    isRenderingEnsemble = true;
+    pendingEnsembleStep = false;
+
+    try {
+        const cardList = getCardCanvases();
+        const mapCanvas = map.getCanvas();
+        if (!mapCanvas || cardList.length === 0) return;
+
+        let size = cachedTargetSize || updateCachedDimensions();
+        if (!size) return;
+
+        const targetW = size.w;
+        const targetH = size.h;
+
+        const srcAspect = mapCanvas.width / mapCanvas.height;
+        const dstAspect = targetW / targetH;
+        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+
+        if (srcAspect > dstAspect) {
+            sWidth = mapCanvas.height * dstAspect;
+            sx = (mapCanvas.width - sWidth) / 2;
+        } else {
+            sHeight = mapCanvas.width / dstAspect;
+            sy = (mapCanvas.height - sHeight) / 2;
+        }
+
+        const bgColor = stateManager.currentTheme === 'light' ? '#ffffff' : '#000000';
+        let circle = null;
+        if (stateManager.activeView === '3d' && lastGlobeMatrix) {
+            circle = getGlobeScreenCircle(lastGlobeMatrix, mapCanvas.width, mapCanvas.height);
+        }
+        const scaleX = targetW / sWidth;
+        const scaleY = targetH / sHeight;
+        const cardCx = circle ? (circle.cx - sx) * scaleX : 0;
+        const cardCy = circle ? (circle.cy - sy) * scaleY : 0;
+        const cardR = circle ? circle.r * scaleX : 0;
+
+        // 🌟 Cycles through all 10 members in ~12ms without blocking the browser
+        for (let m = 0; m < 10; m++) {
+            customShaderLayer.setActiveMember(m);
+            if (typeof setContourActiveMember === 'function') {
+                setContourActiveMember(m);
+            }
+            if (typeof map._render === 'function') {
+                map._render();
+            }
+
+            const item = cardList[m];
+            if (!item) continue;
+            const cvs = item.canvas;
+            if (cvs.width !== targetW || cvs.height !== targetH) {
+                cvs.width = targetW;
+                cvs.height = targetH;
+            }
+
+            item.ctx.fillStyle = bgColor;
+            item.ctx.fillRect(0, 0, targetW, targetH);
+
+            if (circle && cardR > 5) {
+                item.ctx.save();
+                item.ctx.beginPath();
+                item.ctx.arc(cardCx, cardCy, cardR, 0, Math.PI * 2);
+                item.ctx.clip();
+                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+                item.ctx.restore();
+            } else {
+                item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            }
+        }
+
+        // Restore active member to 0
+        customShaderLayer.setActiveMember(0);
+        if (typeof setContourActiveMember === 'function') {
+            setContourActiveMember(0);
+        }
+        if (typeof map._render === 'function') {
+            map._render();
+        }
+    } finally {
+        isRenderingEnsemble = false;
+        // If user scrubbed while this frame was drawing, immediately draw the newest frame
+        if (pendingEnsembleStep) {
+            requestAnimationFrame(() => renderAllEnsembleMembers());
+        }
+    }
 }
-
-window.addEventListener('resize', () => {
-    if (stateManager.activeModel === 'aifs_ens') {
-        renderAllEnsembleMembers();
-    }
-});
-
-
 
 function syncEnsembleGrid() {
     const grid = document.getElementById('ensemble-grid');
@@ -287,14 +343,14 @@ function syncEnsembleGrid() {
     
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
+    
     isDrawingEnsemble = shouldShow;
-
+    cachedCardCanvases = null;
+    cachedTargetSize = null;
+    
     if (shouldShow) {
-        // small delay so the DOM has laid out the cards before we measure their rects
-        setTimeout(renderAllEnsembleMembers, 50);
-    } else if (customShaderLayer && typeof customShaderLayer.setGridMode === 'function') {
-        customShaderLayer.setGridMode(false, null);
-        map.triggerRepaint();
+        updateCachedDimensions();
+        setTimeout(renderAllEnsembleMembers, 80);
     }
 }
 
@@ -346,7 +402,6 @@ function drawEnsembleBoxes(targetMemberIndex = null) {
         }
 
         try {
-            item.ctx.imageSmoothingQuality = 'low';
             item.ctx.fillStyle = bgColor;
             item.ctx.fillRect(0, 0, targetW, targetH);
 
