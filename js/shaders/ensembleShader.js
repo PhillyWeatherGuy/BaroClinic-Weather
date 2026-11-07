@@ -660,7 +660,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 if (locMat) gl.uniformMatrix4fv(locMat, false, matrix);
             }
 
-            gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
+            gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 0.78);
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
             gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), 0.0);
 
