@@ -404,57 +404,6 @@ let pendingEnsembleStep = null;
 let cachedCardCanvases = null;
 let cachedTargetSize = null;
 let expandedEnsembleMember = null;
-const reducedEnsembleChunks = new Set();
-
-function reduceEnsembleChunkToMember(chunkIndex, memberIndex) {
-    const volume = stateManager.loadedChunkBitmaps[chunkIndex];
-    if (!volume?.isEnsemble || !Array.isArray(volume.frames) || reducedEnsembleChunks.has(String(chunkIndex))) return;
-
-    const rawData = stateManager.chunkPixelData[chunkIndex];
-    const chunkManifest = stateManager.manifest?.chunks?.[chunkIndex];
-    if (rawData instanceof Uint8Array) {
-        const memberCount = stateManager.manifest?.members || 10;
-        const memberSize = chunkManifest?.member_size_bytes || Math.floor(rawData.byteLength / memberCount);
-        const memberStart = memberIndex * memberSize;
-        stateManager.chunkPixelData[chunkIndex] = rawData.slice(memberStart, memberStart + memberSize);
-    }
-
-    volume.frames = volume.frames.map(frame => {
-        if (!Array.isArray(frame)) return frame;
-        const selected = frame[memberIndex];
-        if (!selected?.data || !(selected.data instanceof Uint8Array)) return selected || null;
-        return {
-            ...selected,
-            data: selected.data.slice(),
-            ptype: selected.ptype instanceof Uint8Array ? selected.ptype.slice() : selected.ptype
-        };
-    });
-    volume.isEnsemble = false;
-    reducedEnsembleChunks.add(String(chunkIndex));
-}
-
-function unloadOtherEnsembleMembers(memberIndex) {
-    for (const chunkIndex in stateManager.loadedChunkBitmaps) {
-        reduceEnsembleChunkToMember(chunkIndex, memberIndex);
-    }
-
-    if (customShaderLayer?.clearTextures) customShaderLayer.clearTextures();
-    if (customShaderLayer?.setGridMember) customShaderLayer.setGridMember(memberIndex);
-    for (const chunkIndex in stateManager.loadedChunkBitmaps) {
-        const volume = stateManager.loadedChunkBitmaps[chunkIndex];
-        if (volume) customShaderLayer?.preloadChunkTexture(Number(chunkIndex), volume);
-    }
-}
-
-function restoreEnsembleMembers() {
-    for (const chunkIndex of reducedEnsembleChunks) {
-        delete stateManager.loadedChunkBitmaps[chunkIndex];
-        delete stateManager.chunkPixelData[chunkIndex];
-    }
-    reducedEnsembleChunks.clear();
-    if (customShaderLayer?.clearTextures) customShaderLayer.clearTextures();
-    if (customShaderLayer?.setGridMember) customShaderLayer.setGridMember(null);
-}
 
 function setExpandedEnsembleMember(memberIndex = null) {
     if (!isDrawingEnsemble) return;
@@ -465,24 +414,6 @@ function setExpandedEnsembleMember(memberIndex = null) {
 
     grid.classList.toggle('is-expanded', expandedEnsembleMember !== null);
     grid.style.display = expandedEnsembleMember === null ? 'grid' : 'block';
-    setBasemapLabelsVisibility(map, expandedEnsembleMember === null ? false : true);
-    toggleBasemapLayers(expandedEnsembleMember !== null);
-
-    if (expandedEnsembleMember !== null) {
-        unloadOtherEnsembleMembers(expandedEnsembleMember);
-        document.body.classList.add('ensemble-expanded');
-        setBasemapLabelsVisibility(map, true);
-        initCityOverlay(map).then(() => {
-            if (expandedEnsembleMember !== null) {
-                setBasemapLabelsVisibility(map, true);
-                updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
-            }
-        }).catch(() => {});
-    } else {
-        restoreEnsembleMembers();
-        document.body.classList.remove('ensemble-expanded');
-        destroyCityOverlay();
-    }
     grid.querySelectorAll('.map-card').forEach((card, index) => {
         const isExpanded = expandedEnsembleMember === index;
         card.classList.toggle('is-expanded', isExpanded);
@@ -499,11 +430,7 @@ function setExpandedEnsembleMember(memberIndex = null) {
     cachedTargetSize = null;
     const cards = getCardCanvases();
     cards.forEach(item => item.ctx.clearRect(0, 0, item.canvas.width, item.canvas.height));
-    if (expandedEnsembleMember === null) {
-        renderFrame(stateManager.currentStepIndex);
-    } else {
-        requestAnimationFrame(() => renderAllEnsembleMembers());
-    }
+    requestAnimationFrame(() => renderAllEnsembleMembers());
 }
 
 window.addEventListener('keydown', (event) => {
@@ -719,11 +646,8 @@ export async function renderAllEnsembleMembers() {
         customShaderLayer.setGridMode(false, null);
 
         // Assemble the frozen basemap and the matching scissored member into each card.
-        const isExpanded = expandedEnsembleMember !== null;
         const linesCanvas = renderLinesMap() || staticOverlayCanvas;
         cardList.forEach((item, memberIndex) => {
-            if (isExpanded && memberIndex !== expandedEnsembleMember) return;
-
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
@@ -736,11 +660,10 @@ export async function renderAllEnsembleMembers() {
             const weatherW = box?.w || weatherCanvas.width;
             const weatherH = box?.h || weatherCanvas.height;
 
-            // Expanded mode uses the live map canvas as the normal basemap beneath the weather.
-            const baseCanvas = isExpanded ? mapCanvas : staticBasemapCanvas;
-            if (baseCanvas) {
+            // Draw crisp frozen basemap background
+            if (staticBasemapCanvas) {
                 item.ctx.drawImage(
-                    baseCanvas,
+                    staticBasemapCanvas, 
                     sx, sy, sWidth, sHeight, 
                     0, 0, targetW, targetH
                 );
@@ -772,7 +695,6 @@ function syncEnsembleGrid() {
     if (!shouldShow && expandedEnsembleMember !== null) {
         expandedEnsembleMember = null;
         grid.classList.remove('is-expanded');
-        setBasemapLabelsVisibility(map, false);
     }
     grid.style.display = shouldShow ? (expandedEnsembleMember === null ? 'grid' : 'block') : 'none';
     
@@ -1162,9 +1084,6 @@ async function renderFrame(globalIdx) {
             const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
             if (renderId !== activeRenderId) return;
 
-            if (expandedEnsembleMember !== null) {
-                reduceEnsembleChunkToMember(chunkIdx, expandedEnsembleMember);
-            }
             if (customShaderLayer) {
                 customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             }
@@ -1173,9 +1092,6 @@ async function renderFrame(globalIdx) {
             return;
         }
     } else if (customShaderLayer && !customShaderLayer.chunkTextures[`${chunkIdx}_${frameIdx}`]) {
-        if (expandedEnsembleMember !== null) {
-            reduceEnsembleChunkToMember(chunkIdx, expandedEnsembleMember);
-        }
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
     }
 

@@ -1385,7 +1385,6 @@ body.globe-view #map {
 
 #ensemble-grid.is-expanded {
     display: block;
-    background: transparent;
 }
 
 body.light-mode #ensemble-grid {
@@ -1406,9 +1405,6 @@ body.light-mode #ensemble-grid {
     right: 6px;
     bottom: 6px;
     left: 6px;
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
 }
 
 .map-card.is-collapsed {
@@ -1463,10 +1459,6 @@ body.light-mode .map-card {
     background: rgba(0, 0, 0, 0.82);
     outline: 2px solid rgba(255, 255, 255, 0.8);
     outline-offset: 1px;
-}
-
-body.ensemble-expanded .maplibregl-marker {
-    z-index: 10 !important;
 }
 
 @media (max-width: 1023px) {
