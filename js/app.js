@@ -357,9 +357,8 @@ export async function renderAllEnsembleMembers() {
         customShaderLayer.setGridMode(false, null);
         toggleBasemapLayers(true);
 
-        // 🌟 6. ASSEMBLE THE SANDWICH INTO EACH CARD
-        cardList.forEach((item, idx) => {
-            const rect = boxRects[idx];
+        // 🌟 6. ASSEMBLE THE SANDWICH INTO EACH CARD (Using centered map crop sx, sy, sWidth, sHeight)
+        cardList.forEach((item) => {
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
@@ -370,14 +369,14 @@ export async function renderAllEnsembleMembers() {
             if (staticBasemapCanvas) {
                 item.ctx.drawImage(
                     staticBasemapCanvas, 
-                    rect.x, mapCanvas.height - rect.y - rect.h, rect.w, rect.h, 
+                    sx, sy, sWidth, sHeight, 
                     0, 0, targetW, targetH
                 );
             }
             // Overlay the scissored, transparent weather on top
             item.ctx.drawImage(
                 mapCanvas, 
-                rect.x, mapCanvas.height - rect.y - rect.h, rect.w, rect.h, 
+                sx, sy, sWidth, sHeight, 
                 0, 0, targetW, targetH
             );
         });
