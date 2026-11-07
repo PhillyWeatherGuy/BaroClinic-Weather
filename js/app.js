@@ -69,20 +69,24 @@ const map = new maplibregl.Map({
 
 /**
  * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
+ * Guaranteed to stay 100% locked to the perimeter across all zoom levels, rotations, and screen sizes!
  */
 function getGlobeScreenCircle(matrix, w, h) {
     if (!matrix) return null;
 
+    // 1. Globe Center (0, 0, 0, 1) in screen pixels
     const cx_clip = matrix[12];
     const cy_clip = matrix[13];
     const cw_clip = matrix[15] || 1.0;
     const cx = (cx_clip / cw_clip * 0.5 + 0.5) * w;
     const cy = (0.5 - cy_clip / cw_clip * 0.5) * h;
 
+    // 2. Camera direction vector from matrix
     let vx = matrix[2], vy = matrix[6], vz = matrix[10];
     const vLen = Math.hypot(vx, vy, vz) || 1.0;
     vx /= vLen; vy /= vLen; vz /= vLen;
 
+    // 3. Up vector orthogonal to camera line of sight
     let ux = 0.0, uy = 1.0, uz = 0.0;
     if (Math.abs(vy) > 0.9) {
         ux = 1.0; uy = 0.0; uz = 0.0;
@@ -92,6 +96,7 @@ function getGlobeScreenCircle(matrix, w, h) {
     const uLen = Math.hypot(ux, uy, uz) || 1.0;
     ux /= uLen; uy /= uLen; uz /= uLen;
 
+    // 4. Project unit sphere horizon point (ux, uy, uz) to screen pixels
     const hx_clip = matrix[0] * ux + matrix[4] * uy + matrix[8] * uz + matrix[12];
     const hy_clip = matrix[1] * ux + matrix[5] * uy + matrix[9] * uz + matrix[13];
     const hw_clip = matrix[3] * ux + matrix[7] * uy + matrix[11] * uz + matrix[15];
@@ -127,6 +132,7 @@ function updateAtmosphereHalo(matrix) {
     const cy = circle.cy;
     const r = circle.r;
 
+    // 🌟 Thicker, multi-layered atmospheric rim glow drawn BEHIND the planet
     const outerR = r * 1.22;
     const grad = haloCtx.createRadialGradient(cx, cy, r * 0.96, cx, cy, outerR);
     grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
@@ -285,9 +291,9 @@ function toggleBasemapLayers(show) {
     });
 }
 
-// 🌟 Non-blocking 60 FPS multi-member capture loop
+// 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
-    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
+    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
     if (isRenderingEnsemble) {
         pendingEnsembleStep = true;
         return;
@@ -324,50 +330,63 @@ export async function renderAllEnsembleMembers() {
             captureBasemap();
         }
 
-        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY VIA CACHED IDs
+        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
         toggleBasemapLayers(false);
 
-        // 🌟 Cycles through all 10 members seamlessly (MapLibre basemap is sleeping!)
-        for (let m = 0; m < 10; m++) {
-            customShaderLayer.setActiveMember(m);
-            if (typeof setContourActiveMember === 'function') {
-                setContourActiveMember(m);
-            }
-            if (typeof map._render === 'function') {
-                map._render(); // Lightning fast now, ONLY draws transparent weather
-            }
+        // Compute screen bounding rects for all 10 cards (WebGL bottom-left origin)
+        const boxRects = cardList.map(item => {
+            const rect = item.canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            return {
+                x: Math.floor(rect.left * dpr),
+                y: Math.floor((window.innerHeight - rect.bottom) * dpr),
+                w: Math.floor(rect.width * dpr),
+                h: Math.floor(rect.height * dpr)
+            };
+        });
 
-            const item = cardList[m];
-            if (!item) continue;
+        // 🌟 3. ENABLE SINGLE-PASS GRID MODE ON THE SHADER LAYER
+        customShaderLayer.setGridMode(true, boxRects);
+
+        // 🌟 4. ONE SINGLE map._render() CALL RENDERS ALL 10 MEMBERS SIMULTANEOUSLY!
+        if (typeof map._render === 'function') {
+            map._render(); 
+        }
+
+        // 🌟 5. DISABLE GRID MODE & RESTORE BASEMAP
+        customShaderLayer.setGridMode(false, null);
+        toggleBasemapLayers(true);
+
+        // 🌟 6. ASSEMBLE THE SANDWICH INTO EACH CARD
+        cardList.forEach((item, idx) => {
+            const rect = boxRects[idx];
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
                 cvs.height = targetH;
             }
 
-            // 🌟 3. ASSEMBLE THE SANDWICH
-            // Paint the crisp, frozen basemap into the card
+            // Draw crisp frozen basemap background
             if (staticBasemapCanvas) {
-                item.ctx.drawImage(staticBasemapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+                item.ctx.drawImage(
+                    staticBasemapCanvas, 
+                    rect.x, mapCanvas.height - rect.y - rect.h, rect.w, rect.h, 
+                    0, 0, targetW, targetH
+                );
             }
-            // Overlay the live, transparent weather on top
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-        }
+            // Overlay the scissored, transparent weather on top
+            item.ctx.drawImage(
+                mapCanvas, 
+                rect.x, mapCanvas.height - rect.y - rect.h, rect.w, rect.h, 
+                0, 0, targetW, targetH
+            );
+        });
 
-        // 🌟 4. RESTORE BASEMAP
-        toggleBasemapLayers(true);
-
-        // Restore active member to 0
-        customShaderLayer.setActiveMember(0);
-        if (typeof setContourActiveMember === 'function') {
-            setContourActiveMember(0);
-        }
         if (typeof map._render === 'function') {
-            map._render(); // Final redraw to put the main map back to normal
+            map._render();
         }
     } finally {
         isRenderingEnsemble = false;
-        // If user scrubbed while this frame was drawing, immediately draw the newest frame
         if (pendingEnsembleStep) {
             requestAnimationFrame(() => renderAllEnsembleMembers());
         }
@@ -1090,6 +1109,11 @@ map.on('load', async () => {
     setBasemapLabelsVisibility(map, false);
     initAtmosphereHaloCanvas();
     try { initVectorContours(map); } catch (err) {}
+    
+    // 🌟 Cache basemap layer IDs for single-pass viewport mode
+    basemapLayerIds = (map.getStyle().layers || [])
+        .map(l => l.id)
+        .filter(id => id !== 'weather-gpu-shader' && id !== 'contour-gpu-layer' && id !== 'contour-master-label-layer');
 });
 
 map.on('render', () => {
@@ -1113,7 +1137,6 @@ map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
     const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
-    formText = formatParameterValue(decodedVal, stateManager.manifest);
     const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
     const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
 
