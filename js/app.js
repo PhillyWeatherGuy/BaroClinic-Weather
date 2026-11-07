@@ -370,8 +370,6 @@ export async function renderAllEnsembleMembers() {
         }
 
         customShaderLayer.setGridMode(false, null);
-        toggleBasemapLayers(true);
-        toggleEnsembleContours(true);
 
         // Assemble the frozen basemap and the matching scissored member into each card.
         cardList.forEach((item, memberIndex) => {
@@ -403,6 +401,8 @@ export async function renderAllEnsembleMembers() {
             );
         });
 
+        toggleBasemapLayers(true);
+        toggleEnsembleContours(true);
         if (typeof map._render === 'function') {
             map._render();
         }
