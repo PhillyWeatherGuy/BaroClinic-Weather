@@ -408,7 +408,7 @@ function captureBasemapOverlay() {
 }
 // 🌟 NEW: Snapshot the static basemap without the weather
 function captureBasemap() {
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
     const mapCanvas = map.getCanvas();
     if (!staticBasemapCanvas) {
         staticBasemapCanvas = document.createElement('canvas');
@@ -420,12 +420,13 @@ function captureBasemap() {
         basemapMap.resize();
         syncBasemapMapCamera();
         basemapMap._render();
+        if (!basemapMap.areTilesLoaded()) return; // tiles for this camera aren't ready yet
         staticBasemapCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
         captureBasemapOverlay();
         isBasemapCaptured = true;
         return;
     }
-
+    if (!map.isStyleLoaded()) return;
     // Temporarily hide our weather/contours to take a clean snapshot of the basemap
     const toggleWeather = (show) => {
         const vis = show ? 'visible' : 'none';
@@ -500,6 +501,11 @@ export async function renderAllEnsembleMembers() {
         // 🌟 1. CAPTURE FROZEN BASEMAP (Only happens once when map stops moving)
         if (!isBasemapCaptured) {
             captureBasemap();
+            if (!isBasemapCaptured) {
+                // Basemap tiles for this camera aren't ready: keep the last frame, retry when idle
+                if (basemapMap) basemapMap.once('idle', () => renderAllEnsembleMembers());
+                return;
+            }
         }
 
         // 🌟 2. Sync the hidden weather-only map to the live camera and size
