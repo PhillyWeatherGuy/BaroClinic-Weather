@@ -1414,7 +1414,7 @@ body.globe-view #map {
     gap: 6px;
     padding: 6px;
     box-sizing: border-box;
-    background: #3b4148;
+    background: #000000;
     z-index: 5;    /* above #ensemble-canvas (4), below #timeline (10) and #top-nav (30) */
     pointer-events: none; /* lets pan/zoom events reach the master map behind */
 }
@@ -1424,7 +1424,7 @@ body.globe-view #map {
 }
 
 body.light-mode #ensemble-grid {
-    background: #d9dde1;
+    background: #ffffff;
 }
 
 .map-card {
