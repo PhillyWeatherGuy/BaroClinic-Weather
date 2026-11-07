@@ -991,7 +991,7 @@ export async function applyTheme(theme) {
         console.warn("Could not resolve theme basemap URL:", err);
     }
 
-    const paramId = stateManager.paramConfig?.palette || stateManager.paramConfig?.id || stateManager.activeParam;
+    const paramId = stateManager.paramConfig?.id || stateManager.activeParam;
     const paletteFunc = (theme === 'dark') ? getDarkPalette : getLightPalette;
     const newPalette = paletteFunc(paramId);
 

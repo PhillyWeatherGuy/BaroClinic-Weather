@@ -724,9 +724,9 @@ export function initModelCategoryBar() {
                 }
 
                 if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
-                    shaderLayerRef.updatePalette(activeCfg?.palette || nextParam);
+                    shaderLayerRef.updatePalette(activeCfg?.id || nextParam);
                 }
-                try { updatePolarPalette(activeCfg?.palette || nextParam); } catch (e) {}
+                try { updatePolarPalette(activeCfg?.id || nextParam); } catch (e) {}
 
                 // Sync parameter category buttons so only parameters valid for this model are visible
                 if (typeof refreshParamCategoryUI === 'function') {
