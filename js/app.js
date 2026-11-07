@@ -403,6 +403,42 @@ let isRenderingEnsemble = false;
 let pendingEnsembleStep = null;
 let cachedCardCanvases = null;
 let cachedTargetSize = null;
+let expandedEnsembleMember = null;
+
+function setExpandedEnsembleMember(memberIndex = null) {
+    if (!isDrawingEnsemble) return;
+
+    expandedEnsembleMember = expandedEnsembleMember === memberIndex ? null : memberIndex;
+    const grid = document.getElementById('ensemble-grid');
+    if (!grid) return;
+
+    grid.classList.toggle('is-expanded', expandedEnsembleMember !== null);
+    grid.style.display = expandedEnsembleMember === null ? 'grid' : 'block';
+    grid.querySelectorAll('.map-card').forEach((card, index) => {
+        const isExpanded = expandedEnsembleMember === index;
+        card.classList.toggle('is-expanded', isExpanded);
+        card.classList.toggle('is-collapsed', expandedEnsembleMember !== null && !isExpanded);
+        const button = card.querySelector('.ensemble-expand-btn');
+        if (button) {
+            const action = isExpanded ? 'Collapse' : 'Expand';
+            button.setAttribute('aria-label', `${action} ${card.dataset.member}`);
+            button.title = `${action} ${card.dataset.member}`;
+            button.textContent = isExpanded ? '🗗' : '⛶';
+        }
+    });
+
+    cachedTargetSize = null;
+    const cards = getCardCanvases();
+    cards.forEach(item => item.ctx.clearRect(0, 0, item.canvas.width, item.canvas.height));
+    requestAnimationFrame(() => renderAllEnsembleMembers());
+}
+
+window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && expandedEnsembleMember !== null) {
+        event.preventDefault();
+        setExpandedEnsembleMember(null);
+    }
+});
 
 function getCardCanvases() {
     if (cachedCardCanvases && cachedCardCanvases.length === 10) {
@@ -410,6 +446,15 @@ function getCardCanvases() {
     }
     const cards = document.querySelectorAll('.map-card');
     cachedCardCanvases = Array.from(cards).map(card => {
+        const expandButton = card.querySelector('.ensemble-expand-btn');
+        if (expandButton && !expandButton.dataset.bound) {
+            expandButton.dataset.bound = 'true';
+            expandButton.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                setExpandedEnsembleMember(Number(card.dataset.member.replace(/\D/g, '')) - 1);
+            });
+        }
         let canvas = card.querySelector('canvas');
         if (!canvas) {
             canvas = document.createElement('canvas');
@@ -427,7 +472,12 @@ function getCardCanvases() {
 function updateCachedDimensions() {
     const cardList = getCardCanvases();
     if (!cardList || cardList.length === 0) return null;
-    const rect = cardList[0].card.getBoundingClientRect();
+    const visibleCard = cardList.find(item => {
+        const rect = item.card.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    });
+    if (!visibleCard) return null;
+    const rect = visibleCard.card.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
 
     const dpr = window.devicePixelRatio || 1;
@@ -642,7 +692,11 @@ function syncEnsembleGrid() {
     if (!grid) return;
     
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
-    grid.style.display = shouldShow ? 'grid' : 'none';
+    if (!shouldShow && expandedEnsembleMember !== null) {
+        expandedEnsembleMember = null;
+        grid.classList.remove('is-expanded');
+    }
+    grid.style.display = shouldShow ? (expandedEnsembleMember === null ? 'grid' : 'block') : 'none';
     
     isDrawingEnsemble = shouldShow;
     cachedCardCanvases = null;
