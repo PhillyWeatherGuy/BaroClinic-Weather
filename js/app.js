@@ -75,6 +75,8 @@ const map = new maplibregl.Map({
 });
 
 function syncBasemapMapCamera() {
+    const proj = map.getProjection ? map.getProjection() : null;
+    if (proj && basemapMap.setProjection && basemapMap.getProjection()?.type !== proj.type) basemapMap.setProjection(proj);
     if (!basemapMap || !basemapMapReady) return;
     basemapMap.jumpTo({
         center: map.getCenter(),
@@ -144,6 +146,8 @@ function syncWeatherMapSize() {
 }
 
 function syncWeatherMapCamera() {
+    const proj = map.getProjection ? map.getProjection() : null;
+    if (proj && weatherMap.setProjection && weatherMap.getProjection()?.type !== proj.type) weatherMap.setProjection(proj);
     if (!weatherMap || !weatherMapReady) return;
     weatherMap.jumpTo({
         center: map.getCenter(),
