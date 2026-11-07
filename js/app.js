@@ -333,33 +333,14 @@ export async function renderAllEnsembleMembers() {
         // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
         toggleBasemapLayers(false);
 
-        // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
-        const mapRect = mapCanvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const boxRects = cardList.map(item => {
-            const rect = item.canvas.getBoundingClientRect();
-            return {
-                x: Math.floor((rect.left - mapRect.left) * dpr),
-                y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
-                w: Math.floor(rect.width * dpr),
-                h: Math.floor(rect.height * dpr)
-            };
-        });
-
-        // 🌟 3. ENABLE SINGLE-PASS GRID MODE ON THE SHADER LAYER
-        customShaderLayer.setGridMode(true, boxRects);
-
-        // 🌟 4. ONE SINGLE map._render() CALL RENDERS ALL 10 MEMBERS SIMULTANEOUSLY!
-        if (typeof map._render === 'function') {
-            map._render(); 
-        }
-
-        // 🌟 5. DISABLE GRID MODE & RESTORE BASEMAP
+        // 🌟 Render and capture one member at a time so each card gets exactly one texture.
         customShaderLayer.setGridMode(false, null);
-        toggleBasemapLayers(true);
+        cardList.forEach((item, memberIndex) => {
+            customShaderLayer.setActiveMember(memberIndex);
+            if (typeof map._render === 'function') {
+                map._render();
+            }
 
-        // 🌟 6. ASSEMBLE THE SANDWICH INTO EACH CARD (Using centered map crop sx, sy, sWidth, sHeight)
-        cardList.forEach((item) => {
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
@@ -382,6 +363,9 @@ export async function renderAllEnsembleMembers() {
             );
         });
 
+        // Restore the normal map view and basemap after all cards are captured.
+        customShaderLayer.setActiveMember(0);
+        toggleBasemapLayers(true);
         if (typeof map._render === 'function') {
             map._render();
         }
