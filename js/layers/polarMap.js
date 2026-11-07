@@ -27,6 +27,8 @@ let pathCountries = null;
 let pathStates = null;
 let pathCounties = null;
 let pathGraticule = null;
+let polarContourFeatures = [];
+let polarContourPaths = [];
 
 let rawLandFeatures = [];
 let rawLakesFeatures = [];
@@ -541,6 +543,21 @@ function rebuildAllPaths() {
     pathStates = buildPath2D(rawStateFeatures, isNorth);
     pathCounties = buildPath2D(rawCountyFeatures, isNorth);
     pathGraticule = buildGraticulePath(isNorth);
+    polarContourPaths = buildContourPaths(polarContourFeatures, isNorth);
+    render2DOverlay();
+}
+
+function buildContourPaths(features, isNorth) {
+    return (features || []).map(feature => ({
+        path: buildPath2D([feature], isNorth),
+        color: feature.properties?.color || '#f8fafc',
+        width: Number(feature.properties?.width) || 1.5
+    }));
+}
+
+export function setPolarContourFeatures(features) {
+    polarContourFeatures = features || [];
+    polarContourPaths = buildContourPaths(polarContourFeatures, currentPole === 'north');
     render2DOverlay();
 }
 
@@ -581,6 +598,12 @@ function render2DOverlay() {
         overlayCtx.stroke(pathGraticule);
         overlayCtx.setLineDash([]);
     }
+
+    polarContourPaths.forEach(({ path, color, width }) => {
+        overlayCtx.lineWidth = (width * dpr) / scale;
+        overlayCtx.strokeStyle = color;
+        overlayCtx.stroke(path);
+    });
 
     if (pathCounties && camera.zoom > 1.8) {
         const countyAlpha = Math.min(1.0, (camera.zoom - 1.8) * 0.7);

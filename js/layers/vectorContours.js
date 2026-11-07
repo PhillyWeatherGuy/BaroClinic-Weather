@@ -9,6 +9,7 @@ let activeMasterContours = null;
 let activeMasterKey = null;
 let fetchPromise = null;
 let activeContourBinary = null;
+let activeContourFeatures = [];
 let currentVisibleStep = 0;
 let currentMember = 0; // 🌟 Tracks the active ensemble member (0-9)
 let lastCullCenter = null; // 🌟 Tracks the last parsed map center for spatial culling
@@ -848,6 +849,7 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
                     { ...stepData, features: (stepData.features || []).slice() };
     const themed = themeContourFeatures(decoded, masterData);
     const prepared = prepareStep(themed);
+    prepared.features = themed.features || [];
     
     if (prepared.count > 0 || !masterData.binary) {
         const maxCacheSize = isMobile ? 8 : 40;
@@ -917,6 +919,7 @@ function applyStep(stepNum, masterData, rawStep, force) {
     const data = getStepData(stepNum, masterData, rawStep);
 
     if (!data || data.count === 0) {
+        activeContourFeatures = [];
         setActiveData(null);
         setLabels(EMPTY_GEOJSON);
         displayedStep = null;
@@ -925,6 +928,7 @@ function applyStep(stepNum, masterData, rawStep, force) {
 
     const stepMemberKey = `${stepNum}_m${currentMember}`;
     if (displayedStep !== stepMemberKey || force) {
+        activeContourFeatures = data.features || [];
         setActiveData(data);
         setLabels(data.labels);
     }
@@ -974,6 +978,10 @@ export function setContourActiveMember(memberIndex) {
     }
 }
 
+export function getActiveContourFeatures() {
+    return activeContourFeatures;
+}
+
 export function initVectorContours(map) {
     mapInstance = map;
 
@@ -1016,6 +1024,7 @@ export function initVectorContours(map) {
 export function clearVectorContours() {
     activeMasterContours = null;
     activeContourBinary = null;
+    activeContourFeatures = [];
     activeMasterKey = null;
     fetchPromise = null;
     currentMember = 0;

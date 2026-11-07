@@ -28,8 +28,8 @@ import {
     destroyCityOverlay,
     setBasemapLabelsVisibility 
 } from './layers/cityOverlay.js'; 
-import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember } from './layers/vectorContours.js';
-import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
+import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures } from './layers/vectorContours.js';
+import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setPolarContourFeatures } from './layers/polarMap.js';
 
 // 🛰️ Real-Time Radar Engine
 import { initRadarMode, destroyRadarMode, updateRadarUnitLabels } from './components/radarUI.js';
@@ -924,6 +924,7 @@ export function applyView(targetView) {
         }
 
         showPolarMap();
+        setPolarContourFeatures(getActiveContourFeatures());
 
         if (stateManager.activeFrameState) {
             updatePolarFrame(stateManager.activeFrameState);
@@ -1120,15 +1121,17 @@ async function renderFrame(globalIdx) {
     
     const activeView = stateManager.activeView || '2d';
 
-    if (activeView === '2d' || activeView === '3d') {
+    if (activeView === '2d' || activeView === '3d' || activeView === 'polar') {
         // 🌟 Load and update vector contours for ALL models (including AIFS-ENS)
         try { initVectorContours(map); } catch (e) {}
         await updateVectorContours(frameInfo.step);
 
         if (renderId !== activeRenderId) return;
 
+        if (activeView === 'polar') {
+            setPolarContourFeatures(getActiveContourFeatures());
         // Skip heavy city text overlay in ensemble mode for speed
-        if (!isEnsembleRangeModel()) {
+        } else if (!isEnsembleRangeModel()) {
             try {
                 updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
             } catch (e) {}
@@ -1137,8 +1140,9 @@ async function renderFrame(globalIdx) {
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
         }
-    } else if (activeView === 'polar' && polarMapLoaded) {
-        updatePolarFrame(stateManager.activeFrameState);
+        if (activeView === 'polar' && polarMapLoaded) {
+            updatePolarFrame(stateManager.activeFrameState);
+        }
     }
 
     // 🌟 ANIMATE ALL 10 MEMBERS SIMULTANEOUSLY DURING SCRUBBING
