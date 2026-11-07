@@ -53,6 +53,7 @@ let lastGlobeMatrix = null;
 let staticBasemapCanvas = null;
 let isBasemapCaptured = false;
 let basemapLayerIds = []; // 🌟 Cached for lightning-fast toggling
+let ensembleHiddenLayerVisibility = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -300,6 +301,28 @@ function toggleEnsembleContours(show) {
     });
 }
 
+function setWeatherOnlyCapture(show) {
+    if (!map || !map.isStyleLoaded()) return;
+
+    if (show) {
+        if (ensembleHiddenLayerVisibility) return;
+        ensembleHiddenLayerVisibility = new Map();
+        Object.entries(map.style._layers).forEach(([id, layer]) => {
+            if (id === 'weather-gpu-shader') return;
+            ensembleHiddenLayerVisibility.set(id, layer.visibility ?? 'visible');
+            layer.visibility = 'none';
+        });
+        return;
+    }
+
+    if (!ensembleHiddenLayerVisibility) return;
+    ensembleHiddenLayerVisibility.forEach((visibility, id) => {
+        const layer = map.style._layers[id];
+        if (layer) layer.visibility = visibility;
+    });
+    ensembleHiddenLayerVisibility = null;
+}
+
 // 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
@@ -340,8 +363,7 @@ export async function renderAllEnsembleMembers() {
         }
 
         // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
-        toggleBasemapLayers(false);
-        toggleEnsembleContours(false);
+        setWeatherOnlyCapture(true);
 
         // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
         const mapRect = mapCanvas.getBoundingClientRect();
@@ -401,8 +423,7 @@ export async function renderAllEnsembleMembers() {
             );
         });
 
-        toggleBasemapLayers(true);
-        toggleEnsembleContours(true);
+        setWeatherOnlyCapture(false);
         if (typeof map._render === 'function') {
             map._render();
         }
