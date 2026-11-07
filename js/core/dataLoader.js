@@ -5,8 +5,22 @@ import { clearPolarTextures } from '../layers/polarMap.js';
 import { clearVectorContours } from '../layers/vectorContours.js';
 
 export async function fetchManifest(run = null, model = null, param = null) {
-    const activeModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
+    const rawModel = (model || stateManager.activeModel || 'ecmwf').toLowerCase();
     const activeParam = (param || stateManager.activeParam || '2t').toLowerCase();
+
+    // 🌟 Resolve base model and member range tag for ensemble variants
+    let activeModel = rawModel;
+    let memberTag = null;
+
+    const memberMatch = rawModel.match(/aifs_ens_(\d+)_(\d+)/);
+    if (memberMatch) {
+        activeModel = 'aifs_ens';
+        const start = String(memberMatch[1]).padStart(2, '0');
+        const end = String(memberMatch[2]).padStart(2, '0');
+        memberTag = `m${start}-m${end}`;
+    } else if (rawModel === 'aifs_ens') {
+        memberTag = 'm01-m10';
+    }
 
     // 🌟 Keep base URL pointing to the Cloudflare Worker proxy for all models
     if (!stateManager.DEFAULT_BASE_URL) {
@@ -31,30 +45,37 @@ export async function fetchManifest(run = null, model = null, param = null) {
     }
 
     const urlsToTry = [];
-    const latestUrl = `${stateManager.BASE_URL}${activeModel}_${manifestParam}_manifest.json`;
 
-    // 🌟 For ERA5 storms, always use clean storm-slug URLs without operational date suffixes
+    // 1. URLs with Run Date and Cycle (Operational runs)
     if (stateManager.currentDate && stateManager.currentCycle && !activeModel.startsWith('era5')) {
         const dateStr = stateManager.currentDate;
         const cycleStr = stateManager.currentCycle;
-        
-        if (activeParam === 'pva') {
-            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_z500_${dateStr}_${cycleStr}_manifest.json`);
+        const pName = (activeParam === 'pva') ? 'z500' : manifestParam;
+
+        if (memberTag) {
+            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${pName}_${dateStr}_${cycleStr}_${memberTag}_manifest.json`);
+            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${pName}_${dateStr}_${cycleStr}_${memberTag}.json`);
         } else {
-            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${manifestParam}_${dateStr}_${cycleStr}_manifest.json`);
+            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${pName}_${dateStr}_${cycleStr}_manifest.json`);
         }
     }
-    if (!run || activeModel.startsWith('era5')) {
-        urlsToTry.unshift(latestUrl);
+
+    // 2. Latest Run URLs (Fallback / default load)
+    if (memberTag) {
+        if (memberTag === 'm01-m10') {
+            urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${manifestParam}_manifest.json`);
+        }
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${manifestParam}_${memberTag}_manifest.json`);
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${manifestParam}_manifest_${memberTag}.json`);
+        urlsToTry.push(`${stateManager.BASE_URL}${rawModel}_${manifestParam}_manifest.json`);
     } else {
-        urlsToTry.push(latestUrl);
+        urlsToTry.push(`${stateManager.BASE_URL}${activeModel}_${manifestParam}_manifest.json`);
     }
 
     let fetchedData = null;
 
     for (const url of urlsToTry) {
         try {
-            // 🌟 Standard caching enabled for manifests
             const fetchOptions = {
                 signal: stateManager.activeFetchController?.signal,
                 cache: 'default'
@@ -66,21 +87,22 @@ export async function fetchManifest(run = null, model = null, param = null) {
                 break;
             }
         } catch (err) {
-            if (err.name === 'AbortError') return; // Exit gracefully if aborted
+            if (err.name === 'AbortError') return;
         }
     }
 
     if (!fetchedData) {
-        throw new Error(`HTTP Manifest not found for ${activeModel} (${activeParam})`);
+        throw new Error(`HTTP Manifest not found for ${rawModel} (${activeParam})`);
     }
 
     stateManager.manifest = fetchedData;
     
     if (stateManager.manifest.date) stateManager.currentDate = stateManager.manifest.date;
     if (stateManager.manifest.run) stateManager.currentCycle = stateManager.manifest.run.toLowerCase();
-    if (stateManager.manifest.model) stateManager.activeModel = stateManager.manifest.model;
     
-    // 🌟 Preserve the frontend-specific _rrfs parameter ID
+    // 🌟 Preserve the specific variant (e.g. aifs_ens_11_20) so the active button highlight doesn't reset
+    stateManager.activeModel = rawModel;
+    
     if (stateManager.manifest.parameter) {
         if (!stateManager.activeParam.endsWith('_rrfs')) {
             stateManager.activeParam = stateManager.manifest.parameter;
@@ -93,7 +115,10 @@ export async function fetchManifest(run = null, model = null, param = null) {
                          || stateManager.manifest.model_run
                          || stateManager.manifest.time;
     
-    // 🌟 Approach 1: On phones, if a run has >70 hourly frames, step in 3-hour intervals
+    // 🌟 Update the 10 card badges in the UI (Member 01..10 or Member 11..20, etc.)
+    updateEnsembleGridLabels(stateManager.manifest);
+
+    // 🌟 Step reduction for mobile devices
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     const totalFramesCount = stateManager.manifest.total_frames || 0;
     const mobileStepInterval = (isMobile && totalFramesCount > 70) ? 3 : 1;
@@ -106,7 +131,7 @@ export async function fetchManifest(run = null, model = null, param = null) {
         for (let fIdx = 0; fIdx < steps.length; fIdx++) {
             const stepVal = steps[fIdx];
             if (mobileStepInterval > 1 && (stepVal % mobileStepInterval !== 0)) {
-                continue; // Skip intermediate hours on mobile to keep timeline slider light
+                continue;
             }
             stateManager.globalSteps.push({
                 step: stepVal,
@@ -121,6 +146,24 @@ export async function fetchManifest(run = null, model = null, param = null) {
 }
 
 /**
+ * 🌟 Dynamically updates the corner labels on the 10 map cards
+ */
+function updateEnsembleGridLabels(manifest) {
+    const cards = document.querySelectorAll('#ensemble-grid .map-card');
+    if (!cards || cards.length === 0) return;
+
+    const memberIds = manifest?.member_ids;
+    cards.forEach((card, idx) => {
+        if (memberIds && memberIds[idx]) {
+            const cleanNum = memberIds[idx].replace(/^m0?/, '');
+            card.setAttribute('data-member', `Member ${cleanNum.padStart(2, '0')}`);
+        } else {
+            card.setAttribute('data-member', `Member ${String(idx + 1).padStart(2, '0')}`);
+        }
+    });
+}
+
+/**
  * 🌟 Dynamic Frame to ImageBitmap Converter (Supports 1x Native, 2x Upscale, and Dual Rate/Ptype Packing)
  */
 async function frameToBitmap(frameBytes, width, height, shouldUpscale = false, ptypeBytes = null) {
@@ -132,14 +175,12 @@ async function frameToBitmap(frameBytes, width, height, shouldUpscale = false, p
     const rgba32 = new Uint32Array(rgbaBuffer);
 
     if (ptypeBytes) {
-        // Fast 32-bit Little-Endian packing: R = Rate, G = Ptype, B = 0, A = 255
         for (let i = 0; i < totalPixels; i++) {
             const r = frameBytes[i];
             const g = ptypeBytes[i];
             rgba32[i] = 0xFF000000 | (g << 8) | r;
         }
     } else {
-        // Fast 32-bit Little-Endian pixel packing for standard scalar parameters: A(255) | B(v) | G(v) | R(v)
         for (let i = 0; i < totalPixels; i++) {
             const v = frameBytes[i];
             rgba32[i] = 0xFF000000 | (v << 16) | (v << 8) | v;
@@ -184,12 +225,10 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
         throw new Error("Load cancelled");
     }
 
-    // 🌟 Instant Cache Return (Zero latency if already in memory)
     if (stateManager.loadedChunkBitmaps[chunkIndex]) {
         return stateManager.loadedChunkBitmaps[chunkIndex];
     }
 
-    // 🌟 DEDUPLICATE CONCURRENT FETCHES (Prevents double downloading)
     if (!stateManager.activeChunkPromises) stateManager.activeChunkPromises = {};
     if (stateManager.activeChunkPromises[chunkIndex]) {
         return stateManager.activeChunkPromises[chunkIndex];
@@ -201,7 +240,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
         const chunkUrl = chunk.file.startsWith('http') ? chunk.file : stateManager.BASE_URL + chunk.file;
         
-        // 🌟 Standard caching enabled for chunks
         const imgResp = await fetch(chunkUrl, { 
             signal: stateManager.activeFetchController?.signal,
             cache: 'default'
@@ -219,7 +257,6 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
         const shouldUpscale = Boolean(stateManager.paramConfig?.upscale_2x || stateManager.manifest?.upscale_2x);
 
-        // 🌟 Determine if intermediate hours are skipped on mobile
         const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
         const totalFramesCount = stateManager.manifest?.total_frames || 0;
         const mobileStepInterval = (isMobile && totalFramesCount > 70) ? 3 : 1;
@@ -279,7 +316,7 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                 }
             }
             
-            // Native Grid Path: Keeps zero-copy typed arrays for HRRR/RRFS whether scalar or ptype
+            // Native Grid Path: HRRR/RRFS
             if (stateManager.manifest.grid) {
                 const frames = [];
                 const ptypeFrames = ptypeBytes ? [] : null;
@@ -303,12 +340,12 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
                 return volumeObj;
             }
 
-            // 🌟 OPTIMIZED PATH: ENSEMBLE CHUNKED (Zero-copy raw byte slices for 10 members)
+            // 🌟 OPTIMIZED PATH: ENSEMBLE CHUNKED (10 members)
             if (stateManager.manifest.type === 'ensemble_chunked') {
                 const numMembers = stateManager.manifest.members || 10;
                 const memberSizeBytes = chunk.member_size_bytes || (numFrames * frameSize);
                 
-                const outFrames = []; // Array of arrays: [ [m0, m1...m9], [m0, m1...m9] ]
+                const outFrames = [];
 
                 for (let f = 0; f < numFrames; f++) {
                     const stepVal = (chunk.forecast_steps || [])[f];
@@ -319,14 +356,10 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 
                     const memberFrames = [];
                     for (let m = 0; m < numMembers; m++) {
-                        // Offset formula: (Member Index * Total Size of Member Block) + (Frame Index * Size of One Frame)
                         const srcStart = (m * memberSizeBytes) + (f * frameSize);
                         const frameBytes = rawData.subarray(srcStart, srcStart + frameSize);
-                        
-                        // Extract P-Type data for this specific member
                         const ptypeSlice = ptypeBytes ? ptypeBytes.subarray(srcStart, srcStart + frameSize) : null;
                         
-                        // 🌟 Zero-copy raw slices (Bypasses slow 32-bit canvas ImageBitmap allocation)
                         memberFrames.push({
                             data: frameBytes,
                             ptype: ptypeSlice
@@ -429,13 +462,10 @@ export async function loadChunkBitmap(chunkIndex, currentGen = null) {
 export function purgeAllAppMemory(shaderLayerRef = null) {
     stateManager.loadGeneration++;
 
-    // 🌟 ABORT ONGOING DOWNLOADS
     if (stateManager.activeFetchController) {
         try { stateManager.activeFetchController.abort(); } catch(e){}
     }
     stateManager.activeFetchController = new AbortController();
-    
-    // 🌟 CLEAR PROMISE LOCKS
     stateManager.activeChunkPromises = {};
 
     clearThreeGlobeTextures();
@@ -447,14 +477,11 @@ export function purgeAllAppMemory(shaderLayerRef = null) {
         
         if (item && item.frames) {
             item.frames.forEach(frameOrArray => {
-                // 🌟 Handle Ensemble Arrays
                 if (Array.isArray(frameOrArray)) {
                     frameOrArray.forEach(bmp => {
                         if (bmp && typeof bmp.close === 'function') bmp.close();
                     });
-                } 
-                // 🌟 Handle Standard Single ImageBitmaps
-                else if (frameOrArray && typeof frameOrArray.close === 'function') {
+                } else if (frameOrArray && typeof frameOrArray.close === 'function') {
                     frameOrArray.close();
                 }
             });
