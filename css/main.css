@@ -1,9 +1,3 @@
-/* Keep the native MapLibre globe, but present its rendered surface as a flattened disk. */
-body.flat-globe-view #map {
-    transform: scaleY(0.58);
-    transform-origin: center center;
-    overflow: hidden;
-}
 html {
     zoom: 0.85;
     width: 100%;

@@ -74,45 +74,6 @@ const map = new maplibregl.Map({
     preserveDrawingBuffer: true // 🌟 Required for real-time canvas copying
 });
 
-let globeDragAxis = null;
-let globeDragStartCenter = null;
-let isConstrainingGlobeDrag = false;
-
-map.on('dragstart', () => {
-    if (stateManager.activeView !== 'polar') return;
-    const center = map.getCenter();
-    globeDragAxis = null;
-    globeDragStartCenter = { lng: center.lng, lat: center.lat };
-});
-
-map.on('drag', () => {
-    if (stateManager.activeView !== 'polar' || !globeDragStartCenter || isConstrainingGlobeDrag) return;
-
-    const center = map.getCenter();
-    const deltaLng = Math.abs(center.lng - globeDragStartCenter.lng);
-    const deltaLat = Math.abs(center.lat - globeDragStartCenter.lat);
-
-    if (!globeDragAxis && deltaLng + deltaLat > 0.15) {
-        globeDragAxis = deltaLng >= deltaLat ? 'horizontal' : 'vertical';
-    }
-    if (!globeDragAxis) return;
-
-    const constrainedCenter = globeDragAxis === 'horizontal'
-        ? [center.lng, globeDragStartCenter.lat]
-        : [globeDragStartCenter.lng, center.lat];
-
-    isConstrainingGlobeDrag = true;
-    map.setCenter(constrainedCenter);
-    map.setBearing(0);
-    map.setPitch(0);
-    isConstrainingGlobeDrag = false;
-});
-
-map.on('dragend', () => {
-    globeDragAxis = null;
-    globeDragStartCenter = null;
-});
-
 function syncBasemapMapCamera() {
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && basemapMap.setProjection && basemapMap.getProjection()?.type !== proj.type) basemapMap.setProjection(proj);
@@ -811,7 +772,7 @@ export function updateBasemapStyle(styleUrl) {
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
         if (typeof map.setProjection === 'function') {
-            map.setProjection({ type: (stateManager.activeView === '3d' || stateManager.activeView === 'polar') ? 'globe' : 'mercator' });
+            map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
         }
 
         if (stateManager.activeMode === 'radar') {
@@ -914,7 +875,6 @@ export function applyView(targetView) {
     stateManager.activeView = targetView;
 
     document.body.classList.toggle('globe-view', targetView === '3d');
-    document.body.classList.toggle('flat-globe-view', targetView === 'polar');
     if (!haloCanvas) initAtmosphereHaloCanvas();
     if (haloCanvas) {
         haloCanvas.style.display = targetView === '3d' ? 'block' : 'none';
@@ -923,7 +883,7 @@ export function applyView(targetView) {
         }
     }
 
-    if (targetView === '2d' || targetView === '3d' || targetView === 'polar') {
+    if (targetView === '2d' || targetView === '3d') {
         hidePolarMap();
         clearPolarTextures();
 
@@ -935,18 +895,7 @@ export function applyView(targetView) {
 
         if (map) {
             if (typeof map.setProjection === 'function') {
-                map.setProjection({ type: (targetView === '3d' || targetView === 'polar') ? 'globe' : 'mercator' });
-            }
-            if (targetView === 'polar') {
-                map.setBearing(0);
-                map.setPitch(0);
-                map.dragRotate.disable();
-                map.touchPitch.disable();
-                map.touchZoomRotate.disableRotation();
-            } else {
-                map.dragRotate.enable();
-                map.touchPitch.enable();
-                map.touchZoomRotate.enableRotation();
+                map.setProjection({ type: targetView === '3d' ? 'globe' : 'mercator' });
             }
             map.resize();
             if (basemapMap) basemapMap.resize();
@@ -960,6 +909,25 @@ export function applyView(targetView) {
                 updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
             }
         }
+    } else if (targetView === 'polar') {
+        const mapDiv = document.getElementById('map');
+        if (mapDiv) mapDiv.style.display = 'none';
+
+        const globeDiv = document.getElementById('globe-container');
+        if (globeDiv) globeDiv.style.display = 'none';
+
+        if (!polarMapLoaded) {
+            try {
+                initPolarMap();
+                polarMapLoaded = true;
+            } catch (err) {}
+        }
+
+        showPolarMap();
+
+        if (stateManager.activeFrameState) {
+            updatePolarFrame(stateManager.activeFrameState);
+        }
     }
 }
 
@@ -969,7 +937,7 @@ export function applyView(targetView) {
 export function handleKeyboardZoom(direction, x, y) {
     const activeView = stateManager.activeView || '2d';
 
-    if ((activeView === '2d' || activeView === '3d' || activeView === 'polar') && map) {
+    if ((activeView === '2d' || activeView === '3d') && map) {
         const targetLngLat = map.unproject([x, y]);
         const deltaZoom = direction > 0 ? 0.65 : -0.65;
         map.easeTo({
@@ -977,6 +945,10 @@ export function handleKeyboardZoom(direction, x, y) {
             around: targetLngLat,
             duration: 150
         });
+    } else if (activeView === 'polar' && polarMapLoaded) {
+        if (typeof zoomPolarAtPoint === 'function') {
+            zoomPolarAtPoint(direction, x, y);
+        }
     }
 }
 
@@ -1148,7 +1120,7 @@ async function renderFrame(globalIdx) {
     
     const activeView = stateManager.activeView || '2d';
 
-    if (activeView === '2d' || activeView === '3d' || activeView === 'polar') {
+    if (activeView === '2d' || activeView === '3d') {
         // 🌟 Load and update vector contours for ALL models (including AIFS-ENS)
         try { initVectorContours(map); } catch (e) {}
         await updateVectorContours(frameInfo.step);
@@ -1165,6 +1137,8 @@ async function renderFrame(globalIdx) {
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
         }
+    } else if (activeView === 'polar' && polarMapLoaded) {
+        updatePolarFrame(stateManager.activeFrameState);
     }
 
     // 🌟 ANIMATE ALL 10 MEMBERS SIMULTANEOUSLY DURING SCRUBBING
@@ -1382,7 +1356,7 @@ export async function switchAppMode(targetMode) {
                 loaded = true;
 
                 if (typeof map.setProjection === 'function') {
-                    map.setProjection({ type: (stateManager.activeView === '3d' || stateManager.activeView === 'polar') ? 'globe' : 'mercator' });
+                    map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
                 }
 
                 try { initCityOverlay(map); } catch (e) {}
@@ -1396,7 +1370,7 @@ export async function switchAppMode(targetMode) {
             map.setStyle(targetStyle);
         } else {
             if (typeof map.setProjection === 'function') {
-                map.setProjection({ type: (stateManager.activeView === '3d' || stateManager.activeView === 'polar') ? 'globe' : 'mercator' });
+                map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
             }
 
             try { initCityOverlay(map); } catch (e) {}
