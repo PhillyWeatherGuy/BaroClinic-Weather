@@ -52,6 +52,7 @@ let lastGlobeMatrix = null;
 // 🌟 THE "FROZEN BASEMAP" SANDWICH CACHE
 let staticBasemapCanvas = null;
 let isBasemapCaptured = false;
+let basemapLayerIds = []; // 🌟 Cached for lightning-fast toggling
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -274,17 +275,13 @@ function captureBasemap() {
     isBasemapCaptured = true;
 }
 
-// 🌟 NEW: Turn on/off MapLibre's internal basemap layers bypassing style diffing
+// 🌟 NEW: Turn on/off cached basemap layers instantly using pre-filtered IDs
 function toggleBasemapLayers(show) {
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map || !map.isStyleLoaded() || basemapLayerIds.length === 0) return;
     const vis = show ? 'visible' : 'none';
-    const layers = map.getStyle().layers;
-    layers.forEach(l => {
-        if (l.id !== 'weather-gpu-shader' && l.id !== 'contour-gpu-layer' && l.id !== 'contour-master-label-layer') {
-            if (map.style._layers[l.id]) {
-                map.style._layers[l.id].visibility = vis;
-            }
-        }
+    basemapLayerIds.forEach(id => {
+        const layer = map.style._layers[id];
+        if (layer) layer.visibility = vis;
     });
 }
 
@@ -327,7 +324,7 @@ export async function renderAllEnsembleMembers() {
             captureBasemap();
         }
 
-        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS
+        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY VIA CACHED IDs
         toggleBasemapLayers(false);
 
         // 🌟 Cycles through all 10 members seamlessly (MapLibre basemap is sleeping!)
@@ -1062,7 +1059,6 @@ document.querySelectorAll('.mode-nav-btn').forEach((button) => {
 
 initViewerUI(
     (stepIndex) => {
-        // 🌟 Restored to instant 60 FPS slider! 
         if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
         renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
     },
@@ -1117,6 +1113,7 @@ map.on('click', (e) => {
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
     const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
+    formText = formatParameterValue(decodedVal, stateManager.manifest);
     const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
     const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
 
