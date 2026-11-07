@@ -578,6 +578,7 @@ async function getSharedModelsConfig() {
             Object.values(sharedModelsConfig.models || {}).forEach(model => {
                 if (!Array.isArray(model.variants)) return;
                 model.variants.forEach(variant => {
+                    if (variant.id === model.id) return;
                     sharedModelsConfig.models[variant.id] = {
                         ...variant,
                         category: model.category,
