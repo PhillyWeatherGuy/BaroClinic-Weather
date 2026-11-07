@@ -1142,12 +1142,12 @@ map.on('render', () => {
 
     if (map.isMoving()) {
         isBasemapCaptured = false; // 🌟 Force a fresh clean snapshot next time we stop
+        drawEnsembleBoxes(0);
     }
 });
 
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
-        isBasemapCaptured = false;
         updateCachedDimensions();
         renderAllEnsembleMembers();
     }
