@@ -53,9 +53,12 @@ let lastGlobeMatrix = null;
 let staticBasemapCanvas = null;
 let isBasemapCaptured = false;
 let basemapLayerIds = []; // 🌟 Cached for lightning-fast toggling
-let ensembleHiddenLayerVisibility = null;
 let basemapMap = null;
 let basemapMapReady = false;
+// 🌟 Hidden map that renders ONLY the ensemble weather (empty style, camera synced to the live map)
+let weatherMap = null;
+let weatherMapReady = false;
+let weatherMapContainer = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -123,6 +126,74 @@ function updateBasemapMapStyle(styleUrl) {
         isBasemapCaptured = false;
     });
     basemapMap.setStyle(styleUrl);
+}
+
+function syncWeatherMapSize() {
+    if (!weatherMapContainer) return false;
+    const c = map.getCanvas();
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    if (!w || !h) return false;
+    if (weatherMapContainer.style.width !== `${w}px` || weatherMapContainer.style.height !== `${h}px`) {
+        weatherMapContainer.style.width = `${w}px`;
+        weatherMapContainer.style.height = `${h}px`;
+        if (weatherMap) weatherMap.resize();
+    }
+    return true;
+}
+
+function syncWeatherMapCamera() {
+    if (!weatherMap || !weatherMapReady) return;
+    weatherMap.jumpTo({
+        center: map.getCenter(),
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch()
+    });
+}
+
+function initWeatherMap() {
+    if (weatherMap) return;
+
+    weatherMapContainer = document.createElement('div');
+    weatherMapContainer.id = 'weather-render-map';
+    weatherMapContainer.style.cssText = 'position:fixed;left:-10000px;top:0;pointer-events:none;';
+    document.body.appendChild(weatherMapContainer);
+    syncWeatherMapSize();
+
+    weatherMap = new maplibregl.Map({
+        container: weatherMapContainer,
+        style: { version: 8, sources: {}, layers: [] },
+        center: map.getCenter(),
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+        interactive: false,
+        attributionControl: false,
+        preserveDrawingBuffer: true
+    });
+
+    weatherMap.once('load', () => {
+        weatherMapReady = true;
+        syncWeatherMapCamera();
+    });
+}
+
+function addEnsembleLayerToWeatherMap(layer) {
+    const add = () => {
+        if (customShaderLayer !== layer) return; // superseded by a newer initLayer()
+        if (weatherMap.getLayer('weather-gpu-shader')) weatherMap.removeLayer('weather-gpu-shader');
+        weatherMap.addLayer(layer);
+
+        for (const chunkIdx in stateManager.loadedChunkBitmaps) {
+            const volume = stateManager.loadedChunkBitmaps[chunkIdx];
+            if (volume) layer.preloadChunkTexture(Number(chunkIdx), volume);
+        }
+        if (stateManager.activeFrameState) layer.updateFrame(stateManager.activeFrameState);
+        renderAllEnsembleMembers();
+    };
+    if (weatherMapReady) add();
+    else weatherMap.once('load', add);
 }
 
 /**
@@ -243,6 +314,9 @@ function unloadActiveViewer() {
 
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
+    }
+    if (weatherMap && weatherMapReady && weatherMap.getLayer('weather-gpu-shader')) {
+        weatherMap.removeLayer('weather-gpu-shader');
     }
     if (map.getLayer('radar-gpu-shader')) {
         map.removeLayer('radar-gpu-shader');
@@ -367,31 +441,9 @@ function toggleEnsembleContours(show) {
     });
 }
 
-function setWeatherOnlyCapture(show) {
-    if (!map || !map.isStyleLoaded()) return;
-
-    if (show) {
-        if (ensembleHiddenLayerVisibility) return;
-        ensembleHiddenLayerVisibility = new Map();
-        Object.entries(map.style._layers).forEach(([id, layer]) => {
-            if (id === 'weather-gpu-shader') return;
-            ensembleHiddenLayerVisibility.set(id, layer.visibility ?? 'visible');
-            layer.visibility = 'none';
-        });
-        return;
-    }
-
-    if (!ensembleHiddenLayerVisibility) return;
-    ensembleHiddenLayerVisibility.forEach((visibility, id) => {
-        const layer = map.style._layers[id];
-        if (layer) layer.visibility = visibility;
-    });
-    ensembleHiddenLayerVisibility = null;
-}
-
 // 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
-    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
+    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function' || !weatherMapReady) return;
     if (isRenderingEnsemble) {
         pendingEnsembleStep = true;
         return;
@@ -428,8 +480,10 @@ export async function renderAllEnsembleMembers() {
             captureBasemap();
         }
 
-        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
-        setWeatherOnlyCapture(true);
+        // 🌟 2. Sync the hidden weather-only map to the live camera and size
+        if (!syncWeatherMapSize()) return;
+        syncWeatherMapCamera();
+        const weatherCanvas = weatherMap.getCanvas();
 
         // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
         const mapRect = mapCanvas.getBoundingClientRect();
@@ -450,12 +504,12 @@ export async function renderAllEnsembleMembers() {
             y: sy,
             w: sWidth,
             h: sHeight,
-            canvasW: mapCanvas.width,
-            canvasH: mapCanvas.height
+            canvasW: weatherCanvas.width,
+            canvasH: weatherCanvas.height
         });
-        if (typeof map._render === 'function') {
-            map._render();
-        }
+        // Synchronous redraw of the hidden weather map: the grid is drawn into ITS canvas only
+        if (typeof weatherMap.redraw === 'function') weatherMap.redraw();
+        else weatherMap._render();
 
         customShaderLayer.setGridMode(false, null);
 
@@ -469,9 +523,9 @@ export async function renderAllEnsembleMembers() {
 
             const box = boxRects[memberIndex];
             const weatherX = box?.x || 0;
-            const weatherY = box ? mapCanvas.height - box.y - box.h : 0;
-            const weatherW = box?.w || mapCanvas.width;
-            const weatherH = box?.h || mapCanvas.height;
+            const weatherY = box ? weatherCanvas.height - box.y - box.h : 0;
+            const weatherW = box?.w || weatherCanvas.width;
+            const weatherH = box?.h || weatherCanvas.height;
 
             // Draw crisp frozen basemap background
             if (staticBasemapCanvas) {
@@ -483,16 +537,12 @@ export async function renderAllEnsembleMembers() {
             }
             // Overlay the scissored, transparent weather on top
             item.ctx.drawImage(
-                mapCanvas, 
+                weatherCanvas,
                 weatherX, weatherY, weatherW, weatherH,
                 0, 0, targetW, targetH
             );
         });
 
-        setWeatherOnlyCapture(false);
-        if (typeof map._render === 'function') {
-            map._render();
-        }
     } finally {
         isRenderingEnsemble = false;
         if (pendingEnsembleStep) {
@@ -810,6 +860,9 @@ export function initLayer(shaderType = null) {
     if (map.getLayer('weather-gpu-shader')) {
         map.removeLayer('weather-gpu-shader');
     }
+    if (weatherMap && weatherMapReady && weatherMap.getLayer('weather-gpu-shader')) {
+        weatherMap.removeLayer('weather-gpu-shader');
+    }
     if (customShaderLayer) {
         customShaderLayer.clearTextures();
         customShaderLayer = null;
@@ -818,7 +871,9 @@ export function initLayer(shaderType = null) {
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
     if (stateManager.activeModel === 'aifs_ens') {
-        customShaderLayer = createEnsembleShaderLayer(map);
+        initWeatherMap();
+        customShaderLayer = createEnsembleShaderLayer(weatherMap);
+        customShaderLayer.gridOnly = true; // never draw a full-screen copy on the hidden map
     } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
@@ -865,7 +920,10 @@ export function initLayer(shaderType = null) {
         }
     };
 
-    if (!map.getLayer('weather-gpu-shader')) {
+    if (stateManager.activeModel === 'aifs_ens') {
+        // Weather lives on its own hidden map; the live map stays a clean basemap
+        addEnsembleLayerToWeatherMap(customShaderLayer);
+    } else if (!map.getLayer('weather-gpu-shader')) {
         map.addLayer(customShaderLayer, firstContentLayerId);
     }
 }
@@ -1217,6 +1275,7 @@ map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
     setBasemapLabelsVisibility(map, false);
     initBasemapMap();
+    initWeatherMap();
     initAtmosphereHaloCanvas();
     try { initVectorContours(map); } catch (err) {}
     
@@ -1242,7 +1301,6 @@ map.on('render', () => {
 
     if (map.isMoving()) {
         isBasemapCaptured = false; // 🌟 Force a fresh clean snapshot next time we stop
-        drawEnsembleBoxes(0);
     }
 });
 
