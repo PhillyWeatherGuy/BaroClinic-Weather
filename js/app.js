@@ -86,6 +86,40 @@ function syncBasemapMapCamera() {
     });
 }
 
+let linesMap = null, linesMapReady = false, linesContainer = null;
+
+function buildLinesStyle() {
+    const st = basemapMap.getStyle();
+    return { ...st, layers: (st.layers || []).filter(l => l.type === 'line' && /boundary|coast|outline/i.test(l.id)) };
+}
+
+function initLinesMap() {
+    if (linesMap || !basemapMap || !basemapMapReady) return;
+    linesContainer = document.createElement('div');
+    linesContainer.style.cssText = 'position:fixed;left:-10000px;top:0;width:100px;height:100px;pointer-events:none';
+    document.body.appendChild(linesContainer);
+    linesMap = new maplibregl.Map({
+        container: linesContainer, style: buildLinesStyle(),
+        center: map.getCenter(), zoom: map.getZoom(),
+        interactive: false, attributionControl: false, preserveDrawingBuffer: true
+    });
+    linesMap.once('load', () => { linesMapReady = true; });
+}
+
+function renderLinesMap() {
+    if (!linesMap || !linesMapReady) return null;
+    const c = map.getCanvas();
+    linesContainer.style.width = c.clientWidth + 'px';
+    linesContainer.style.height = c.clientHeight + 'px';
+    linesMap.resize();
+    const proj = map.getProjection ? map.getProjection() : null;
+    if (proj && linesMap.getProjection()?.type !== proj.type) linesMap.setProjection(proj);
+    linesMap.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+    linesMap._render();
+    const lc = linesMap.getCanvas();
+    return (lc.width === c.width && lc.height === c.height) ? lc : null;
+}
+
 function syncBasemapMapSize() {
     if (!basemapMap) return false;
     const c = map.getCanvas();
@@ -128,6 +162,7 @@ function initBasemapMap() {
         setBasemapLabelsVisibility(basemapMap, false);
         syncBasemapMapCamera();
         isBasemapCaptured = false;
+        initLinesMap();
     });
 }
 
@@ -139,6 +174,7 @@ function updateBasemapMapStyle(styleUrl) {
         setBasemapLabelsVisibility(basemapMap, false);
         syncBasemapMapCamera();
         isBasemapCaptured = false;
+        if (linesMap) linesMap.setStyle(buildLinesStyle());
     });
     basemapMap.setStyle(styleUrl);
 }
@@ -438,9 +474,9 @@ function captureBasemap() {
         if (bc.width !== mapCanvas.width || bc.height !== mapCanvas.height) return;
         syncBasemapMapCamera();
         basemapMap._render();
-        if (!basemapMap.areTilesLoaded()) return; // tiles for this camera aren't ready yet
+        if (!map.isMoving() && !basemapMap.areTilesLoaded()) return; // tiles for this camera aren't ready yet
         staticBasemapCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
-        captureBasemapOverlay();
+        if (!map.isMoving()) captureBasemapOverlay();
         isBasemapCaptured = true;
         return;
     }
@@ -560,6 +596,7 @@ export async function renderAllEnsembleMembers() {
         customShaderLayer.setGridMode(false, null);
 
         // Assemble the frozen basemap and the matching scissored member into each card.
+        const linesCanvas = renderLinesMap() || staticOverlayCanvas;
         cardList.forEach((item, memberIndex) => {
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
@@ -587,8 +624,8 @@ export async function renderAllEnsembleMembers() {
                 weatherX, weatherY, weatherW, weatherH,
                 0, 0, targetW, targetH
             );
-            if (staticOverlayCanvas) {
-                item.ctx.drawImage(staticOverlayCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            if (linesCanvas) {
+                item.ctx.drawImage(linesCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
             }
         });
 
@@ -1340,9 +1377,15 @@ map.on('style.load', () => {
     }
 });
 
+let liveRenderQueued = false;
 map.on('move', () => {
     syncBasemapMapCamera();
-    if (isDrawingEnsemble) isBasemapCaptured = false;
+    if (!isDrawingEnsemble) return;
+    isBasemapCaptured = false;
+    if (!liveRenderQueued) {
+        liveRenderQueued = true;
+        requestAnimationFrame(() => { liveRenderQueued = false; renderAllEnsembleMembers(); });
+    }
 });
 
 map.on('render', () => {
