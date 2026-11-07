@@ -291,6 +291,15 @@ function toggleBasemapLayers(show) {
     });
 }
 
+function toggleEnsembleContours(show) {
+    if (!map || !map.isStyleLoaded()) return;
+    const vis = show ? 'visible' : 'none';
+    ['contour-gpu-layer', 'contour-master-label-layer'].forEach(id => {
+        const layer = map.style._layers[id];
+        if (layer) layer.visibility = vis;
+    });
+}
+
 // 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
@@ -332,6 +341,7 @@ export async function renderAllEnsembleMembers() {
 
         // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
         toggleBasemapLayers(false);
+        toggleEnsembleContours(false);
 
         // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
         const mapRect = mapCanvas.getBoundingClientRect();
@@ -361,6 +371,7 @@ export async function renderAllEnsembleMembers() {
 
         customShaderLayer.setGridMode(false, null);
         toggleBasemapLayers(true);
+        toggleEnsembleContours(true);
 
         // Assemble the frozen basemap and the matching scissored member into each card.
         cardList.forEach((item, memberIndex) => {
