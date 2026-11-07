@@ -1147,6 +1147,7 @@ map.on('render', () => {
 
 map.on('moveend', () => {
     if (isDrawingEnsemble) {
+        isBasemapCaptured = false;
         updateCachedDimensions();
         renderAllEnsembleMembers();
     }
