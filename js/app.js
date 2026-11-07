@@ -51,6 +51,7 @@ let lastGlobeMatrix = null;
 
 // 🌟 THE "FROZEN BASEMAP" SANDWICH CACHE
 let staticBasemapCanvas = null;
+let staticOverlayCanvas = null;
 let isBasemapCaptured = false;
 let basemapLayerIds = []; // 🌟 Cached for lightning-fast toggling
 let basemapMap = null;
@@ -385,6 +386,26 @@ function updateCachedDimensions() {
     return cachedTargetSize;
 }
 
+// 🌟 Border/coast lines only, on a transparent canvas, drawn ABOVE the weather in each card
+function captureBasemapOverlay() {
+    const mapCanvas = map.getCanvas();
+    if (!staticOverlayCanvas) staticOverlayCanvas = document.createElement('canvas');
+    staticOverlayCanvas.width = mapCanvas.width;   // also clears it
+    staticOverlayCanvas.height = mapCanvas.height;
+
+    const hidden = [];
+    for (const layer of (basemapMap.getStyle().layers || [])) {
+        const keep = layer.type === 'line' && /boundary|coast|outline/i.test(layer.id);
+        if (keep || basemapMap.getLayoutProperty(layer.id, 'visibility') === 'none') continue;
+        basemapMap.setLayoutProperty(layer.id, 'visibility', 'none');
+        hidden.push(layer.id);
+    }
+
+    basemapMap._render();
+    staticOverlayCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
+
+    hidden.forEach(id => basemapMap.setLayoutProperty(id, 'visibility', 'visible'));
+}
 // 🌟 NEW: Snapshot the static basemap without the weather
 function captureBasemap() {
     if (!map || !map.isStyleLoaded()) return;
@@ -400,6 +421,7 @@ function captureBasemap() {
         syncBasemapMapCamera();
         basemapMap._render();
         staticBasemapCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
+        captureBasemapOverlay();
         isBasemapCaptured = true;
         return;
     }
@@ -541,6 +563,9 @@ export async function renderAllEnsembleMembers() {
                 weatherX, weatherY, weatherW, weatherH,
                 0, 0, targetW, targetH
             );
+            if (staticOverlayCanvas) {
+                item.ctx.drawImage(staticOverlayCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            }
         });
 
     } finally {
