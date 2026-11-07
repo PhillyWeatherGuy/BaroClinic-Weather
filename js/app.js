@@ -671,14 +671,9 @@ export async function renderAllEnsembleMembers() {
             const weatherW = box?.w || weatherCanvas.width;
             const weatherH = box?.h || weatherCanvas.height;
 
-            // Draw crisp frozen basemap background
-            if (staticBasemapCanvas) {
-                item.ctx.drawImage(
-                    staticBasemapCanvas, 
-                    sx, sy, sWidth, sHeight, 
-                    0, 0, targetW, targetH
-                );
-            }
+            // Keep ensemble cards visually neutral so each member's weather field stands alone.
+            item.ctx.fillStyle = stateManager.currentTheme === 'dark' ? '#3b4148' : '#d9dde1';
+            item.ctx.fillRect(0, 0, targetW, targetH);
             // Overlay the scissored, transparent weather on top
             item.ctx.drawImage(
                 weatherCanvas,
