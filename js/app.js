@@ -333,13 +333,14 @@ export async function renderAllEnsembleMembers() {
         // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
         toggleBasemapLayers(false);
 
-        // Compute screen bounding rects for all 10 cards (WebGL bottom-left origin)
+        // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
+        const mapRect = mapCanvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
         const boxRects = cardList.map(item => {
             const rect = item.canvas.getBoundingClientRect();
-            const dpr = window.devicePixelRatio || 1;
             return {
-                x: Math.floor(rect.left * dpr),
-                y: Math.floor((window.innerHeight - rect.bottom) * dpr),
+                x: Math.floor((rect.left - mapRect.left) * dpr),
+                y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
                 w: Math.floor(rect.width * dpr),
                 h: Math.floor(rect.height * dpr)
             };
