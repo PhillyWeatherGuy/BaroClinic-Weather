@@ -1,5 +1,5 @@
 // js/config/darkPalettes.js
-import { PRATE_PALETTE as LIGHT_PRATE_PALETTE, TEMP_PALETTE as LIGHT_TEMP_PALETTE } from './palettes.js';
+import { PRATE_PALETTE as LIGHT_PRATE_PALETTE, TEMP_PALETTE as LIGHT_TEMP_PALETTE, TEMP_2M_PALETTE as LIGHT_TEMP_2M_PALETTE } from './palettes.js';
 
 /**
  * 🌡️ Exact 2m Temperature Palette extracted from provided_colors[::-1]
@@ -57,6 +57,7 @@ const DARK_TEMP_COLORS = [
 ];
 
 export const TEMP_PALETTE = LIGHT_TEMP_PALETTE;
+export const TEMP_2M_PALETTE = LIGHT_TEMP_2M_PALETTE;
 
 // 🌧️ Dark Mode Precip Levels (Inches)
 const DARK_PRECIP_LEVELS = [
@@ -395,6 +396,9 @@ export const W925_PALETTE = createNonLinearPrecipPalette(
  */
 export function getPaletteForParameter(paramId) {
     const id = (paramId || '').toLowerCase();
+    if (id === '2t') {
+        return TEMP_2M_PALETTE;
+    }
     if (id === 'prate') {
         return PRATE_PALETTE;
     }
