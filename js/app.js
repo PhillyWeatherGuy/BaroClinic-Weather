@@ -58,6 +58,8 @@ let basemapMap = null;
 let basemapMapReady = false;
 let ensembleWeatherStyleActive = false;
 let ensembleStyleTransition = false;
+let ensemblePanelLayer = null;
+let ensemblePanelGl = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -130,6 +132,20 @@ function updateBasemapMapStyle(styleUrl) {
         isBasemapCaptured = false;
     });
     basemapMap.setStyle(styleUrl);
+}
+
+function getEnsemblePanelMatrix(width, height) {
+    const dpr = window.devicePixelRatio || 1;
+    const worldScale = 512 * Math.pow(2, map.getZoom()) * dpr;
+    const center = map.getCenter();
+    const centerX = (center.lng + 180) / 360;
+    const centerY = 0.5 - Math.log(Math.tan(Math.PI / 4 + center.lat * Math.PI / 360)) / (2 * Math.PI);
+    return new Float32Array([
+        2 * worldScale / width, 0, 0, 0,
+        0, -2 * worldScale / height, 0, 0,
+        0, 0, 1, 0,
+        -2 * worldScale * centerX / width, 1 + 2 * worldScale * centerY / height, 0, 1
+    ]);
 }
 
 /**
@@ -326,18 +342,29 @@ function requestMapRender(targetMap) {
     });
 }
 
-async function captureBasemap() {
+async function captureBasemap(panelW = null, panelH = null) {
     if (!map || !map.isStyleLoaded()) return;
     const mapCanvas = map.getCanvas();
+    const dpr = window.devicePixelRatio || 1;
+    const outputW = panelW || mapCanvas.width;
+    const outputH = panelH || mapCanvas.height;
     if (!staticBasemapCanvas) {
         staticBasemapCanvas = document.createElement('canvas');
     }
-    staticBasemapCanvas.width = mapCanvas.width;
-    staticBasemapCanvas.height = mapCanvas.height;
+    staticBasemapCanvas.width = outputW;
+    staticBasemapCanvas.height = outputH;
 
     if (basemapMap && basemapMapReady) {
+        const basemapContainer = basemapMap.getContainer();
+        basemapContainer.style.width = `${outputW / dpr}px`;
+        basemapContainer.style.height = `${outputH / dpr}px`;
         basemapMap.resize();
-        syncBasemapMapCamera();
+        basemapMap.jumpTo({
+            center: map.getCenter(),
+            zoom: map.getZoom(),
+            bearing: map.getBearing(),
+            pitch: map.getPitch()
+        });
         await requestMapRender(basemapMap);
         staticBasemapCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
         isBasemapCaptured = true;
@@ -406,10 +433,88 @@ function setWeatherOnlyCapture(show) {
     ensembleHiddenLayerVisibility = null;
 }
 
+async function renderEnsemblePanels() {
+    if (!isDrawingEnsemble || !ensemblePanelLayer || !ensemblePanelGl) return;
+    if (isRenderingEnsemble) {
+        pendingEnsembleStep = true;
+        return;
+    }
+    isRenderingEnsemble = true;
+    try {
+        const cards = getCardCanvases();
+        const mapCanvas = map.getCanvas();
+        const panelCanvas = document.getElementById('ensemble-canvas');
+        const size = cachedTargetSize || updateCachedDimensions();
+        if (!mapCanvas || !panelCanvas || !size || cards.length === 0) return;
+
+        panelCanvas.width = mapCanvas.width;
+        panelCanvas.height = mapCanvas.height;
+        panelCanvas.style.width = `${mapCanvas.getBoundingClientRect().width}px`;
+        panelCanvas.style.height = `${mapCanvas.getBoundingClientRect().height}px`;
+
+        const targetW = size.w;
+        const targetH = size.h;
+        const srcAspect = mapCanvas.width / mapCanvas.height;
+        const dstAspect = targetW / targetH;
+        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+        if (srcAspect > dstAspect) {
+            sWidth = mapCanvas.height * dstAspect;
+            sx = (mapCanvas.width - sWidth) / 2;
+        } else {
+            sHeight = mapCanvas.width / dstAspect;
+            sy = (mapCanvas.height - sHeight) / 2;
+        }
+
+            if (!isBasemapCaptured) {
+                await captureBasemap();
+            }
+
+        const mapRect = mapCanvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const rects = cards.map(item => {
+            const rect = item.canvas.getBoundingClientRect();
+            return {
+                x: Math.floor((rect.left - mapRect.left) * dpr),
+                y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
+                w: Math.floor(rect.width * dpr),
+                h: Math.floor(rect.height * dpr)
+            };
+        });
+
+        const gl = ensemblePanelGl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.disable(gl.SCISSOR_TEST);
+        gl.viewport(0, 0, panelCanvas.width, panelCanvas.height);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        ensemblePanelLayer.renderAllMembersGrid(gl, getEnsemblePanelMatrix(targetW, targetH), rects);
+
+        cards.forEach((item, index) => {
+            const rect = rects[index];
+            if (item.canvas.width !== targetW || item.canvas.height !== targetH) {
+                item.canvas.width = targetW;
+                item.canvas.height = targetH;
+            }
+            if (staticBasemapCanvas) {
+                item.ctx.drawImage(staticBasemapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+            }
+            const sourceY = panelCanvas.height - rect.y - rect.h;
+            item.ctx.drawImage(panelCanvas, rect.x, sourceY, rect.w, rect.h, 0, 0, targetW, targetH);
+        });
+    } finally {
+        isRenderingEnsemble = false;
+        if (pendingEnsembleStep) {
+            pendingEnsembleStep = false;
+            requestAnimationFrame(() => renderEnsemblePanels());
+        }
+    }
+}
+
 // 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
     if (ensembleStyleTransition) return;
+    if (ensemblePanelLayer) return renderEnsemblePanels();
     if (isRenderingEnsemble) {
         pendingEnsembleStep = true;
         return;
@@ -525,6 +630,8 @@ function syncEnsembleGrid() {
     
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
+    const ensembleCanvas = document.getElementById('ensemble-canvas');
+    if (ensembleCanvas) ensembleCanvas.style.display = shouldShow ? 'block' : 'none';
 
     const mapContainer = document.getElementById('map');
     if (mapContainer) {
@@ -870,11 +977,22 @@ export function initLayer(shaderType = null) {
         customShaderLayer.clearTextures();
         customShaderLayer = null;
     }
+    if (ensemblePanelLayer) {
+        ensemblePanelLayer.clearTextures();
+        ensemblePanelLayer = null;
+        ensemblePanelGl = null;
+    }
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
     if (stateManager.activeModel === 'aifs_ens') {
         customShaderLayer = createEnsembleShaderLayer(map);
+        const ensembleCanvas = document.getElementById('ensemble-canvas');
+        ensemblePanelGl = ensembleCanvas?.getContext('webgl2', { alpha: true, preserveDrawingBuffer: true });
+        if (ensemblePanelGl) {
+            ensemblePanelLayer = createEnsembleShaderLayer({ triggerRepaint: () => {} });
+            ensemblePanelLayer.onAdd(null, ensemblePanelGl);
+        }
     } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
@@ -895,6 +1013,9 @@ export function initLayer(shaderType = null) {
         const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
         if (bitmap && customShaderLayer) {
             customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
+        }
+        if (bitmap && ensemblePanelLayer) {
+            ensemblePanelLayer.preloadChunkTexture(chunkIdx, bitmap);
         }
     }
 
@@ -945,12 +1066,18 @@ async function renderFrame(globalIdx) {
             if (customShaderLayer) {
                 customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             }
+            if (ensemblePanelLayer) {
+                ensemblePanelLayer.preloadChunkTexture(chunkIdx, bitmap);
+            }
             updateSliderTrackAndBounds();
         } catch (err) {
             return;
         }
     } else if (customShaderLayer && !customShaderLayer.chunkTextures[`${chunkIdx}_${frameIdx}`]) {
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
+        if (ensemblePanelLayer) {
+            ensemblePanelLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
+        }
     }
 
     if (renderId !== activeRenderId) return;
@@ -990,6 +1117,9 @@ async function renderFrame(globalIdx) {
 
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
+        }
+        if (ensemblePanelLayer) {
+            ensemblePanelLayer.updateFrame(stateManager.activeFrameState);
         }
     } else if (activeView === 'polar' && polarMapLoaded) {
         updatePolarFrame(stateManager.activeFrameState);
