@@ -339,7 +339,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                         gl_Position = projectTile(a_pos);
                     }
                     `}
-                    gl_Position.xy = gl_Position.xy * u_grid_transform.xy + u_grid_transform.zw;
+                    gl_Position.xy = gl_Position.xy * u_grid_transform.xy + u_grid_transform.zw * gl_Position.w;
                 }
                 `;
 
@@ -405,7 +405,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                     } else {
                         gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
                     }
-                    gl_Position.xy = gl_Position.xy * u_grid_transform.xy + u_grid_transform.zw;
+                    gl_Position.xy = gl_Position.xy * u_grid_transform.xy + u_grid_transform.zw * gl_Position.w;
                 }
                 `;
 
@@ -677,7 +677,8 @@ export function createEnsembleShaderLayer(mapInstance) {
 
             gl.disable(gl.DEPTH_TEST);
             gl.enable(gl.BLEND);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            // Separate alpha so partially transparent weather composites correctly onto the transparent hidden canvas
+            gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
             gl.enable(gl.SCISSOR_TEST);
 
             const sourceRect = this.gridSourceRect;
@@ -725,6 +726,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 return;
             }
 
+            if (this.gridOnly) return;
             if (!this.activeTex) return;
 
             const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
