@@ -11,6 +11,7 @@ let fetchPromise = null;
 let activeContourBinary = null;
 let currentVisibleStep = 0;
 let currentMember = 0; // 🌟 Tracks the active ensemble member (0-9)
+let lastCullCenter = null; // 🌟 Tracks the last parsed map center for spatial culling
 
 let displayedStep = null;
 let pendingApply = null;
@@ -73,7 +74,6 @@ function themeContourFeatures(featureCollection, masterData) {
     }
 
     // 2. Surface Precipitation Rate (MSLP Isobars + 1000-500mb Thickness)
-    // 🌟 UPDATED: Added w10 and gust10 to receive the MSLP styling
     const isPrate = activeParam.includes('prate') || activeParam.includes('precip') || activeParam === 'w10' || activeParam === 'gust10' || masterData?.parameter === 'prate';
     if (isPrate) {
         const isDark = stateManager.currentTheme === 'dark';
@@ -159,7 +159,6 @@ function themeContourFeatures(featureCollection, masterData) {
         const isDarkTheme = stateManager.currentTheme === 'dark';
         const isW250 = (activeParam === 'w250' || activeParam === 'z250');
 
-        // 🌟 250mb Wind gets crisp Ice Silver (#E0F2FE) with a subtle dark casing
         const contourColor = isW250
             ? (isDarkTheme ? '#E0F2FE' : '#000000')
             : getPvaContourThemeColor();
@@ -703,6 +702,21 @@ function prepareStep(featureCollection) {
     
     // 🌟 Force 1 subdivision in ensemble mode (cards are too small to need high-res splines)
     const SUBDIVISIONS = (isMobile || isEnsemble) ? 1 : 3;
+    const zoom = mapInstance ? mapInstance.getZoom() : 0;
+    
+    let cullCenter = null;
+    let cullRadiusSq = 0;
+    
+    // 🌟 Spatial Culling: Pre-calculate screen boundaries to skip storms in other continents
+    if (mapInstance && zoom > 2.5) {
+        cullCenter = mapInstance.getCenter();
+        const b = mapInstance.getBounds();
+        const maxSpan = Math.max(b.getNorth() - b.getSouth(), b.getEast() - b.getWest()) + 40; // 40 degree overscan buffer
+        cullRadiusSq = (maxSpan / 2) * (maxSpan / 2);
+        lastCullCenter = { lng: cullCenter.lng, lat: cullCenter.lat, zoom: zoom };
+    } else {
+        lastCullCenter = null;
+    }
 
     let maxSegs = 0;
     const items = [];
@@ -739,6 +753,21 @@ function prepareStep(featureCollection) {
 
         for (const rawLine of lines) {
             if (rawLine.length < 2) continue;
+            
+            // 🌟 SPATIAL CULLING: Drop lines completely outside the screen buffer
+            if (cullCenter) {
+                let inBounds = false;
+                for (let i = 0; i < rawLine.length; i++) {
+                    let dx = Math.abs(rawLine[i][0] - cullCenter.lng);
+                    while (dx > 180) dx = Math.abs(dx - 360);
+                    let dy = rawLine[i][1] - cullCenter.lat;
+                    if ((dx * dx + dy * dy) <= cullRadiusSq) {
+                        inBounds = true;
+                        break;
+                    }
+                }
+                if (!inBounds) continue;
+            }
 
             const line = smoothMercatorLine(rawLine, SUBDIVISIONS, 0.32);
             const len = line.length;
@@ -947,6 +976,25 @@ export function setContourActiveMember(memberIndex) {
 
 export function initVectorContours(map) {
     mapInstance = map;
+
+    // 🌟 Panning Culling Tracker: If user pans a lot, rebuild the culled contours
+    map.on('moveend', () => {
+        if (lastCullCenter) {
+            const currentCenter = map.getCenter();
+            let dx = Math.abs(currentCenter.lng - lastCullCenter.lng);
+            while (dx > 180) dx = Math.abs(dx - 360);
+            let dy = currentCenter.lat - lastCullCenter.lat;
+            const dist = Math.hypot(dx, dy);
+            
+            // If panned 20+ degrees or zoomed significantly, invalidate cache & rerender
+            if (dist > 20 || Math.abs(map.getZoom() - lastCullCenter.zoom) > 0.5) {
+                if (stateManager.currentStepIndex !== undefined) {
+                    const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
+                    if (step !== undefined) updateVectorContours(step, true); // Force update
+                }
+            }
+        }
+    });
 
     if (!map._contoursZoomBound) {
         map._contoursZoomBound = true;
@@ -1181,7 +1229,6 @@ function decodeContourV2(view, coordinateScale) {
         if (offset !== payloadEnd) return null;
         steps.set(String(step), features);
         
-        // 🌟 Map packed member integer (step * 1000 + member) to string keys
         if (step >= 1000) {
             const sNum = Math.floor(step / 1000);
             const mNum = step % 1000;
