@@ -333,14 +333,30 @@ export async function renderAllEnsembleMembers() {
         // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
         toggleBasemapLayers(false);
 
-        // 🌟 Render and capture one member at a time so each card gets exactly one texture.
-        customShaderLayer.setGridMode(false, null);
-        cardList.forEach((item, memberIndex) => {
-            customShaderLayer.setActiveMember(memberIndex);
-            if (typeof map._render === 'function') {
-                map._render();
-            }
+        // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
+        const mapRect = mapCanvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const boxRects = cardList.map(item => {
+            const rect = item.canvas.getBoundingClientRect();
+            return {
+                x: Math.floor((rect.left - mapRect.left) * dpr),
+                y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
+                w: Math.floor(rect.width * dpr),
+                h: Math.floor(rect.height * dpr)
+            };
+        });
 
+        // Render all ten members in one MapLibre pass, one texture per scissored card.
+        customShaderLayer.setGridMode(true, boxRects);
+        if (typeof map._render === 'function') {
+            map._render();
+        }
+
+        customShaderLayer.setGridMode(false, null);
+        toggleBasemapLayers(true);
+
+        // Assemble the frozen basemap and the matching scissored member into each card.
+        cardList.forEach((item) => {
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
@@ -363,9 +379,6 @@ export async function renderAllEnsembleMembers() {
             );
         });
 
-        // Restore the normal map view and basemap after all cards are captured.
-        customShaderLayer.setActiveMember(0);
-        toggleBasemapLayers(true);
         if (typeof map._render === 'function') {
             map._render();
         }
