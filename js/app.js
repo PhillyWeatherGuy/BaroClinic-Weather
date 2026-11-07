@@ -285,9 +285,9 @@ function toggleBasemapLayers(show) {
     });
 }
 
-// 🌟 Non-blocking 60 FPS multi-member capture loop
+// 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
-    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setActiveMember !== 'function') return;
+    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
     if (isRenderingEnsemble) {
         pendingEnsembleStep = true;
         return;
@@ -324,50 +324,63 @@ export async function renderAllEnsembleMembers() {
             captureBasemap();
         }
 
-        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY VIA CACHED IDs
+        // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
         toggleBasemapLayers(false);
 
-        // 🌟 Cycles through all 10 members seamlessly (MapLibre basemap is sleeping!)
-        for (let m = 0; m < 10; m++) {
-            customShaderLayer.setActiveMember(m);
-            if (typeof setContourActiveMember === 'function') {
-                setContourActiveMember(m);
-            }
-            if (typeof map._render === 'function') {
-                map._render(); // Lightning fast now, ONLY draws transparent weather
-            }
+        // Compute screen bounding rects for all 10 cards (WebGL bottom-left origin)
+        const boxRects = cardList.map(item => {
+            const rect = item.canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            return {
+                x: Math.floor(rect.left * dpr),
+                y: Math.floor((window.innerHeight - rect.bottom) * dpr),
+                w: Math.floor(rect.width * dpr),
+                h: Math.floor(rect.height * dpr)
+            };
+        });
 
-            const item = cardList[m];
-            if (!item) continue;
+        // 🌟 3. ENABLE SINGLE-PASS GRID MODE ON THE SHADER LAYER
+        customShaderLayer.setGridMode(true, boxRects);
+
+        // 🌟 4. ONE SINGLE map._render() CALL RENDERS ALL 10 MEMBERS SIMULTANEOUSLY!
+        if (typeof map._render === 'function') {
+            map._render(); 
+        }
+
+        // 🌟 5. DISABLE GRID MODE & RESTORE BASEMAP
+        customShaderLayer.setGridMode(false, null);
+        toggleBasemapLayers(true);
+
+        // 🌟 6. ASSEMBLE THE SANDWICH INTO EACH CARD
+        cardList.forEach((item, idx) => {
+            const rect = boxRects[idx];
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
                 cvs.height = targetH;
             }
 
-            // 🌟 3. ASSEMBLE THE SANDWICH
-            // Paint the crisp, frozen basemap into the card
+            // Draw crisp frozen basemap background
             if (staticBasemapCanvas) {
-                item.ctx.drawImage(staticBasemapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+                item.ctx.drawImage(
+                    staticBasemapCanvas, 
+                    rect.x, mapCanvas.height - rect.y - rect.h, rect.w, rect.h, 
+                    0, 0, targetW, targetH
+                );
             }
-            // Overlay the live, transparent weather on top
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-        }
+            // Overlay the scissored, transparent weather on top
+            item.ctx.drawImage(
+                mapCanvas, 
+                rect.x, mapCanvas.height - rect.y - rect.h, rect.w, rect.h, 
+                0, 0, targetW, targetH
+            );
+        });
 
-        // 🌟 4. RESTORE BASEMAP
-        toggleBasemapLayers(true);
-
-        // Restore active member to 0
-        customShaderLayer.setActiveMember(0);
-        if (typeof setContourActiveMember === 'function') {
-            setContourActiveMember(0);
-        }
         if (typeof map._render === 'function') {
-            map._render(); // Final redraw to put the main map back to normal
+            map._render();
         }
     } finally {
         isRenderingEnsemble = false;
-        // If user scrubbed while this frame was drawing, immediately draw the newest frame
         if (pendingEnsembleStep) {
             requestAnimationFrame(() => renderAllEnsembleMembers());
         }
@@ -1102,7 +1115,7 @@ map.on('render', () => {
 });
 
 map.on('moveend', () => {
-    if (isDrawingEnsemble) {
+    if 'isDrawingEnsemble' (isDrawingEnsemble) {
         updateCachedDimensions();
         renderAllEnsembleMembers();
     }
