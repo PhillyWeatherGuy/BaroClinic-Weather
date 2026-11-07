@@ -56,10 +56,6 @@ let basemapLayerIds = []; // 🌟 Cached for lightning-fast toggling
 let ensembleHiddenLayerVisibility = null;
 let basemapMap = null;
 let basemapMapReady = false;
-let ensembleWeatherStyleActive = false;
-let ensembleStyleTransition = false;
-let ensemblePanelLayer = null;
-let ensemblePanelGl = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
 
@@ -76,11 +72,6 @@ const map = new maplibregl.Map({
 
 function syncBasemapMapCamera() {
     if (!basemapMap || !basemapMapReady) return;
-    const mapRect = map.getContainer().getBoundingClientRect();
-    const basemapContainer = basemapMap.getContainer();
-    basemapContainer.style.width = `${mapRect.width}px`;
-    basemapContainer.style.height = `${mapRect.height}px`;
-    basemapMap.resize();
     basemapMap.jumpTo({
         center: map.getCenter(),
         zoom: map.getZoom(),
@@ -132,20 +123,6 @@ function updateBasemapMapStyle(styleUrl) {
         isBasemapCaptured = false;
     });
     basemapMap.setStyle(styleUrl);
-}
-
-function getEnsemblePanelMatrix(width, height) {
-    const dpr = window.devicePixelRatio || 1;
-    const worldScale = 512 * Math.pow(2, map.getZoom()) * dpr;
-    const center = map.getCenter();
-    const centerX = (center.lng + 180) / 360;
-    const centerY = 0.5 - Math.log(Math.tan(Math.PI / 4 + center.lat * Math.PI / 360)) / (2 * Math.PI);
-    return new Float32Array([
-        2 * worldScale / width, 0, 0, 0,
-        0, -2 * worldScale / height, 0, 0,
-        0, 0, 1, 0,
-        -2 * worldScale * centerX / width, 1 + 2 * worldScale * centerY / height, 0, 1
-    ]);
 }
 
 /**
@@ -335,37 +312,19 @@ function updateCachedDimensions() {
 }
 
 // 🌟 NEW: Snapshot the static basemap without the weather
-function requestMapRender(targetMap) {
-    return new Promise(resolve => {
-        targetMap.once('render', resolve);
-        targetMap.triggerRepaint();
-    });
-}
-
-async function captureBasemap(panelW = null, panelH = null) {
+function captureBasemap() {
     if (!map || !map.isStyleLoaded()) return;
     const mapCanvas = map.getCanvas();
-    const dpr = window.devicePixelRatio || 1;
-    const outputW = panelW || mapCanvas.width;
-    const outputH = panelH || mapCanvas.height;
     if (!staticBasemapCanvas) {
         staticBasemapCanvas = document.createElement('canvas');
     }
-    staticBasemapCanvas.width = outputW;
-    staticBasemapCanvas.height = outputH;
+    staticBasemapCanvas.width = mapCanvas.width;
+    staticBasemapCanvas.height = mapCanvas.height;
 
     if (basemapMap && basemapMapReady) {
-        const basemapContainer = basemapMap.getContainer();
-        basemapContainer.style.width = `${outputW / dpr}px`;
-        basemapContainer.style.height = `${outputH / dpr}px`;
         basemapMap.resize();
-        basemapMap.jumpTo({
-            center: map.getCenter(),
-            zoom: map.getZoom(),
-            bearing: map.getBearing(),
-            pitch: map.getPitch()
-        });
-        await requestMapRender(basemapMap);
+        syncBasemapMapCamera();
+        basemapMap._render();
         staticBasemapCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
         isBasemapCaptured = true;
         return;
@@ -380,7 +339,7 @@ async function captureBasemap(panelW = null, panelH = null) {
     };
 
     toggleWeather(false);
-    await requestMapRender(map);
+    map._render(); 
     
     const ctx = staticBasemapCanvas.getContext('2d');
     ctx.drawImage(mapCanvas, 0, 0);
@@ -414,90 +373,25 @@ function setWeatherOnlyCapture(show) {
     if (show) {
         if (ensembleHiddenLayerVisibility) return;
         ensembleHiddenLayerVisibility = new Map();
-        (map.getStyle().layers || []).forEach(layer => {
-            const id = layer.id;
+        Object.entries(map.style._layers).forEach(([id, layer]) => {
             if (id === 'weather-gpu-shader') return;
-            const visibility = map.getLayoutProperty(id, 'visibility');
-            ensembleHiddenLayerVisibility.set(id, visibility ?? 'visible');
-            map.setLayoutProperty(id, 'visibility', 'none');
+            ensembleHiddenLayerVisibility.set(id, layer.visibility ?? 'visible');
+            layer.visibility = 'none';
         });
         return;
     }
 
     if (!ensembleHiddenLayerVisibility) return;
     ensembleHiddenLayerVisibility.forEach((visibility, id) => {
-        if (map.getLayer(id)) {
-            map.setLayoutProperty(id, 'visibility', visibility);
-        }
+        const layer = map.style._layers[id];
+        if (layer) layer.visibility = visibility;
     });
     ensembleHiddenLayerVisibility = null;
-}
-
-async function renderEnsemblePanels() {
-    if (!isDrawingEnsemble || !ensemblePanelLayer || !ensemblePanelGl) return;
-    if (isRenderingEnsemble) {
-        pendingEnsembleStep = true;
-        return;
-    }
-    isRenderingEnsemble = true;
-    try {
-        const cards = getCardCanvases();
-        const mapCanvas = map.getCanvas();
-        const panelCanvas = document.getElementById('ensemble-canvas');
-        const size = cachedTargetSize || updateCachedDimensions();
-        if (!mapCanvas || !panelCanvas || !size || cards.length === 0) return;
-
-        panelCanvas.width = mapCanvas.width;
-        panelCanvas.height = mapCanvas.height;
-        panelCanvas.style.width = `${mapCanvas.getBoundingClientRect().width}px`;
-        panelCanvas.style.height = `${mapCanvas.getBoundingClientRect().height}px`;
-
-        const targetW = size.w;
-        const targetH = size.h;
-        const mapRect = mapCanvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const rects = cards.map(item => {
-            const rect = item.canvas.getBoundingClientRect();
-            return {
-                x: Math.floor((rect.left - mapRect.left) * dpr),
-                y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
-                w: Math.floor(rect.width * dpr),
-                h: Math.floor(rect.height * dpr)
-            };
-        });
-
-        const gl = ensemblePanelGl;
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.disable(gl.SCISSOR_TEST);
-        gl.viewport(0, 0, panelCanvas.width, panelCanvas.height);
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        ensemblePanelLayer.renderAllMembersGrid(gl, getEnsemblePanelMatrix(targetW, targetH), rects);
-
-        cards.forEach((item, index) => {
-            const rect = rects[index];
-            if (item.canvas.width !== targetW || item.canvas.height !== targetH) {
-                item.canvas.width = targetW;
-                item.canvas.height = targetH;
-            }
-            item.ctx.clearRect(0, 0, targetW, targetH);
-            const sourceY = panelCanvas.height - rect.y - rect.h;
-            item.ctx.drawImage(panelCanvas, rect.x, sourceY, rect.w, rect.h, 0, 0, targetW, targetH);
-        });
-    } finally {
-        isRenderingEnsemble = false;
-        if (pendingEnsembleStep) {
-            pendingEnsembleStep = false;
-            requestAnimationFrame(() => renderEnsemblePanels());
-        }
-    }
 }
 
 // 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function') return;
-    if (ensembleStyleTransition) return;
-    if (ensemblePanelLayer) return renderEnsemblePanels();
     if (isRenderingEnsemble) {
         pendingEnsembleStep = true;
         return;
@@ -531,7 +425,7 @@ export async function renderAllEnsembleMembers() {
 
         // 🌟 1. CAPTURE FROZEN BASEMAP (Only happens once when map stops moving)
         if (!isBasemapCaptured) {
-            await captureBasemap();
+            captureBasemap();
         }
 
         // 🌟 2. HIDE MAPLIBRE'S HEAVY ENGINE LAYERS INSTANTLY
@@ -560,7 +454,7 @@ export async function renderAllEnsembleMembers() {
             canvasH: mapCanvas.height
         });
         if (typeof map._render === 'function') {
-            await requestMapRender(map);
+            map._render();
         }
 
         customShaderLayer.setGridMode(false, null);
@@ -597,7 +491,7 @@ export async function renderAllEnsembleMembers() {
 
         setWeatherOnlyCapture(false);
         if (typeof map._render === 'function') {
-            await requestMapRender(map);
+            map._render();
         }
     } finally {
         isRenderingEnsemble = false;
@@ -613,48 +507,8 @@ function syncEnsembleGrid() {
     
     const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
     grid.style.display = shouldShow ? 'grid' : 'none';
-    const ensembleCanvas = document.getElementById('ensemble-canvas');
-    if (ensembleCanvas) ensembleCanvas.style.display = shouldShow ? 'block' : 'none';
-
-    const mapContainer = document.getElementById('map');
-    if (mapContainer) {
-        mapContainer.style.visibility = 'visible';
-        mapContainer.style.opacity = shouldShow ? '0' : '1';
-    }
     
     isDrawingEnsemble = shouldShow;
-
-    if (shouldShow && !ensembleWeatherStyleActive && !ensembleStyleTransition) {
-        ensembleStyleTransition = true;
-        map.once('style.load', () => {
-            ensembleStyleTransition = false;
-            ensembleWeatherStyleActive = true;
-            initLayer('scalar');
-            if (stateManager.activeFrameState && customShaderLayer) {
-                customShaderLayer.updateFrame(stateManager.activeFrameState);
-            }
-            renderAllEnsembleMembers();
-        });
-        map.setStyle({
-            version: 8,
-            sources: {},
-            layers: [{
-                id: 'ensemble-weather-background',
-                type: 'background',
-                paint: { 'background-color': 'rgba(0, 0, 0, 0)' }
-            }]
-        });
-    } else if (!shouldShow && ensembleWeatherStyleActive && !ensembleStyleTransition) {
-        ensembleStyleTransition = true;
-        ensembleWeatherStyleActive = false;
-        const restoreStyle = stateManager.currentMapStyle || './config/style_default.json';
-        map.once('style.load', () => {
-            ensembleStyleTransition = false;
-            initLayer();
-        });
-        map.setStyle(restoreStyle);
-    }
-
     cachedCardCanvases = null;
     cachedTargetSize = null;
     
@@ -960,22 +814,11 @@ export function initLayer(shaderType = null) {
         customShaderLayer.clearTextures();
         customShaderLayer = null;
     }
-    if (ensemblePanelLayer) {
-        ensemblePanelLayer.clearTextures();
-        ensemblePanelLayer = null;
-        ensemblePanelGl = null;
-    }
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
     if (stateManager.activeModel === 'aifs_ens') {
         customShaderLayer = createEnsembleShaderLayer(map);
-        const ensembleCanvas = document.getElementById('ensemble-canvas');
-        ensemblePanelGl = ensembleCanvas?.getContext('webgl2', { alpha: true, preserveDrawingBuffer: true });
-        if (ensemblePanelGl) {
-            ensemblePanelLayer = createEnsembleShaderLayer({ triggerRepaint: () => {} });
-            ensemblePanelLayer.onAdd(null, ensemblePanelGl);
-        }
     } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
@@ -996,9 +839,6 @@ export function initLayer(shaderType = null) {
         const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
         if (bitmap && customShaderLayer) {
             customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-        }
-        if (bitmap && ensemblePanelLayer) {
-            ensemblePanelLayer.preloadChunkTexture(chunkIdx, bitmap);
         }
     }
 
@@ -1049,18 +889,12 @@ async function renderFrame(globalIdx) {
             if (customShaderLayer) {
                 customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
             }
-            if (ensemblePanelLayer) {
-                ensemblePanelLayer.preloadChunkTexture(chunkIdx, bitmap);
-            }
             updateSliderTrackAndBounds();
         } catch (err) {
             return;
         }
     } else if (customShaderLayer && !customShaderLayer.chunkTextures[`${chunkIdx}_${frameIdx}`]) {
         customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
-        if (ensemblePanelLayer) {
-            ensemblePanelLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
-        }
     }
 
     if (renderId !== activeRenderId) return;
@@ -1083,11 +917,9 @@ async function renderFrame(globalIdx) {
     const activeView = stateManager.activeView || '2d';
 
     if (activeView === '2d' || activeView === '3d') {
-        // Keep ensemble cards limited to member weather plus the shared basemap.
-        if (stateManager.activeModel !== 'aifs_ens') {
-            try { initVectorContours(map); } catch (e) {}
-            await updateVectorContours(frameInfo.step);
-        }
+        // 🌟 Load and update vector contours for ALL models (including AIFS-ENS)
+        try { initVectorContours(map); } catch (e) {}
+        await updateVectorContours(frameInfo.step);
 
         if (renderId !== activeRenderId) return;
 
@@ -1100,9 +932,6 @@ async function renderFrame(globalIdx) {
 
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
-        }
-        if (ensemblePanelLayer) {
-            ensemblePanelLayer.updateFrame(stateManager.activeFrameState);
         }
     } else if (activeView === 'polar' && polarMapLoaded) {
         updatePolarFrame(stateManager.activeFrameState);
