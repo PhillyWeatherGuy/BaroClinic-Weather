@@ -235,6 +235,7 @@ export function createEnsembleShaderLayer(mapInstance) {
         isGridMode: false,
         gridRects: null,
         gridSourceRect: null,
+        gridMemberIndex: null,
         texResolution: [1440.0, 721.0],
         programs: {},
         vertexCount: 0,
@@ -584,6 +585,11 @@ export function createEnsembleShaderLayer(mapInstance) {
             mapInstance.triggerRepaint();
         },
 
+        setGridMember: function(memberIndex = null) {
+            this.gridMemberIndex = memberIndex;
+            mapInstance.triggerRepaint();
+        },
+
         getMemberTexture: function(chunkIndex, frameIndex, memberIndex) {
             return this.chunkTextures[`${chunkIndex}_${frameIndex}_m${memberIndex}`] || null;
         },
@@ -695,14 +701,19 @@ export function createEnsembleShaderLayer(mapInstance) {
                 1.0 - canvasH / sourceH + (2.0 * sourceY / sourceH)
             ];
 
-            for (let m = 0; m < 10; m++) {
-                const rect = boxRects[m];
+            const memberIndices = this.gridMemberIndex === null
+                ? Array.from({ length: 10 }, (_, index) => index)
+                : [this.gridMemberIndex];
+
+            for (const memberIndex of memberIndices) {
+                const rect = boxRects[memberIndex];
                 if (!rect || rect.w <= 0 || rect.h <= 0) continue;
 
                 gl.viewport(rect.x, rect.y, rect.w, rect.h);
                 gl.scissor(rect.x, rect.y, rect.w, rect.h);
 
-                const tex = this.chunkTextures[`${cIdx}_${fIdx}_m${m}`] || this.activeTex;
+                const textureMemberIndex = this.gridMemberIndex === null ? memberIndex : 0;
+                const tex = this.chunkTextures[`${cIdx}_${fIdx}_m${textureMemberIndex}`] || this.activeTex;
                 if (!tex) continue;
 
                 gl.activeTexture(gl.TEXTURE0);
