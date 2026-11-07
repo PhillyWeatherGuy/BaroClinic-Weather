@@ -86,6 +86,18 @@ function syncBasemapMapCamera() {
     });
 }
 
+function syncBasemapMapSize() {
+    if (!basemapMap) return false;
+    const c = map.getCanvas();
+    const w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return false;
+    const el = basemapMap.getContainer();
+    el.style.width = `${w}px`;
+    el.style.height = `${h}px`;
+    basemapMap.resize();
+    return true;
+}
+
 function initBasemapMap() {
     if (basemapMap) return;
 
@@ -421,7 +433,9 @@ function captureBasemap() {
     staticBasemapCanvas.height = mapCanvas.height;
 
     if (basemapMap && basemapMapReady) {
-        basemapMap.resize();
+        if (!syncBasemapMapSize()) return;
+        const bc = basemapMap.getCanvas();
+        if (bc.width !== mapCanvas.width || bc.height !== mapCanvas.height) return;
         syncBasemapMapCamera();
         basemapMap._render();
         if (!basemapMap.areTilesLoaded()) return; // tiles for this camera aren't ready yet
