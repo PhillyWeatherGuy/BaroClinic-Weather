@@ -404,6 +404,17 @@ let pendingEnsembleStep = null;
 let cachedCardCanvases = null;
 let cachedTargetSize = null;
 let expandedEnsembleMember = null;
+const ENSEMBLE_RANGE_MODELS = new Set([
+    'aifs_ens',
+    'aifs_ens_11_20',
+    'aifs_ens_21_30',
+    'aifs_ens_31_40',
+    'aifs_ens_41_50'
+]);
+
+function isEnsembleRangeModel(modelId = stateManager.activeModel) {
+    return ENSEMBLE_RANGE_MODELS.has(modelId);
+}
 
 function setExpandedEnsembleMember(memberIndex = null) {
     if (!isDrawingEnsemble) return;
@@ -691,7 +702,7 @@ function syncEnsembleGrid() {
     const grid = document.getElementById('ensemble-grid');
     if (!grid) return;
     
-    const shouldShow = stateManager.activeMode === 'modelViewer' && stateManager.activeModel === 'aifs_ens';
+    const shouldShow = stateManager.activeMode === 'modelViewer' && isEnsembleRangeModel();
     if (!shouldShow && expandedEnsembleMember !== null) {
         expandedEnsembleMember = null;
         grid.classList.remove('is-expanded');
@@ -1010,7 +1021,7 @@ export function initLayer(shaderType = null) {
 
     const chosenShader = shaderType || stateManager.activeShader || 'scalar';
 
-    if (stateManager.activeModel === 'aifs_ens') {
+    if (isEnsembleRangeModel()) {
         initWeatherMap();
         customShaderLayer = createEnsembleShaderLayer(weatherMap);
         customShaderLayer.gridOnly = true; // never draw a full-screen copy on the hidden map
@@ -1060,7 +1071,7 @@ export function initLayer(shaderType = null) {
         }
     };
 
-    if (stateManager.activeModel === 'aifs_ens') {
+    if (isEnsembleRangeModel()) {
         // Weather lives on its own hidden map; the live map stays a clean basemap
         addEnsembleLayerToWeatherMap(customShaderLayer);
     } else if (!map.getLayer('weather-gpu-shader')) {
@@ -1122,7 +1133,7 @@ async function renderFrame(globalIdx) {
         if (renderId !== activeRenderId) return;
 
         // Skip heavy city text overlay in ensemble mode for speed
-        if (stateManager.activeModel !== 'aifs_ens') {
+        if (!isEnsembleRangeModel()) {
             try {
                 updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
             } catch (e) {}
@@ -1322,7 +1333,7 @@ export async function switchAppMode(targetMode) {
                 if (stateManager.activeModel === 'hrrr') mSpan.textContent = 'HRRR';
                 else if (stateManager.activeModel === 'rrfs') mSpan.textContent = 'RRFS';
                 else if (stateManager.activeModel === 'aifs') mSpan.textContent = 'EC-AIFS';
-                else if (stateManager.activeModel === 'aifs_ens') mSpan.textContent = 'AIFS-ENS';
+                else if (isEnsembleRangeModel()) mSpan.textContent = 'AIFS-ENS';
                 else mSpan.textContent = 'ECMWF-IFS';
             }
         }

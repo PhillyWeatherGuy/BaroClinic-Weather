@@ -575,6 +575,17 @@ async function getSharedModelsConfig() {
         const resp = await fetch('./config/models.json');
         if (resp.ok) {
             sharedModelsConfig = await resp.json();
+            Object.values(sharedModelsConfig.models || {}).forEach(model => {
+                if (!Array.isArray(model.variants)) return;
+                model.variants.forEach(variant => {
+                    sharedModelsConfig.models[variant.id] = {
+                        ...variant,
+                        category: model.category,
+                        resolution: model.resolution,
+                        hidden: true
+                    };
+                });
+            });
             return sharedModelsConfig;
         }
     } catch (err) {
@@ -615,7 +626,7 @@ export function initModelCategoryBar() {
         if (!sharedModelsConfig || !sharedModelsConfig.models) return;
 
         const matchingModels = Object.values(sharedModelsConfig.models).filter(
-            m => m.category && m.category.toLowerCase() === categoryName.toLowerCase()
+            m => !m.hidden && m.category && m.category.toLowerCase() === categoryName.toLowerCase()
         );
 
         if (matchingModels.length === 0) {
@@ -623,20 +634,14 @@ export function initModelCategoryBar() {
             return;
         }
 
-        matchingModels.forEach((model) => {
-            const btn = document.createElement('button');
-            btn.className = `model-select-btn ${model.id === stateManager.activeModel ? 'active' : ''}`;
-            btn.setAttribute('data-model-id', model.id);
-            btn.textContent = model.name;
-
-            btn.addEventListener('click', async () => {
+        async function handleModelSelection(model, btn) {
                 if (stateManager.activeModel === model.id) return;
 
                 document.querySelectorAll('#model-list-container .model-select-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
 
                 const labelSpan = modelBtn.querySelector('span');
-                if (labelSpan) labelSpan.textContent = model.name;
+                if (labelSpan) labelSpan.textContent = model.displayName || model.name;
 
                 if (isPlaying) pausePlayback();
 
@@ -781,9 +786,54 @@ export function initModelCategoryBar() {
                         showToast(`❌ Failed to load model ${model.name}`);
                     }
                 }
+        }
+
+        function createModelButton(model) {
+            const btn = document.createElement('button');
+            btn.className = `model-select-btn ${model.id === stateManager.activeModel ? 'active' : ''}`;
+            btn.setAttribute('data-model-id', model.id);
+            btn.textContent = model.name;
+            btn.addEventListener('click', () => handleModelSelection(model, btn));
+            return btn;
+        }
+
+        matchingModels.forEach((model) => {
+            if (model.id !== 'aifs_ens' || !Array.isArray(model.variants)) {
+                modelListContainer.appendChild(createModelButton(model));
+                return;
+            }
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'model-variant-dropdown';
+
+            const toggle = document.createElement('button');
+            toggle.className = 'model-select-btn model-variant-toggle';
+            toggle.type = 'button';
+            toggle.textContent = 'AIFS-ENS';
+
+            const menu = document.createElement('div');
+            menu.className = 'model-variant-menu';
+            menu.style.display = 'none';
+
+            model.variants.forEach(variant => {
+                const variantBtn = createModelButton(variant);
+                variantBtn.classList.toggle('active', variant.id === stateManager.activeModel);
+                variantBtn.addEventListener('click', () => {
+                    menu.style.display = 'none';
+                    wrapper.classList.remove('open');
+                });
+                menu.appendChild(variantBtn);
             });
 
-            modelListContainer.appendChild(btn);
+            toggle.addEventListener('click', event => {
+                event.stopPropagation();
+                const isOpen = menu.style.display === 'block';
+                menu.style.display = isOpen ? 'none' : 'block';
+                wrapper.classList.toggle('open', !isOpen);
+            });
+
+            wrapper.append(toggle, menu);
+            modelListContainer.appendChild(wrapper);
         });
     }
 

@@ -106,6 +106,55 @@
       "supported_params": [
         "2t",
         "prate"
+      ],
+      "variants": [
+        {
+          "id": "aifs_ens_mean",
+          "name": "mean",
+          "displayName": "AIFS-ENS",
+          "supported_params": ["2t", "prate"]
+        },
+        {
+          "id": "aifs_ens_control",
+          "name": "control",
+          "displayName": "AIFS-ENS",
+          "supported_params": ["2t", "prate"]
+        },
+        {
+          "id": "aifs_ens",
+          "name": "1-10",
+          "displayName": "AIFS-ENS",
+          "ensemble": true,
+          "supported_params": ["2t", "prate"]
+        },
+        {
+          "id": "aifs_ens_11_20",
+          "name": "11-20",
+          "displayName": "AIFS-ENS",
+          "ensemble": true,
+          "supported_params": ["2t", "prate"]
+        },
+        {
+          "id": "aifs_ens_21_30",
+          "name": "21-30",
+          "displayName": "AIFS-ENS",
+          "ensemble": true,
+          "supported_params": ["2t", "prate"]
+        },
+        {
+          "id": "aifs_ens_31_40",
+          "name": "31-40",
+          "displayName": "AIFS-ENS",
+          "ensemble": true,
+          "supported_params": ["2t", "prate"]
+        },
+        {
+          "id": "aifs_ens_41_50",
+          "name": "41-50",
+          "displayName": "AIFS-ENS",
+          "ensemble": true,
+          "supported_params": ["2t", "prate"]
+        }
       ]
     },
     "hrrr": {

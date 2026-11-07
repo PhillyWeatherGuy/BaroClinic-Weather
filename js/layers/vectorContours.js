@@ -698,7 +698,7 @@ function packColor(str, alpha, fallback = '#ffffff') {
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const isEnsemble = stateManager.activeModel === 'aifs_ens';
+    const isEnsemble = stateManager.activeModel === 'aifs_ens' || /^aifs_ens_(11_20|21_30|31_40|41_50)$/.test(stateManager.activeModel);
     
     // 🌟 Force 1 subdivision in ensemble mode (cards are too small to need high-res splines)
     const SUBDIVISIONS = (isMobile || isEnsemble) ? 1 : 3;
@@ -904,7 +904,7 @@ function setLabels(fc) {
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     
     // 🌟 Disable slow GeoJSON worker loop in ensemble mode
-    if (stateManager.activeModel === 'aifs_ens') return;
+    if (stateManager.activeModel === 'aifs_ens' || /^aifs_ens_(11_20|21_30|31_40|41_50)$/.test(stateManager.activeModel)) return;
 
     const src = mapInstance && mapInstance.getSource(LABEL_SOURCE_ID);
     if (src) src.setData(fc || EMPTY_GEOJSON);
