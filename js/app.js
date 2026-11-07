@@ -356,12 +356,18 @@ export async function renderAllEnsembleMembers() {
         toggleBasemapLayers(true);
 
         // Assemble the frozen basemap and the matching scissored member into each card.
-        cardList.forEach((item) => {
+        cardList.forEach((item, memberIndex) => {
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
                 cvs.height = targetH;
             }
+
+            const box = boxRects[memberIndex];
+            const weatherX = box?.x || 0;
+            const weatherY = box ? mapCanvas.height - box.y - box.h : 0;
+            const weatherW = box?.w || mapCanvas.width;
+            const weatherH = box?.h || mapCanvas.height;
 
             // Draw crisp frozen basemap background
             if (staticBasemapCanvas) {
@@ -374,7 +380,7 @@ export async function renderAllEnsembleMembers() {
             // Overlay the scissored, transparent weather on top
             item.ctx.drawImage(
                 mapCanvas, 
-                sx, sy, sWidth, sHeight, 
+                weatherX, weatherY, weatherW, weatherH,
                 0, 0, targetW, targetH
             );
         });
