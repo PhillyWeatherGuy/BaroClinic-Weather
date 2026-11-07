@@ -1,1477 +1,1510 @@
-// js/app.js
-import { stateManager } from './core/stateManager.js';
-import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from './core/dataLoader.js';
-import { getViewerPreferences } from './core/viewerPreferences.js';
-import { createScalarShaderLayer } from './shaders/scalarShader.js';
-import { createPrecipShaderLayer } from './shaders/precipShader.js';
-import { createPrecipTypeShaderLayer } from './shaders/precipTypeShader.js';
-import { initHubTransition } from './components/homeScreen.js';
-import { createHrrrShaderLayer } from './shaders/hrrrShader.js';
-import { createEnsembleShaderLayer } from './shaders/ensembleShader.js';
-import { 
-    initViewerUI, 
-    syncTimelineWithManifest, 
-    syncModelRunDropdown,
-    setShaderLayerReference,
-    updateSliderTrackAndBounds,
-    setStepIndex,
-    showToast, 
-    hideToast 
-} from './components/viewerUI.js';
-
-// 🌟 Universal overlays
-import { 
-    initCityOverlay, 
-    updateCityCallouts, 
-    sampleBilinearValue, 
-    formatParameterValue,
-    destroyCityOverlay,
-    setBasemapLabelsVisibility 
-} from './layers/cityOverlay.js'; 
-import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember } from './layers/vectorContours.js';
-import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
-
-// 🛰️ Real-Time Radar Engine
-import { initRadarMode, destroyRadarMode, updateRadarUnitLabels } from './components/radarUI.js';
-import { hideStormVolume } from './layers/stormVolume3D.js';
-
-import { getPaletteForParameter as getLightPalette } from './config/palettes.js';
-import { getPaletteForParameter as getDarkPalette } from './config/darkPalettes.js';
-
-let customShaderLayer = null;
-let renderDebounceId = null;
-let activeRenderId = 0;
-let polarMapLoaded = false;
-let isFirstLoad = true; // 🌟 Forces default model/param on initial site load
-
-// 🌟 Dedicated Atmosphere Canvas (Placed BEHIND MapLibre canvas for draw-order occlusion)
-let haloCanvas = null;
-let haloCtx = null;
-let lastGlobeMatrix = null;
-
-// 🌟 THE "FROZEN BASEMAP" SANDWICH CACHE
-let staticBasemapCanvas = null;
-let staticOverlayCanvas = null;
-let isBasemapCaptured = false;
-let basemapLayerIds = []; // 🌟 Cached for lightning-fast toggling
-let basemapMap = null;
-let basemapMapReady = false;
-// 🌟 Hidden map that renders ONLY the ensemble weather (empty style, camera synced to the live map)
-let weatherMap = null;
-let weatherMapReady = false;
-let weatherMapContainer = null;
-
-const popup = new maplibregl.Popup({ closeButton: false });
-
-const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768;
-
-const map = new maplibregl.Map({
-    container: 'map',
-    style: './config/style_default.json',
-    center: [-96.5, 38.5], 
-    zoom: isMobileViewport ? 3.2 : 3.8,
-    keyboard: false,
-    preserveDrawingBuffer: true // 🌟 Required for real-time canvas copying
-});
-
-function syncBasemapMapCamera() {
-    const proj = map.getProjection ? map.getProjection() : null;
-    if (proj && basemapMap.setProjection && basemapMap.getProjection()?.type !== proj.type) basemapMap.setProjection(proj);
-    if (!basemapMap || !basemapMapReady) return;
-    basemapMap.jumpTo({
-        center: map.getCenter(),
-        zoom: map.getZoom(),
-        bearing: map.getBearing(),
-        pitch: map.getPitch()
-    });
+/* ==========================================
+   SPLASH SCREEN & TRANSITIONS
+   ========================================== */
+#splash-screen {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #050a15;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column; 
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    box-sizing: border-box;
+    transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
 }
 
-let linesMap = null, linesMapReady = false, linesContainer = null;
-
-function buildLinesStyle() {
-    const st = basemapMap.getStyle();
-    return { ...st, layers: (st.layers || []).filter(l => l.type === 'line' && /boundary|coast|outline/i.test(l.id)) };
+#splash-screen::before {
+    content: '';
+    position: absolute;
+    width: 800px;
+    height: 800px;
+    background: radial-gradient(circle, rgba(77, 166, 255, 0.08) 0%, rgba(5, 10, 21, 0) 70%);
+    pointer-events: none;
+    z-index: 0;
 }
 
-function initLinesMap() {
-    if (linesMap || !basemapMap || !basemapMapReady) return;
-    linesContainer = document.createElement('div');
-    linesContainer.style.cssText = 'position:fixed;left:-10000px;top:0;width:100px;height:100px;pointer-events:none';
-    document.body.appendChild(linesContainer);
-    linesMap = new maplibregl.Map({
-        container: linesContainer, style: buildLinesStyle(),
-        center: map.getCenter(), zoom: map.getZoom(),
-        interactive: false, attributionControl: false, preserveDrawingBuffer: true
-    });
-    linesMap.once('load', () => { linesMapReady = true; });
+#splash-branding {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 1;
 }
 
-function renderLinesMap() {
-    if (!linesMap || !linesMapReady) return null;
-    const c = map.getCanvas();
-    linesContainer.style.width = c.clientWidth + 'px';
-    linesContainer.style.height = c.clientHeight + 'px';
-    linesMap.resize();
-    const proj = map.getProjection ? map.getProjection() : null;
-    if (proj && linesMap.getProjection()?.type !== proj.type) linesMap.setProjection(proj);
-    linesMap.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
-    linesMap._render();
-    const lc = linesMap.getCanvas();
-    return (lc.width === c.width && lc.height === c.height) ? lc : null;
+#splash-logo {
+    width: 75vw;
+    max-width: 280px;
+    height: auto;
+    margin-bottom: 15px;
+    filter: drop-shadow(0 0 18px rgba(77, 166, 255, 0.25));
 }
 
-function syncBasemapMapSize() {
-    if (!basemapMap) return false;
-    const c = map.getCanvas();
-    const w = c.clientWidth, h = c.clientHeight;
-    if (!w || !h) return false;
-    const el = basemapMap.getContainer();
-    el.style.width = `${w}px`;
-    el.style.height = `${h}px`;
-    basemapMap.resize();
-    return true;
+#splash-text {
+    font-family: 'Roboto', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: #4da6ff;
+    letter-spacing: 4px;
+    animation: pulse 1.5s infinite;
+    margin: 0;
 }
 
-function initBasemapMap() {
-    if (basemapMap) return;
-
-    const container = document.createElement('div');
-    container.id = 'basemap-render-map';
-    container.style.position = 'fixed';
-    container.style.left = '-10000px';
-    container.style.top = '0';
-    container.style.width = '100vw';
-    container.style.height = '100vh';
-    container.style.pointerEvents = 'none';
-    document.body.appendChild(container);
-
-    basemapMap = new maplibregl.Map({
-        container,
-        style: stateManager.currentMapStyle || './config/style_default.json',
-        center: map.getCenter(),
-        zoom: map.getZoom(),
-        bearing: map.getBearing(),
-        pitch: map.getPitch(),
-        interactive: false,
-        attributionControl: false,
-        preserveDrawingBuffer: true
-    });
-
-    basemapMap.once('load', () => {
-        basemapMapReady = true;
-        setBasemapLabelsVisibility(basemapMap, false);
-        syncBasemapMapCamera();
-        isBasemapCaptured = false;
-        initLinesMap();
-    });
+#splash-screen.fade-out {
+    opacity: 0;
+    pointer-events: none;
 }
 
-function updateBasemapMapStyle(styleUrl) {
-    if (!basemapMap || !styleUrl) return;
-    basemapMapReady = false;
-    basemapMap.once('style.load', () => {
-        basemapMapReady = true;
-        setBasemapLabelsVisibility(basemapMap, false);
-        syncBasemapMapCamera();
-        isBasemapCaptured = false;
-        if (linesMap) linesMap.setStyle(buildLinesStyle());
-    });
-    basemapMap.setStyle(styleUrl);
+#home-menu-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    width: 100%;
+    max-width: 600px;
+    margin-top: 25px; 
+    box-sizing: border-box;
+    z-index: 1;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.8s ease, transform 0.8s ease;
+    pointer-events: none; 
 }
 
-function syncWeatherMapSize() {
-    if (!weatherMapContainer) return false;
-    const c = map.getCanvas();
-    const w = c.clientWidth;
-    const h = c.clientHeight;
-    if (!w || !h) return false;
-    if (weatherMapContainer.style.width !== `${w}px` || weatherMapContainer.style.height !== `${h}px`) {
-        weatherMapContainer.style.width = `${w}px`;
-        weatherMapContainer.style.height = `${h}px`;
-        if (weatherMap) weatherMap.resize();
-    }
-    return true;
+#splash-screen.hub-active #home-menu-grid {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
 }
 
-function syncWeatherMapCamera() {
-    const proj = map.getProjection ? map.getProjection() : null;
-    if (proj && weatherMap.setProjection && weatherMap.getProjection()?.type !== proj.type) weatherMap.setProjection(proj);
-    if (!weatherMap || !weatherMapReady) return;
-    weatherMap.jumpTo({
-        center: map.getCenter(),
-        zoom: map.getZoom(),
-        bearing: map.getBearing(),
-        pitch: map.getPitch()
-    });
+#splash-screen.hub-active #splash-text {
+    display: none; 
 }
 
-function initWeatherMap() {
-    if (weatherMap) return;
-
-    weatherMapContainer = document.createElement('div');
-    weatherMapContainer.id = 'weather-render-map';
-    weatherMapContainer.style.cssText = 'position:fixed;left:-10000px;top:0;pointer-events:none;';
-    document.body.appendChild(weatherMapContainer);
-    syncWeatherMapSize();
-
-    weatherMap = new maplibregl.Map({
-        container: weatherMapContainer,
-        style: { version: 8, sources: {}, layers: [] },
-        center: map.getCenter(),
-        zoom: map.getZoom(),
-        bearing: map.getBearing(),
-        pitch: map.getPitch(),
-        interactive: false,
-        attributionControl: false,
-        preserveDrawingBuffer: true
-    });
-
-    weatherMap.once('load', () => {
-        weatherMapReady = true;
-        syncWeatherMapCamera();
-    });
+.menu-card {
+    background: #141822;
+    border: 1px solid #222938;
+    border-radius: 10px;
+    padding: 22px 12px;
+    text-align: center;
+    color: white;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-function addEnsembleLayerToWeatherMap(layer) {
-    const add = () => {
-        if (customShaderLayer !== layer) return; // superseded by a newer initLayer()
-        if (weatherMap.getLayer('weather-gpu-shader')) weatherMap.removeLayer('weather-gpu-shader');
-        weatherMap.addLayer(layer);
-
-        for (const chunkIdx in stateManager.loadedChunkBitmaps) {
-            const volume = stateManager.loadedChunkBitmaps[chunkIdx];
-            if (volume) layer.preloadChunkTexture(Number(chunkIdx), volume);
-        }
-        if (stateManager.activeFrameState) layer.updateFrame(stateManager.activeFrameState);
-        renderAllEnsembleMembers();
-    };
-    if (weatherMapReady) add();
-    else weatherMap.once('load', add);
+.menu-card h3 {
+    font-family: 'Roboto', sans-serif;
+    font-size: clamp(16px, 3.5vw, 24px);
+    margin: 0 0 6px 0;
+    letter-spacing: 1px;
+    color: #ffffff;
 }
 
-/**
- * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
- * Guaranteed to stay 100% locked to the perimeter across all zoom levels, rotations, and screen sizes!
- */
-function getGlobeScreenCircle(matrix, w, h) {
-    if (!matrix) return null;
-
-    // 1. Globe Center (0, 0, 0, 1) in screen pixels
-    const cx_clip = matrix[12];
-    const cy_clip = matrix[13];
-    const cw_clip = matrix[15] || 1.0;
-    const cx = (cx_clip / cw_clip * 0.5 + 0.5) * w;
-    const cy = (0.5 - cy_clip / cw_clip * 0.5) * h;
-
-    // 2. Camera direction vector from matrix
-    let vx = matrix[2], vy = matrix[6], vz = matrix[10];
-    const vLen = Math.hypot(vx, vy, vz) || 1.0;
-    vx /= vLen; vy /= vLen; vz /= vLen;
-
-    // 3. Up vector orthogonal to camera line of sight
-    let ux = 0.0, uy = 1.0, uz = 0.0;
-    if (Math.abs(vy) > 0.9) {
-        ux = 1.0; uy = 0.0; uz = 0.0;
-    }
-    const dotUV = ux * vx + uy * vy + uz * vz;
-    ux -= dotUV * vx; uy -= dotUV * vy; uz -= dotUV * vz;
-    const uLen = Math.hypot(ux, uy, uz) || 1.0;
-    ux /= uLen; uy /= uLen; uz /= uLen;
-
-    // 4. Project unit sphere horizon point (ux, uy, uz) to screen pixels
-    const hx_clip = matrix[0] * ux + matrix[4] * uy + matrix[8] * uz + matrix[12];
-    const hy_clip = matrix[1] * ux + matrix[5] * uy + matrix[9] * uz + matrix[13];
-    const hw_clip = matrix[3] * ux + matrix[7] * uy + matrix[11] * uz + matrix[15];
-
-    const hx = (hx_clip / hw_clip * 0.5 + 0.5) * w;
-    const hy = (0.5 - hy_clip / hw_clip * 0.5) * h;
-
-    const r = Math.hypot(hx - cx, hy - cy);
-    return { cx, cy, r };
+.menu-card p {
+    font-family: 'Roboto', sans-serif;
+    font-size: clamp(11px, 1.8vw, 14px);
+    color: #94a3b8;
+    margin: 0;
+    line-height: 1.3;
 }
 
-function updateAtmosphereHalo(matrix) {
-    if (stateManager.activeView !== '3d' || !haloCanvas || !haloCtx || !matrix) return;
-
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = window.innerWidth * dpr;
-    const h = window.innerHeight * dpr;
-
-    if (haloCanvas.width !== w || haloCanvas.height !== h) {
-        haloCanvas.width = w;
-        haloCanvas.height = h;
+@media (min-width: 1024px) {
+    #splash-screen {
+        display: block; 
     }
 
-    const circle = getGlobeScreenCircle(matrix, w, h);
-    if (!circle || isNaN(circle.r) || circle.r < 10) {
-        haloCtx.clearRect(0, 0, w, h);
-        return;
+    #splash-screen::before {
+        width: 1400px;
+        height: 1400px;
+        background: radial-gradient(ellipse, rgba(77, 166, 255, 0.06) 0%, rgba(5, 10, 21, 0) 50%);
     }
 
-    haloCtx.clearRect(0, 0, w, h);
+    #splash-branding {
+        position: absolute;
+        top: 50%;
+        left: 50%; 
+        transform: translate(-50%, -50%);
+        width: 38vw;
+        max-width: 680px;
+        transition: left 0.9s cubic-bezier(0.25, 1, 0.35, 1), 
+                    transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
+    }
 
-    const cx = circle.cx;
-    const cy = circle.cy;
-    const r = circle.r;
+    #splash-logo {
+        width: 100%;
+        max-width: none; 
+        margin-bottom: 25px;
+    }
 
-    // 🌟 Thicker, multi-layered atmospheric rim glow drawn BEHIND the planet
-    const outerR = r * 1.22;
-    const grad = haloCtx.createRadialGradient(cx, cy, r * 0.96, cx, cy, outerR);
-    grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
-    grad.addColorStop(0.18, 'rgba(224, 242, 254, 0.98)');
-    grad.addColorStop(0.35, 'rgba(56, 189, 248, 0.85)');
-    grad.addColorStop(0.60, 'rgba(14, 165, 233, 0.45)');
-    grad.addColorStop(0.85, 'rgba(2, 132, 199, 0.15)');
-    grad.addColorStop(1.00, 'rgba(2, 6, 23, 0.0)');
+    #splash-text {
+        font-size: 28px;
+        letter-spacing: 6px;
+    }
 
-    haloCtx.fillStyle = grad;
-    haloCtx.beginPath();
-    haloCtx.arc(cx, cy, outerR, 0, Math.PI * 2);
-    haloCtx.fill();
+    #splash-screen.hub-active #splash-branding {
+        left: 24%; 
+    }
+
+    #home-menu-grid {
+        position: absolute;
+        top: 50%;
+        left: 74%; 
+        margin-top: 0; 
+        width: 44vw; 
+        max-width: 850px; 
+        gap: 2vw; 
+        transform: translate(-50%, 20px); 
+        opacity: 0;
+        transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.25, 1, 0.35, 1);
+    }
+
+    #splash-screen.hub-active #home-menu-grid {
+        transform: translate(-50%, -50%); 
+        opacity: 1;
+    }
+
+    .menu-card {
+        border-radius: 12px; 
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        aspect-ratio: 4 / 3; 
+        padding: 2.5vw; 
+    }
+
+    .menu-card h3 {
+        font-size: clamp(22px, 2.8vw, 36px); 
+        margin-bottom: 12px;
+    }
+
+    .menu-card p {
+        font-size: clamp(13px, 1.1vw, 18px); 
+    }
+
+    .menu-card:hover {
+        background: #18202d;
+        transform: translateY(-4px); 
+        border-color: #3b82f6;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+    }
 }
 
-function initAtmosphereHaloCanvas() {
-    if (haloCanvas) return;
-    haloCanvas = document.createElement('canvas');
-    haloCanvas.id = 'globe-atmosphere-halo';
-    haloCanvas.style.position = 'absolute';
-    haloCanvas.style.top = '0';
-    haloCanvas.style.left = '0';
-    haloCanvas.style.width = '100%';
-    haloCanvas.style.height = '100%';
-    haloCanvas.style.pointerEvents = 'none';
+#home-menu-grid.exiting .menu-card {
+    opacity: 0;
+    transform: scale(0.95);
+    pointer-events: none;
+}
+
+#home-menu-grid.exiting #card-tropics   { transition-delay: 0.0s; }
+#home-menu-grid.exiting #card-radar    { transition-delay: 0.1s; }
+#home-menu-grid.exiting #card-satellite { transition-delay: 0.2s; }
+#home-menu-grid.exiting #card-models    { transition-delay: 0.3s; }
+
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
+
+/* ==========================================
+   NAVIGATION & UI OVERLAYS
+   ========================================== */
+#top-nav {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background: #11151e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 30;
+    border-bottom: 1px solid #1e2634;
+    color: #f8fafc;
+}
+
+.nav-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+/* 🌟 Side-by-Side Horizontal Alignment for Top Buttons */
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+.mode-nav {
+    display: none;
+}
+
+.mode-nav-btn {
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: #94a3b8;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.4px;
+    padding: 5px 9px 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.mode-nav-btn:hover {
+    color: #ffffff;
+}
+
+.mode-nav-btn.active {
+    color: #f8fafc;
+    border-bottom-color: #3b82f6;
+}
+
+.logo {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 1px;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+}
+
+/* ==========================================
+   TOP TIME BADGE (MOBILE DEFAULT / DESKTOP INLINE)
+   ========================================== */
+#top-time-container {
+    position: absolute;
+    top: 62px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    background: #151a24;
+    border: 1px solid #232b3c;
+    padding: 6px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.clock-display {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    color: #f1f5f9;
+    letter-spacing: 0.3px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* ==========================================
+   ULTRA-COMPACT BOTTOM TIMELINE CAPSULE
+   ========================================== */
+#timeline-container {
+    position: absolute; 
+    bottom: 0; 
+    left: 0; 
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    background: #131722; 
+    padding: 6px 12px; 
+    border-radius: 0; 
+    color: #f8fafc; 
+    display: flex; 
+    flex-direction: column;
+    gap: 6px; 
+    align-items: center;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4); 
+    z-index: 10; 
+    border-top: 1px solid #232b3c;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    box-sizing: border-box;
+}
+
+.timeline-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.timeline-slider-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+/* Replace the #timeline-slider section in css/ui.css with this: */
+#timeline-slider { 
+    flex: 1; 
+    accent-color: #3b82f6; 
+    cursor: pointer; 
+    height: 4px;
+    border-radius: 2px;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+    background: rgba(239, 68, 68, 0.5); /* Default red for unloaded track */
+    transition: background 0.15s ease;
+}
+
+#timeline-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+#timeline-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    border: none;
+}
+
+#time-label { 
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700; 
+    font-size: 12px; 
+    color: #94a3b8;
+    min-width: 40px; 
+}
+
+.ctrl-btn {
+    background: #191f2c;
+    border: 1px solid #283142;
+    color: #cbd5e1;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+}
+
+.ctrl-btn:hover {
+    background: #232c3d;
+    color: #ffffff;
+}
+
+.play-btn {
+    padding: 6px 14px;
+}
+
+.gif-btn {
+    background: #191f2c;
+    border: 1px solid #283142;
+    color: #94a3b8;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.gif-btn:hover {
+    background: #232c3d;
+    color: #ffffff;
+}
+
+#status-toast {
+    position: absolute; 
+    top: 70px; 
+    left: 50%; 
+    transform: translateX(-50%);
+    background: #151a24; 
+    color: #93c5fd; 
+    padding: 8px 18px; 
+    border-radius: 8px;
+    font-size: 13px; 
+    font-weight: 500; 
+    z-index: 20; 
+    border: 1px solid #262f3f;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+}
+
+.maplibregl-popup-content {
+    background: #0b0f19 !important; 
+    color: #f8fafc !important;
+    border-radius: 8px; 
+    padding: 12px 16px; 
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.15);
+}
+
+.temp-f { font-size: 20px; font-weight: 800; color: #60a5fa; }
+.temp-c { font-size: 13px; color: #94a3b8; }
+
+/* ==========================================
+   DESKTOP RESPONSIVE EXTENSION (>= 1024px)
+   ========================================== */
+@media (min-width: 1024px) {
+    .mode-nav {
+        display: flex;
+        align-items: center;
+        gap: 1px;
+        margin-left: 2px;
+        padding-left: 10px;
+        border-left: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    #top-time-container {
+        position: static;
+        transform: none;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 0 0 0 18px;
+        margin-left: 12px;
+        border-left: 2px solid rgba(255, 255, 255, 0.2);
+        display: flex;
+        align-items: center;
+    }
+
+    .clock-display {
+        font-size: 15px; 
+        color: #f1f5f9; 
+        text-align: left;
+        letter-spacing: 0.3px;
+        text-shadow: none; 
+    }
+
+    #timeline-container {
+        flex-direction: row;
+        width: 100%; 
+        max-width: none; 
+        min-width: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        transform: none;
+        padding: 6px 20px;
+        border-radius: 0;
+        border-top: 1px solid #232b3c;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        gap: 16px;
+    }
+
+    .timeline-controls {
+        width: auto;
+        min-width: auto;
+        justify-content: flex-start;
+        flex-shrink: 0;
+    }
     
-    haloCanvas.style.zIndex = '0';
-    haloCanvas.style.display = 'none';
-
-    const mapContainer = map.getContainer();
-    if (mapContainer) {
-        mapContainer.insertBefore(haloCanvas, mapContainer.firstChild);
-    }
-    haloCtx = haloCanvas.getContext('2d');
-}
-
-function updateModeNavigation(activeMode) {
-    document.querySelectorAll('.mode-nav-btn').forEach((button) => {
-        button.classList.toggle('active', button.dataset.mode === activeMode);
-    });
-}
-
-function unloadActiveViewer() {
-    destroyRadarMode(map);
-    hideStormVolume();
-    destroyCityOverlay();
-    hidePolarMap();
-    clearPolarTextures();
-    purgeAllAppMemory(customShaderLayer);
-
-    if (map.getLayer('weather-gpu-shader')) {
-        map.removeLayer('weather-gpu-shader');
-    }
-    if (weatherMap && weatherMapReady && weatherMap.getLayer('weather-gpu-shader')) {
-        weatherMap.removeLayer('weather-gpu-shader');
-    }
-    if (map.getLayer('radar-gpu-shader')) {
-        map.removeLayer('radar-gpu-shader');
-    }
-}
-
-function showComingSoonScreen(targetMode) {
-    const comingSoonScreen = document.getElementById('coming-soon-screen');
-    const comingSoonTitle = document.getElementById('coming-soon-title');
-    const mapContainer = document.getElementById('map');
-    const globeContainer = document.getElementById('globe-container');
-
-    if (comingSoonTitle) {
-        comingSoonTitle.textContent = targetMode === 'satellite' ? 'Satellite' : 'Tropics';
-    }
-    if (mapContainer) mapContainer.style.display = 'none';
-    if (globeContainer) globeContainer.style.display = 'none';
-    if (comingSoonScreen) comingSoonScreen.style.display = 'flex';
-}
-
-function hideComingSoonScreen() {
-    const comingSoonScreen = document.getElementById('coming-soon-screen');
-    const mapContainer = document.getElementById('map');
-    if (comingSoonScreen) comingSoonScreen.style.display = 'none';
-    if (mapContainer) mapContainer.style.display = 'block';
-}
-
-// 🌟 ULTRA-FAST 60 FPS 10-MEMBER SYNCHRONIZED RENDER ENGINE
-let isDrawingEnsemble = false;
-let isRenderingEnsemble = false;
-let pendingEnsembleStep = null;
-let cachedCardCanvases = null;
-let cachedTargetSize = null;
-let expandedEnsembleMember = null;
-const ENSEMBLE_RANGE_MODELS = new Set([
-    'aifs_ens',
-    'aifs_ens_11_20',
-    'aifs_ens_21_30',
-    'aifs_ens_31_40',
-    'aifs_ens_41_50'
-]);
-
-function isEnsembleRangeModel(modelId = stateManager.activeModel) {
-    return ENSEMBLE_RANGE_MODELS.has(modelId);
-}
-
-function setExpandedEnsembleMember(memberIndex = null) {
-    if (!isDrawingEnsemble) return;
-
-    expandedEnsembleMember = expandedEnsembleMember === memberIndex ? null : memberIndex;
-    const grid = document.getElementById('ensemble-grid');
-    if (!grid) return;
-
-    grid.classList.toggle('is-expanded', expandedEnsembleMember !== null);
-    grid.style.display = expandedEnsembleMember === null ? 'grid' : 'block';
-    grid.querySelectorAll('.map-card').forEach((card, index) => {
-        const isExpanded = expandedEnsembleMember === index;
-        card.classList.toggle('is-expanded', isExpanded);
-        card.classList.toggle('is-collapsed', expandedEnsembleMember !== null && !isExpanded);
-        const button = card.querySelector('.ensemble-expand-btn');
-        if (button) {
-            const action = isExpanded ? 'Collapse' : 'Expand';
-            button.setAttribute('aria-label', `${action} ${card.dataset.member}`);
-            button.title = `${action} ${card.dataset.member}`;
-            button.textContent = isExpanded ? '🗗' : '⛶';
-        }
-    });
-
-    cachedTargetSize = null;
-    const cards = getCardCanvases();
-    cards.forEach(item => item.ctx.clearRect(0, 0, item.canvas.width, item.canvas.height));
-    requestAnimationFrame(() => renderAllEnsembleMembers());
-}
-
-window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && expandedEnsembleMember !== null) {
-        event.preventDefault();
-        setExpandedEnsembleMember(null);
-    }
-});
-
-function getCardCanvases() {
-    if (cachedCardCanvases && cachedCardCanvases.length === 10) {
-        return cachedCardCanvases;
-    }
-    const cards = document.querySelectorAll('.map-card');
-    cachedCardCanvases = Array.from(cards).map(card => {
-        const expandButton = card.querySelector('.ensemble-expand-btn');
-        if (expandButton && !expandButton.dataset.bound) {
-            expandButton.dataset.bound = 'true';
-            expandButton.addEventListener('click', event => {
-                event.preventDefault();
-                event.stopPropagation();
-                setExpandedEnsembleMember(Number(card.dataset.member.replace(/\D/g, '')) - 1);
-            });
-        }
-        let canvas = card.querySelector('canvas');
-        if (!canvas) {
-            canvas = document.createElement('canvas');
-            canvas.style.width = '100%';
-            canvas.style.height = '100%';
-            canvas.style.display = 'block';
-            canvas.style.borderRadius = '6px';
-            card.appendChild(canvas);
-        }
-        return { card, canvas, ctx: canvas.getContext('2d') };
-    });
-    return cachedCardCanvases;
-}
-
-function updateCachedDimensions() {
-    const cardList = getCardCanvases();
-    if (!cardList || cardList.length === 0) return null;
-    const visibleCard = cardList.find(item => {
-        const rect = item.card.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-    });
-    if (!visibleCard) return null;
-    const rect = visibleCard.card.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return null;
-
-    const dpr = window.devicePixelRatio || 1;
-    cachedTargetSize = {
-        w: Math.floor(rect.width * dpr),
-        h: Math.floor(rect.height * dpr)
-    };
-    return cachedTargetSize;
-}
-
-// 🌟 Border/coast lines only, on a transparent canvas, drawn ABOVE the weather in each card
-function captureBasemapOverlay() {
-    const mapCanvas = map.getCanvas();
-    if (!staticOverlayCanvas) staticOverlayCanvas = document.createElement('canvas');
-    staticOverlayCanvas.width = mapCanvas.width;   // also clears it
-    staticOverlayCanvas.height = mapCanvas.height;
-
-    const hidden = [];
-    for (const layer of (basemapMap.getStyle().layers || [])) {
-        const keep = layer.type === 'line' && /boundary|coast|outline/i.test(layer.id);
-        if (keep || basemapMap.getLayoutProperty(layer.id, 'visibility') === 'none') continue;
-        basemapMap.setLayoutProperty(layer.id, 'visibility', 'none');
-        hidden.push(layer.id);
+    .timeline-slider-wrapper {
+        width: auto;
+        flex: 1; /* Allows the slider to stretch and fill all available screen width */
     }
 
-    basemapMap._render();
-    staticOverlayCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
-
-    hidden.forEach(id => basemapMap.setLayoutProperty(id, 'visibility', 'visible'));
-}
-// 🌟 NEW: Snapshot the static basemap without the weather
-function captureBasemap() {
-    if (!map) return;
-    const mapCanvas = map.getCanvas();
-    if (!staticBasemapCanvas) {
-        staticBasemapCanvas = document.createElement('canvas');
-    }
-    staticBasemapCanvas.width = mapCanvas.width;
-    staticBasemapCanvas.height = mapCanvas.height;
-
-    if (basemapMap && basemapMapReady) {
-        if (!syncBasemapMapSize()) return;
-        const bc = basemapMap.getCanvas();
-        if (bc.width !== mapCanvas.width || bc.height !== mapCanvas.height) return;
-        syncBasemapMapCamera();
-        basemapMap._render();
-        if (!map.isMoving() && !basemapMap.areTilesLoaded()) return; // tiles for this camera aren't ready yet
-        staticBasemapCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
-        if (!map.isMoving()) captureBasemapOverlay();
-        isBasemapCaptured = true;
-        return;
-    }
-    if (!map.isStyleLoaded()) return;
-    // Temporarily hide our weather/contours to take a clean snapshot of the basemap
-    const toggleWeather = (show) => {
-        const vis = show ? 'visible' : 'none';
-        if (map.style._layers['weather-gpu-shader']) map.style._layers['weather-gpu-shader'].visibility = vis;
-        if (map.style._layers['contour-gpu-layer']) map.style._layers['contour-gpu-layer'].visibility = vis;
-        if (map.style._layers['contour-master-label-layer']) map.style._layers['contour-master-label-layer'].visibility = vis;
-    };
-
-    toggleWeather(false);
-    map._render(); 
-    
-    const ctx = staticBasemapCanvas.getContext('2d');
-    ctx.drawImage(mapCanvas, 0, 0);
-    
-    toggleWeather(true);
-    isBasemapCaptured = true;
-}
-
-// 🌟 NEW: Turn on/off cached basemap layers instantly using pre-filtered IDs
-function toggleBasemapLayers(show) {
-    if (!map || !map.isStyleLoaded() || basemapLayerIds.length === 0) return;
-    const vis = show ? 'visible' : 'none';
-    basemapLayerIds.forEach(id => {
-        const layer = map.style._layers[id];
-        if (layer) layer.visibility = vis;
-    });
-}
-
-function toggleEnsembleContours(show) {
-    if (!map || !map.isStyleLoaded()) return;
-    const vis = show ? 'visible' : 'none';
-    ['contour-gpu-layer', 'contour-master-label-layer'].forEach(id => {
-        const layer = map.style._layers[id];
-        if (layer) layer.visibility = vis;
-    });
-}
-
-// 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
-export async function renderAllEnsembleMembers() {
-    if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function' || !weatherMapReady) return;
-    if (isRenderingEnsemble) {
-        pendingEnsembleStep = true;
-        return;
+    .gif-btn {
+        height: 32px;
+        padding: 0 14px;
+        font-size: 12px;
     }
 
-    isRenderingEnsemble = true;
-    pendingEnsembleStep = false;
+    /* 🌟 Desktop Segmented View Pill Overrides */
+    .view-toggle-btn {
+        display: none !important;
+    }
 
-    try {
-        const cardList = getCardCanvases();
-        const mapCanvas = map.getCanvas();
-        if (!mapCanvas || cardList.length === 0) return;
+    .view-dropdown-menu {
+        display: flex !important;
+        position: static !important;
+        transform: none !important;
+        width: auto !important;
+        max-height: none !important;
+        background: #0f131a !important;
+        border: 1px solid #202634 !important;
+        border-radius: 8px !important;
+        padding: 3px !important;
+        flex-direction: row !important;
+        gap: 3px !important;
+        box-shadow: none !important;
+    }
 
-        let size = cachedTargetSize || updateCachedDimensions();
-        if (!size) return;
+    .view-option-btn {
+        padding: 5px 12px !important;
+        font-size: 12px !important;
+        letter-spacing: 0.3px !important;
+        border-radius: 6px !important;
+        color: #94a3b8 !important;
+        border: 1px solid transparent !important;
+    }
 
-        const targetW = size.w;
-        const targetH = size.h;
+    .view-option-btn:hover {
+        color: #f1f5f9 !important;
+        background: rgba(255, 255, 255, 0.04) !important;
+    }
 
-        const srcAspect = mapCanvas.width / mapCanvas.height;
-        const dstAspect = targetW / targetH;
-        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
+    .view-option-btn .check-icon {
+        display: none !important;
+    }
 
-        if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
-            sx = (mapCanvas.width - sWidth) / 2;
-        } else {
-            sHeight = mapCanvas.width / dstAspect;
-            sy = (mapCanvas.height - sHeight) / 2;
-        }
+    .view-option-btn.active {
+        background: #232b3c !important;
+        border: 1px solid #343e52 !important;
+        color: #f8fafc !important;
+        box-shadow: none !important;
+    }
 
-        // 🌟 1. CAPTURE FROZEN BASEMAP (Only happens once when map stops moving)
-        if (!isBasemapCaptured) {
-            captureBasemap();
-            if (!isBasemapCaptured) {
-                // Basemap tiles for this camera aren't ready: keep the last frame, retry when idle
-                if (basemapMap) basemapMap.once('idle', () => renderAllEnsembleMembers());
-                return;
-            }
-        }
+    /* 🌟 Desktop Direct-Access Parameter Categories in Top Nav */
+    .desktop-category-container {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
 
-        // 🌟 2. Sync the hidden weather-only map to the live camera and size
-        if (!syncWeatherMapSize()) return;
-        syncWeatherMapCamera();
-        const weatherCanvas = weatherMap.getCanvas();
+    /* Hide duplicate category pills in sub-bar on desktop so only parameter buttons display */
+    #param-category-bar .category-scroll-container {
+        display: none !important;
+    }
 
-        // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
-        const mapRect = mapCanvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const boxRects = cardList.map(item => {
-            const rect = item.canvas.getBoundingClientRect();
-            return {
-                x: Math.floor((rect.left - mapRect.left) * dpr),
-                y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
-                w: Math.floor(rect.width * dpr),
-                h: Math.floor(rect.height * dpr)
-            };
-        });
-
-        // Render all ten members in one MapLibre pass, one texture per scissored card.
-        customShaderLayer.setGridMode(true, boxRects, {
-            x: sx,
-            y: sy,
-            w: sWidth,
-            h: sHeight,
-            canvasW: weatherCanvas.width,
-            canvasH: weatherCanvas.height
-        });
-        // Synchronous redraw of the hidden weather map: the grid is drawn into ITS canvas only
-        if (typeof weatherMap.redraw === 'function') weatherMap.redraw();
-        else weatherMap._render();
-
-        customShaderLayer.setGridMode(false, null);
-
-        // Assemble the frozen basemap and the matching scissored member into each card.
-        const linesCanvas = renderLinesMap() || staticOverlayCanvas;
-        cardList.forEach((item, memberIndex) => {
-            const cvs = item.canvas;
-            if (cvs.width !== targetW || cvs.height !== targetH) {
-                cvs.width = targetW;
-                cvs.height = targetH;
-            }
-
-            const box = boxRects[memberIndex];
-            const weatherX = box?.x || 0;
-            const weatherY = box ? weatherCanvas.height - box.y - box.h : 0;
-            const weatherW = box?.w || weatherCanvas.width;
-            const weatherH = box?.h || weatherCanvas.height;
-
-            // Keep ensemble cards visually neutral so each member's weather field stands alone.
-            item.ctx.fillStyle = stateManager.currentTheme === 'dark' ? '#3b4148' : '#d9dde1';
-            item.ctx.fillRect(0, 0, targetW, targetH);
-            // Overlay the scissored, transparent weather on top
-            item.ctx.drawImage(
-                weatherCanvas,
-                weatherX, weatherY, weatherW, weatherH,
-                0, 0, targetW, targetH
-            );
-            if (linesCanvas) {
-                item.ctx.drawImage(linesCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-            }
-        });
-
-    } finally {
-        isRenderingEnsemble = false;
-        if (pendingEnsembleStep) {
-            requestAnimationFrame(() => renderAllEnsembleMembers());
-        }
+    #param-category-bar #param-list-container {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: none;
     }
 }
 
-function syncEnsembleGrid() {
-    const grid = document.getElementById('ensemble-grid');
-    if (!grid) return;
-    
-    const shouldShow = stateManager.activeMode === 'modelViewer' && isEnsembleRangeModel();
-    if (!shouldShow && expandedEnsembleMember !== null) {
-        expandedEnsembleMember = null;
-        grid.classList.remove('is-expanded');
+.desktop-category-container {
+    display: none;
+}
+
+.coming-soon-screen {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    align-items: center;
+    justify-content: center;
+    background: #111827;
+    color: #ffffff;
+    text-align: center;
+}
+
+.coming-soon-content {
+    width: 100%;
+}
+
+.coming-soon-kicker {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+.coming-soon-content h1 {
+    margin: 8px 0;
+    font-family: 'Roboto', sans-serif;
+    font-size: 42px;
+    font-weight: 600;
+}
+
+.coming-soon-content p {
+    margin: 0;
+    color: #d1d5db;
+    font-size: 14px;
+}
+
+/* ==========================================
+   MODEL RUN DROPDOWN SELECTOR
+   ========================================== */
+.model-run-dropdown-container {
+    position: relative;
+}
+
+.run-toggle-btn {
+    background: #191f2c;
+    border: 1px solid #283142;
+    color: #cbd5e1;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.run-toggle-btn:hover {
+    background: #232c3d;
+    color: #ffffff;
+}
+
+.run-dropdown-menu {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 0;
+    width: 240px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: #131722;
+    border: 1px solid #232b3c;
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    padding: 6px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.run-dropdown-item {
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: left;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.run-dropdown-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.run-dropdown-item.active {
+    background: #1e2636;
+    color: #60a5fa;
+    font-weight: 700;
+}
+
+.run-dropdown-item .check-icon {
+    font-size: 12px;
+    opacity: 0;
+}
+
+.run-dropdown-item.active .check-icon {
+    opacity: 1;
+}
+
+/* Custom Scrollbar for Dropdown */
+.run-dropdown-menu::-webkit-scrollbar {
+    width: 6px;
+}
+.run-dropdown-menu::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+/* ==========================================
+   VIEW / PROJECTION SELECTOR & FLYOUT STYLING
+   ========================================== */
+.view-selector-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.view-toggle-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #94a3b8;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s ease;
+}
+
+.view-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+.view-toggle-btn.active {
+    background: #232c3d !important;
+    border-color: #364257 !important;
+    color: #f8fafc !important;
+    box-shadow: none !important;
+}
+
+.view-dropdown-menu {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    background: #131722;
+    border: 1px solid #232b3c;
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    padding: 6px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.view-option-btn {
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: left;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.15s ease;
+}
+
+.view-option-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.view-option-btn.active {
+    background: #1e2636;
+    color: #60a5fa;
+    font-weight: 700;
+}
+
+.view-option-btn .check-icon {
+    font-size: 12px;
+    opacity: 0;
+}
+
+.view-option-btn.active .check-icon {
+    opacity: 1;
+}
+
+/* ==========================================
+   TOP NAV DROPDOWN BUTTON & CATEGORY SUB-BAR
+   ========================================== */
+.nav-dropdown-btn {
+    background: #181d28;
+    border: 1px solid #262f3f;
+    color: #cbd5e1;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.3px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.nav-dropdown-btn:hover {
+    background: #202736;
+    color: #ffffff;
+    border-color: #333e52;
+}
+
+.nav-dropdown-btn.active {
+    background: #202736 !important;
+    border-color: #3b82f6 !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+}
+
+.sub-nav-bar {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    right: 0;
+    z-index: 35;
+    background: #11151e;
+    border-bottom: 1px solid #1e2634;
+    padding: 8px 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.category-scroll-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 2px 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+}
+
+.category-scroll-container::-webkit-scrollbar {
+    display: none;
+}
+
+.category-scroll-container:active {
+    cursor: grabbing;
+}
+
+/* 🌟 Category Pill Styling for Models and Parameters */
+.model-cat-pill,
+.param-cat-pill {
+    background: #181d28;
+    border: 1px solid #262f3f;
+    color: #94a3b8;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.3px;
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.model-cat-pill:hover,
+.param-cat-pill:hover {
+    background: #202736;
+    color: #ffffff;
+    border-color: #333e52;
+}
+
+.model-cat-pill.active,
+.param-cat-pill.active {
+    background: #2563eb !important;
+    border-color: #3b82f6 !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+}
+
+.nav-dropdown-btn.open .chevron-icon {
+    transform: rotate(180deg);
+}
+
+.chevron-icon {
+    transition: transform 0.2s ease;
+}
+
+/* ==========================================
+   MODEL SELECTION BUTTONS (INSIDE CATEGORY BAR)
+   ========================================== */
+.model-list-scroll-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: visible;
+    white-space: nowrap;
+    scrollbar-width: none;
+}
+
+.model-list-scroll-container::-webkit-scrollbar {
+    display: none;
+}
+
+.model-select-btn {
+    background: #181d28;
+    border: 1px solid #262f3f;
+    color: #cbd5e1;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.3px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+.model-select-btn:hover {
+    background: #202736;
+    color: #ffffff;
+    border-color: #333e52;
+}
+
+.model-select-btn.active {
+    background: #2563eb !important;
+    border-color: #3b82f6 !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+}
+
+.model-variant-dropdown {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.model-variant-toggle::after {
+    content: '⌄';
+    margin-left: 8px;
+    font-size: 12px;
+}
+
+.model-variant-dropdown.open .model-variant-toggle::after {
+    content: '⌃';
+}
+
+.model-variant-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 40;
+    min-width: 100%;
+    padding: 5px;
+    background: #11151e;
+    border: 1px solid #2a3446;
+    border-radius: 4px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+.model-variant-menu .model-select-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    border-radius: 2px;
+}
+
+.no-models-msg {
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    color: #64748b;
+    padding: 2px 6px;
+    font-style: italic;
+}
+
+/* ==========================================
+   DARK / LIGHT MODE TOGGLE PILL
+   ========================================== */
+.theme-toggle-pill {
+    position: absolute;
+    top: 62px;
+    left: 16px;
+    z-index: 26;
+    background: #151a24;
+    border: 1px solid #232b3c;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    padding: 4px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s ease;
+}
+
+.theme-toggle-pill:hover {
+    background: #1b212e;
+    border-color: #313c52;
+}
+
+.theme-pill-track {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 44px;
+    height: 20px;
+    padding: 0 4px;
+    box-sizing: border-box;
+}
+
+.theme-icon {
+    z-index: 2;
+    transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.sun-icon {
+    color: #94a3b8;
+}
+
+.moon-icon {
+    color: #94a3b8;
+}
+
+.theme-thumb {
+    position: absolute;
+    top: 1px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #2b3548;
+    border: 1px solid #3b465c;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, border-color 0.2s ease;
+    transform: translateX(22px); /* Dark Mode: thumb on right */
+    z-index: 1;
+}
+
+/* Light Mode Active State */
+.theme-toggle-pill.light-mode .theme-thumb {
+    transform: translateX(0px); /* Light Mode: slides to sun on left */
+    background: rgba(251, 191, 36, 0.3);
+    border-color: rgba(251, 191, 36, 0.8);
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
+}
+
+.theme-toggle-pill.light-mode .sun-icon {
+    color: #fbbf24;
+}
+
+.theme-toggle-pill.light-mode .moon-icon {
+    color: #94a3b8;
+}
+
+.unit-toggle-pill {
+    position: absolute;
+    top: 62px;
+    left: 76px;
+    z-index: 26;
+    width: 84px;
+    height: 30px;
+    padding: 3px;
+    border: 1px solid #232b3c;
+    border-radius: 8px;
+    background: #151a24;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    color: #94a3b8;
+    cursor: pointer;
+}
+
+.unit-toggle-pill:hover {
+    border-color: #313c52;
+    background: #1b212e;
+}
+
+.unit-toggle-track {
+    position: relative;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+}
+
+.unit-option {
+    z-index: 2;
+    font-family: 'Roboto', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.unit-thumb {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 50%;
+    border: 1px solid #3b465c;
+    border-radius: 6px;
+    background: #2b3548;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.unit-toggle-pill.metric-mode .unit-thumb {
+    transform: translateX(100%);
+}
+
+/* ==========================================
+   RADAR HOVER INSPECTION BADGE
+   ========================================== */
+.radar-cursor-badge {
+    position: absolute;
+    pointer-events: none;
+    z-index: 90;
+    background: #151a24;
+    border: 1px solid #2b364c;
+    color: #93c5fd;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    display: none;
+    transform: translate3d(0, 0, 0);
+}
+
+/* ==========================================
+   RADAR VOLUMETRIC & MULTI-TILT TOOLBAR
+   ========================================== */
+#radar-tools-container {
+    position: absolute;
+    top: 62px;
+    left: 170px;
+    z-index: 26;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #151a24;
+    border: 1px solid #232b3c;
+    border-radius: 8px;
+    padding: 3px 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+@media (max-width: 1023px) {
+    .unit-toggle-pill {
+        right: 16px;
+        left: auto;
     }
-    grid.style.display = shouldShow ? (expandedEnsembleMember === null ? 'grid' : 'block') : 'none';
-    
-    isDrawingEnsemble = shouldShow;
-    cachedCardCanvases = null;
-    cachedTargetSize = null;
-    
-    if (shouldShow) {
-        updateCachedDimensions();
-        setTimeout(renderAllEnsembleMembers, 80);
+
+    #radar-tools-container {
+        top: 104px;
+        left: 16px;
     }
 }
 
-function drawEnsembleBoxes(targetMemberIndex = null) {
-    if (!isDrawingEnsemble) return;
-
-    const mapCanvas = map.getCanvas();
-    if (!mapCanvas) return;
-
-    const cardList = getCardCanvases();
-    if (cardList.length === 0) return;
-
-    let size = cachedTargetSize || updateCachedDimensions();
-    if (!size) return;
-
-    const targetW = size.w;
-    const targetH = size.h;
-
-    const srcAspect = mapCanvas.width / mapCanvas.height;
-    const dstAspect = targetW / targetH;
-    let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
-
-    if (srcAspect > dstAspect) {
-        sWidth = mapCanvas.height * dstAspect;
-        sx = (mapCanvas.width - sWidth) / 2;
-    } else {
-        sHeight = mapCanvas.width / dstAspect;
-        sy = (mapCanvas.height - sHeight) / 2;
-    }
-
-    cardList.forEach((item, idx) => {
-        if (targetMemberIndex !== null && idx !== targetMemberIndex) return;
-
-        const cvs = item.canvas;
-        if (cvs.width !== targetW || cvs.height !== targetH) {
-            cvs.width = targetW;
-            cvs.height = targetH;
-        }
-
-        try {
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-        } catch (err) {}
-    });
+.radar-tool-btn {
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
 }
 
-/**
- * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
- */
-export function updateBasemapStyle(styleUrl) {
-    if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
-
-    console.log(`[Map] Switching basemap style to: ${styleUrl}`);
-    stateManager.currentMapStyle = styleUrl;
-
-    let loaded = false;
-    const onStyleReady = () => {
-        if (loaded) return;
-        loaded = true;
-        console.log("✅ New basemap style loaded. Re-attaching weather layers...");
-
-        if (typeof map.setProjection === 'function') {
-            map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
-        }
-
-        if (stateManager.activeMode === 'radar') {
-            applyRadarTheme(stateManager.currentTheme);
-            setBasemapLabelsVisibility(map, true);
-            initRadarMode(map);
-        } else {
-            setBasemapLabelsVisibility(map, false);
-            try { initLayer(); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
-
-            if (stateManager.currentStepIndex !== undefined) {
-                renderFrame(stateManager.currentStepIndex);
-            }
-        }
-    };
-
-    map.once('style.load', onStyleReady);
-    setTimeout(onStyleReady, 2000); // Fail-safe
-    map.setStyle(styleUrl);
+.radar-tool-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
 }
 
-/**
- * 🌟 ZERO-RELOAD RADAR THEME SWITCHER
- */
-function applyRadarTheme(theme) {
-    if (!map || !map.isStyleLoaded()) return;
-    const isDark = (theme === 'dark');
-
-    if (map.getLayer('background')) {
-        map.setPaintProperty('background', 'background-color', isDark ? 'rgb(59, 51, 59)' : '#EDEDED');
-    }
-
-    const waterColor = isDark ? 'rgba(2, 20, 37, 1)' : '#F5FDFF';
-    if (map.getLayer('ocean_far')) {
-        map.setPaintProperty('ocean_far', 'fill-color', waterColor);
-    }
-    if (map.getLayer('water')) {
-        map.setPaintProperty('water', 'fill-color', waterColor);
-    }
-
-    const outlineColor = isDark ? '#ffffff' : '#000000';
-    const outlineLayers = [
-        'coastline_far',
-        'water_outline',
-        'boundary_county',
-        'boundary_state',
-        'boundary_country_z0-4',
-        'boundary_country_z5-'
-    ];
-    outlineLayers.forEach(id => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'line-color', outlineColor);
-        }
-    });
-
-    const fillLayers = ['landuse_residential', 'landcover_wood', 'landcover_ice_shelf', 'landcover_glacier', 'building', 'aeroway-area', 'road_area_pier'];
-    fillLayers.forEach(id => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
-        }
-    });
-    if (map.getLayer('landuse_park')) {
-        map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : '#EDEDED');
-    }
-
-    const streetColor = isDark ? '#181818' : '#ffffff';
-    const streetCasing = isDark ? 'rgba(60, 60, 60, 0.8)' : 'rgba(0, 0, 0, 0.25)';
-
-    ['highway_motorway_inner', 'highway_major_inner', 'highway_major_subtle', 'highway_motorway_subtle'].forEach(id => {
-        if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', streetColor);
-    });
-    ['highway_motorway_casing', 'highway_major_casing'].forEach(id => {
-        if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', streetCasing);
-    });
-    if (map.getLayer('highway_minor')) {
-        map.setPaintProperty('highway_minor', 'line-color', isDark ? '#181818' : 'rgba(255, 255, 255, 0.8)');
-    }
-
-    const labelColor = isDark ? '#ffffff' : '#000000';
-    const haloColor = isDark ? '#000000' : '#ffffff';
-    const labelLayers = [
-        'place_other', 'place_suburb', 'place_village', 'place_town',
-        'place_city', 'place_city_large', 'place_state', 'place_country_other',
-        'place_country_minor', 'place_country_major'
-    ];
-    labelLayers.forEach(id => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'text-color', labelColor);
-            map.setPaintProperty(id, 'text-halo-color', haloColor);
-        }
-    });
+.radar-tool-btn.active {
+    background: #2563eb !important;
+    border: 1px solid #3b82f6 !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
 }
 
-/**
- * 🌟 NATIVE PROJECTION / VIEW SWITCHER
- */
-export function applyView(targetView) {
-    stateManager.activeView = targetView;
-
-    document.body.classList.toggle('globe-view', targetView === '3d');
-    if (!haloCanvas) initAtmosphereHaloCanvas();
-    if (haloCanvas) {
-        haloCanvas.style.display = targetView === '3d' ? 'block' : 'none';
-        if (targetView !== '3d' && haloCtx) {
-            haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
-        }
-    }
-
-    if (targetView === '2d' || targetView === '3d') {
-        hidePolarMap();
-        clearPolarTextures();
-
-        const globeDiv = document.getElementById('globe-container');
-        if (globeDiv) globeDiv.style.display = 'none';
-
-        const mapDiv = document.getElementById('map');
-        if (mapDiv) mapDiv.style.display = 'block';
-
-        if (map) {
-            if (typeof map.setProjection === 'function') {
-                map.setProjection({ type: targetView === '3d' ? 'globe' : 'mercator' });
-            }
-            map.resize();
-            if (basemapMap) basemapMap.resize();
-        }
-
-        if (stateManager.activeFrameState && customShaderLayer) {
-            customShaderLayer.updateFrame(stateManager.activeFrameState);
-            try { updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest); } catch (e) {}
-            if (stateManager.globalSteps && stateManager.globalSteps[stateManager.currentStepIndex]) {
-                try { initVectorContours(map); } catch (e) {}
-                updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
-            }
-        }
-    } else if (targetView === 'polar') {
-        const mapDiv = document.getElementById('map');
-        if (mapDiv) mapDiv.style.display = 'none';
-
-        const globeDiv = document.getElementById('globe-container');
-        if (globeDiv) globeDiv.style.display = 'none';
-
-        if (!polarMapLoaded) {
-            try {
-                initPolarMap();
-                polarMapLoaded = true;
-            } catch (err) {}
-        }
-
-        showPolarMap();
-
-        if (stateManager.activeFrameState) {
-            updatePolarFrame(stateManager.activeFrameState);
-        }
-    }
+/* Tilt Dropdown Placement Override */
+.tilt-selector-container {
+    position: relative;
 }
 
-/**
- * 🌟 CURSOR-CENTERED KEYBOARD ZOOM HANDLER
- */
-export function handleKeyboardZoom(direction, x, y) {
-    const activeView = stateManager.activeView || '2d';
-
-    if ((activeView === '2d' || activeView === '3d') && map) {
-        const targetLngLat = map.unproject([x, y]);
-        const deltaZoom = direction > 0 ? 0.65 : -0.65;
-        map.easeTo({
-            zoom: map.getZoom() + deltaZoom,
-            around: targetLngLat,
-            duration: 150
-        });
-    } else if (activeView === 'polar' && polarMapLoaded) {
-        if (typeof zoomPolarAtPoint === 'function') {
-            zoomPolarAtPoint(direction, x, y);
-        }
-    }
+.tilt-selector-container .run-dropdown-menu {
+    top: calc(100% + 8px);
+    bottom: auto;
+    width: 140px;
 }
 
-/**
- * 🌟 DYNAMIC THEME APPLIER
- */
-export async function applyTheme(theme) {
-    document.body.classList.toggle('light-mode', theme === 'light');
-
-    if (stateManager.activeMode === 'radar') {
-        applyRadarTheme(theme);
-        return;
-    }
-
-    try {
-        let paramConfig = stateManager.paramConfig;
-
-        if (!paramConfig) {
-            const resp = await fetch('./config/models.json');
-            if (resp.ok) {
-                const data = await resp.json();
-                const params = data?.parameters || {};
-                paramConfig = params[stateManager.activeParam] ||
-                    Object.values(params).find(p => p.id === stateManager.activeParam || p.name === stateManager.activeParam) ||
-                    params['2t'];
-            }
-        }
-
-        if (paramConfig) {
-            const targetStyle = theme === 'dark'
-                ? (paramConfig.map_style_dark || './config/style_dark.json')
-                : (paramConfig.map_style_light || './config/style_default.json');
-
-            if (targetStyle) {
-                updateBasemapStyle(targetStyle);
-            }
-        }
-    } catch (err) {
-        console.warn("Could not resolve theme basemap URL:", err);
-    }
-
-    const paramId = stateManager.paramConfig?.palette || stateManager.paramConfig?.id || stateManager.activeParam;
-    const paletteFunc = (theme === 'dark') ? getDarkPalette : getLightPalette;
-    const newPalette = paletteFunc(paramId);
-
-    if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
-        customShaderLayer.updatePalette(newPalette);
-    }
-    if (polarMapLoaded) {
-        try { updatePolarPalette(newPalette); } catch (e) {}
-    }
+/* ==========================================
+   RADAR DRAG-BOX SELECTION OVERLAY
+   ========================================== */
+#radar-drag-box {
+    position: fixed;
+    border: 2px dashed #3b82f6;
+    background: rgba(59, 130, 246, 0.15);
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+    pointer-events: none;
+    z-index: 50;
+    border-radius: 4px;
 }
 
-export function initLayer(shaderType = null) {
-    if (map.getLayer('weather-gpu-shader')) {
-        map.removeLayer('weather-gpu-shader');
-    }
-    if (weatherMap && weatherMapReady && weatherMap.getLayer('weather-gpu-shader')) {
-        weatherMap.removeLayer('weather-gpu-shader');
-    }
-    if (customShaderLayer) {
-        customShaderLayer.clearTextures();
-        customShaderLayer = null;
-    }
-
-    const chosenShader = shaderType || stateManager.activeShader || 'scalar';
-
-    if (isEnsembleRangeModel()) {
-        initWeatherMap();
-        customShaderLayer = createEnsembleShaderLayer(weatherMap);
-        customShaderLayer.gridOnly = true; // never draw a full-screen copy on the hidden map
-    } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
-        customShaderLayer = createHrrrShaderLayer(map);
-    } else if (chosenShader === 'precipType') {
-        customShaderLayer = createPrecipTypeShaderLayer(map);
-    } else if (chosenShader === 'precip') {
-        customShaderLayer = createPrecipShaderLayer(map);
-    } else {
-        customShaderLayer = createScalarShaderLayer(map);
-    }
-    setShaderLayerReference(customShaderLayer);
-    
-    const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-    if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
-        customShaderLayer.updatePalette(paletteFunc(stateManager.activeParam));
-    }
-
-    for (const chunkIdx in stateManager.loadedChunkBitmaps) {
-        const bitmap = stateManager.loadedChunkBitmaps[chunkIdx];
-        if (bitmap && customShaderLayer) {
-            customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-        }
-    }
-
-    let firstContentLayerId = null;
-    const layers = map.getStyle().layers || [];
-    for (const layer of layers) {
-        if (layer.id !== 'background') {
-            firstContentLayerId = layer.id;
-            break;
-        }
-    }
-
-    const originalRender = customShaderLayer.render.bind(customShaderLayer);
-    customShaderLayer.render = (gl, matrixOrArgs) => {
-        originalRender(gl, matrixOrArgs);
-        if (stateManager.activeView === '3d') {
-            const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
-            const projData = isV5 ? matrixOrArgs.defaultProjectionData : null;
-            const matrix = isV5 
-                ? (matrixOrArgs.modelViewProjectionMatrix || projData?.mainMatrix) 
-                : matrixOrArgs;
-            lastGlobeMatrix = matrix;
-            updateAtmosphereHalo(matrix);
-        }
-    };
-
-    if (isEnsembleRangeModel()) {
-        // Weather lives on its own hidden map; the live map stays a clean basemap
-        addEnsembleLayerToWeatherMap(customShaderLayer);
-    } else if (!map.getLayer('weather-gpu-shader')) {
-        map.addLayer(customShaderLayer, firstContentLayerId);
-    }
+/* Cursor change when 3D box tool is armed */
+body.radar-box-armed,
+body.radar-box-armed #map canvas {
+    cursor: crosshair !important;
 }
 
-async function renderFrame(globalIdx) {
-    syncEnsembleGrid();
-    if (!stateManager.manifest || !stateManager.globalSteps || stateManager.globalSteps.length === 0) return;
-    
-    const renderId = ++activeRenderId;
-    const frameInfo = stateManager.globalSteps[globalIdx];
-    if (!frameInfo) return;
-
-    const chunkIdx = frameInfo.chunkIndex;
-    const frameIdx = frameInfo.frameIndex !== undefined ? frameInfo.frameIndex : (frameInfo.col || 0);
-
-    if (!stateManager.loadedChunkBitmaps[chunkIdx]) {
-        try {
-            const bitmap = await loadChunkBitmap(chunkIdx, stateManager.loadGeneration);
-            if (renderId !== activeRenderId) return;
-
-            if (customShaderLayer) {
-                customShaderLayer.preloadChunkTexture(chunkIdx, bitmap);
-            }
-            updateSliderTrackAndBounds();
-        } catch (err) {
-            return;
-        }
-    } else if (customShaderLayer && !customShaderLayer.chunkTextures[`${chunkIdx}_${frameIdx}`]) {
-        customShaderLayer.preloadChunkTexture(chunkIdx, stateManager.loadedChunkBitmaps[chunkIdx]);
-    }
-
-    if (renderId !== activeRenderId) return;
-
-    const chunkVolume = stateManager.loadedChunkBitmaps[chunkIdx];
-    const currentFrameImg = (chunkVolume && chunkVolume.frames && chunkVolume.frames[frameIdx])
-        ? chunkVolume.frames[frameIdx]
-        : chunkVolume;
-
-    stateManager.activeFrameState = {
-        chunkIndex: chunkIdx,
-        frameIndex: frameIdx,
-        col: 0,
-        row: 0,
-        chunkImg: currentFrameImg,
-        uvOffset: [0.0, 0.0],
-        uvScale: [1.0, 1.0]
-    };
-    
-    const activeView = stateManager.activeView || '2d';
-
-    if (activeView === '2d' || activeView === '3d') {
-        // 🌟 Load and update vector contours for ALL models (including AIFS-ENS)
-        try { initVectorContours(map); } catch (e) {}
-        await updateVectorContours(frameInfo.step);
-
-        if (renderId !== activeRenderId) return;
-
-        // Skip heavy city text overlay in ensemble mode for speed
-        if (!isEnsembleRangeModel()) {
-            try {
-                updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
-            } catch (e) {}
-        }
-
-        if (customShaderLayer) {
-            customShaderLayer.updateFrame(stateManager.activeFrameState);
-        }
-    } else if (activeView === 'polar' && polarMapLoaded) {
-        updatePolarFrame(stateManager.activeFrameState);
-    }
-
-    // 🌟 ANIMATE ALL 10 MEMBERS SIMULTANEOUSLY DURING SCRUBBING
-    if (isDrawingEnsemble) {
-        renderAllEnsembleMembers();
-    }
+/* ==========================================
+   3D VOLUMETRIC STORM VIEWPORT
+   ========================================== */
+#storm-volume-container {
+    position: absolute;
+    top: 60px;
+    right: 20px;
+    width: 480px;
+    height: 480px;
+    max-width: calc(100vw - 40px);
+    max-height: calc(100vh - 160px);
+    background: #131722;
+    border: 1px solid #232b3c;
+    border-radius: 10px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
-export async function preloadRemainingChunks(currentGen) {
-    if (!stateManager.manifest || !stateManager.manifest.chunks) return;
-    const totalChunks = stateManager.manifest.chunks.length;
-
-    for (let i = 1; i < totalChunks; i++) {
-        if (currentGen !== stateManager.loadGeneration) break;
-
-        if (!stateManager.loadedChunkBitmaps[i] && !stateManager.chunkPixelData[i]) {
-            try {
-                await new Promise(r => setTimeout(r, 50));
-                if (currentGen !== stateManager.loadGeneration) break;
-
-                const bitmap = await loadChunkBitmap(i, currentGen);
-                if (currentGen === stateManager.loadGeneration) {
-                    if (customShaderLayer) {
-                        customShaderLayer.preloadChunkTexture(i, bitmap);
-                    }
-                }
-                updateSliderTrackAndBounds();
-            } catch (err) {
-                if (err.name === 'AbortError') break;
-                if (err.message !== "Load cancelled") {
-                    console.warn(`Preload chunk ${i} skipped:`, err);
-                }
-                continue;
-            }
-        }
-    }
+.storm-volume-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-async function loadInitialModelData() {
-    const thisGen = stateManager.loadGeneration;
-    try {
-        const preferences = getViewerPreferences();
-
-        if (isFirstLoad) {
-            stateManager.activeModel = 'ecmwf';
-            stateManager.activeParam = '2t';
-            isFirstLoad = false;
-
-            try {
-                const resp = await fetch('./config/models.json');
-                if (resp.ok) {
-                    const data = await resp.json();
-                    stateManager.paramConfig = data.parameters['2t'];
-                    stateManager.activeShader = stateManager.paramConfig.shader || 'precip';
-                }
-            } catch(e) {}
-
-            const paramBtn = document.getElementById('btn-param-menu');
-            if (paramBtn) {
-                const pSpan = paramBtn.querySelector('span');
-                if (pSpan) pSpan.textContent = '2m Temperature';
-            }
-            const modelBtn = document.getElementById('btn-model-menu');
-            if (modelBtn) {
-                const mSpan = modelBtn.querySelector('span');
-                if (mSpan) mSpan.textContent = 'ECMWF-IFS';
-            }
-        } else {
-            if (preferences.model) stateManager.activeModel = preferences.model;
-            if (preferences.param) stateManager.activeParam = preferences.param;
-        }
-
-        await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
-        initLayer();
-        try { initVectorContours(map); } catch (e) {}
-        syncModelRunDropdown();
-
-        if (stateManager.manifest && stateManager.manifest.chunks) {
-            const bitmap0 = await loadChunkBitmap(0, thisGen);
-            if (customShaderLayer && thisGen === stateManager.loadGeneration) {
-                customShaderLayer.preloadChunkTexture(0, bitmap0);
-            }
-
-            syncTimelineWithManifest();
-            const savedStep = Number.isInteger(preferences?.modelStep)
-                ? Math.min(preferences.modelStep, stateManager.globalSteps.length - 1)
-                : 0;
-            setStepIndex(Math.max(0, savedStep));
-            await renderFrame(Math.max(0, savedStep));
-            hideToast();
-
-            preloadRemainingChunks(thisGen).then(() => {
-                if (thisGen === stateManager.loadGeneration) {
-                    preloadAllContours(thisGen);
-                }
-            });
-        }
-    } catch (err) {
-        if (err.message !== "Load cancelled") {
-            showToast('❌ ' + err.message);
-        }
-    }
+#storm-volume-title {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    color: #93c5fd;
 }
 
-export async function switchAppMode(targetMode) {
-    stateManager.activeMode = targetMode;
-    console.log(`[App] Switching app mode to: ${targetMode}`);
-
-    syncEnsembleGrid();
-
-    updateModeNavigation(targetMode);
-    unloadActiveViewer();
-
-    const radarTools = document.getElementById('radar-tools-container');
-    const timeline = document.getElementById('timeline-container');
-    if (radarTools) {
-        radarTools.style.display = (targetMode === 'radar') ? 'flex' : 'none';
-    }
-    if (timeline) timeline.style.display = 'flex';
-
-    const modelBtn = document.getElementById('btn-model-menu');
-    const paramBtn = document.getElementById('btn-param-menu');
-    const modelBar = document.getElementById('model-category-bar');
-    const paramBar = document.getElementById('param-category-bar');
-
-    if (modelBar) modelBar.style.display = 'none';
-    if (paramBar) paramBar.style.display = 'none';
-    if (modelBtn) modelBtn.classList.remove('active', 'open');
-    if (paramBtn) paramBtn.classList.remove('active', 'open');
-
-    const desktopCats = document.getElementById('desktop-param-categories');
-    if (desktopCats) {
-        desktopCats.style.display = (targetMode === 'modelViewer' && window.innerWidth >= 1024) ? 'flex' : 'none';
-    }
-
-    if (targetMode === 'satellite' || targetMode === 'tropics') {
-        if (timeline) timeline.style.display = 'none';
-        if (radarTools) radarTools.style.display = 'none';
-        if (modelBtn) modelBtn.style.display = 'none';
-        if (paramBtn) modelBtn.style.display = 'none';
-        showComingSoonScreen(targetMode);
-        return;
-    }
-
-    if (modelBtn) modelBtn.style.display = '';
-    if (paramBtn) {
-        paramBtn.style.display = (targetMode === 'modelViewer' && window.innerWidth >= 1024) ? 'none' : '';
-    }
-    hideComingSoonScreen();
-
-    if (targetMode === 'radar') {
-        showToast("Loading Real-Time Radar...");
-        if (modelBtn) modelBtn.querySelector('span').textContent = 'NEXRAD Composite';
-        if (paramBtn) paramBtn.querySelector('span').textContent = 'Base Reflectivity (dBZ)';
-        
-        destroyCityOverlay();
-
-        if (stateManager.currentMapStyle !== './config/style_radar.json') {
-            stateManager.currentMapStyle = './config/style_radar.json';
-            
-            let loaded = false;
-            const onReady = async () => {
-                if (loaded) return;
-                loaded = true;
-                applyRadarTheme(stateManager.currentTheme);
-                setBasemapLabelsVisibility(map, true);
-                await initRadarMode(map);
-                hideToast();
-            };
-
-            map.once('style.load', onReady);
-            setTimeout(onReady, 2000);
-            map.setStyle('./config/style_radar.json');
-        } else {
-            applyRadarTheme(stateManager.currentTheme);
-            setBasemapLabelsVisibility(map, true);
-            await initRadarMode(map);
-            hideToast();
-        }
-
-    } else if (targetMode === 'modelViewer') {
-        showToast("Loading Global Models...");
-        
-        if (modelBtn) {
-            const mSpan = modelBtn.querySelector('span');
-            if (mSpan) {
-                if (stateManager.activeModel === 'hrrr') mSpan.textContent = 'HRRR';
-                else if (stateManager.activeModel === 'rrfs') mSpan.textContent = 'RRFS';
-                else if (stateManager.activeModel === 'aifs') mSpan.textContent = 'EC-AIFS';
-                else if (isEnsembleRangeModel()) mSpan.textContent = 'AIFS-ENS';
-                else mSpan.textContent = 'ECMWF-IFS';
-            }
-        }
-        if (paramBtn) paramBtn.querySelector('span').textContent = stateManager.paramConfig?.name || '2m Temperature';
-
-        setBasemapLabelsVisibility(map, false);
-        if (map && map.getZoom() > 6) {
-            map.easeTo({
-                center: [-96.5, 38.5],
-                zoom: (typeof window !== 'undefined' && window.innerWidth < 768) ? 3.2 : 3.8,
-                duration: 600
-            });
-        }
-
-        const targetStyle = stateManager.currentTheme === 'dark'
-            ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
-            : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
-
-        if (stateManager.currentMapStyle !== targetStyle) {
-            stateManager.currentMapStyle = targetStyle;
-            
-            let loaded = false;
-            const onReady = async () => {
-                if (loaded) return;
-                loaded = true;
-
-                if (typeof map.setProjection === 'function') {
-                    map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
-                }
-
-                try { initCityOverlay(map); } catch (e) {}
-                try { initVectorContours(map); } catch (e) {}
-                await loadInitialModelData();
-                hideToast();
-            };
-
-            map.once('style.load', onReady);
-            setTimeout(onReady, 2000);
-            map.setStyle(targetStyle);
-        } else {
-            if (typeof map.setProjection === 'function') {
-                map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
-            }
-
-            try { initCityOverlay(map); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
-            await loadInitialModelData();
-            hideToast();
-        }
-    }
+.close-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    border-radius: 6px;
 }
 
-initHubTransition((selectedMode) => {
-    switchAppMode(selectedMode);
-});
+#storm-volume-canvas-container {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
 
-document.querySelectorAll('.mode-nav-btn').forEach((button) => {
-    button.addEventListener('click', () => switchAppMode(button.dataset.mode));
-});
+#storm-volume-canvas-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+}
 
-initViewerUI(
-    (stepIndex) => {
-        if (renderDebounceId) cancelAnimationFrame(renderDebounceId);
-        renderDebounceId = requestAnimationFrame(() => renderFrame(stepIndex));
-    },
-    (newTheme) => { applyTheme(newTheme); },
-    (newView) => { applyView(newView); },
-    (direction, x, y) => { handleKeyboardZoom(direction, x, y); },
-    map,
-    () => {
-        updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
-        updateRadarUnitLabels();
-        const currentStep = stateManager.globalSteps[stateManager.currentStepIndex]?.step;
-        if (currentStep !== undefined) updateVectorContours(currentStep);
-        const location = popup.getLngLat();
-        if (popup.isOpen() && location && stateManager.activeFrameState && stateManager.activeMode !== 'radar') {
-            const value = sampleBilinearValue(location.lng, location.lat, stateManager.activeFrameState, stateManager.manifest);
-            const formattedText = formatParameterValue(value, stateManager.manifest);
-            const paramName = stateManager.manifest?.name || stateManager.manifest?.parameter || 'Value';
-            popup.setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`);
-        }
+/* Altitude Height Reference Ticks */
+#storm-altitude-scale {
+    position: absolute;
+    left: 12px;
+    bottom: 20px;
+    top: 55px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 10;
+}
+
+#storm-altitude-scale span {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    color: rgba(148, 163, 184, 0.85);
+    text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+    letter-spacing: 0.5px;
+}
+
+/* ==========================================
+   3D GLOBE CINEMATIC DEEP SPACE (NO NEBULA)
+   ========================================== */
+body.globe-view,
+body.globe-view #map {
+    background-color: #02040a !important;
+}
+
+body.globe-view #map {
+    background-repeat: no-repeat;
+    background-size: 100vw 100vh;
+    background-image:
+        /* Primary Bright Pinpricks */
+        radial-gradient(1.2px 1.2px at 12% 18%, #ffffff 100%, transparent),
+        radial-gradient(1.2px 1.2px at 78% 12%, #ffffff 100%, transparent),
+        radial-gradient(1.2px 1.2px at 88% 72%, #ffffff 100%, transparent),
+        radial-gradient(1.2px 1.2px at 24% 82%, #bae6fd 100%, transparent),
+        radial-gradient(1.0px 1.0px at 45% 25%, #ffffff 100%, transparent),
+        radial-gradient(1.0px 1.0px at 68% 40%, #ffffff 100%, transparent),
+        radial-gradient(1.0px 1.0px at 15% 55%, #bae6fd 100%, transparent),
+        radial-gradient(1.0px 1.0px at 82% 90%, #ffffff 100%, transparent),
+        /* Mid-Magnitude Stars */
+        radial-gradient(0.8px 0.8px at 8% 8%, rgba(255,255,255,0.7) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 32% 14%, rgba(255,255,255,0.65) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 58% 8%, rgba(255,255,255,0.75) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 92% 28%, rgba(255,255,255,0.7) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 5% 35%, rgba(255,255,255,0.6) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 28% 48%, rgba(255,255,255,0.65) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 75% 58%, rgba(255,255,255,0.7) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 95% 65%, rgba(255,255,255,0.65) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 18% 70%, rgba(255,255,255,0.6) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 38% 88%, rgba(255,255,255,0.7) 100%, transparent),
+        radial-gradient(0.8px 0.8px at 62% 82%, rgba(255,255,255,0.65) 100%, transparent),
+        /* Faint Micro-Star Dust */
+        radial-gradient(0.5px 0.5px at 14% 30%, rgba(255,255,255,0.4) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 22% 22%, rgba(255,255,255,0.35) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 40% 10%, rgba(255,255,255,0.45) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 52% 18%, rgba(255,255,255,0.4) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 65% 22%, rgba(255,255,255,0.35) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 85% 15%, rgba(255,255,255,0.45) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 90% 45%, rgba(255,255,255,0.4) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 80% 68%, rgba(255,255,255,0.35) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 70% 92%, rgba(255,255,255,0.45) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 48% 95%, rgba(255,255,255,0.4) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 30% 75%, rgba(255,255,255,0.35) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 10% 85%, rgba(255,255,255,0.45) 100%, transparent),
+        radial-gradient(0.5px 0.5px at 3% 62%, rgba(255,255,255,0.4) 100%, transparent);
+}
+
+/* ==========================================
+   ENSEMBLE 10-MAP GRID & SINGLE WEBGL CANVAS
+   ========================================== */
+#ensemble-canvas {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    right: 0;
+    bottom: 50px;
+    width: 100%;
+    z-index: 4;    /* sits directly behind #ensemble-grid (z-index: 5) */
+    pointer-events: none;
+    display: none;
+}
+
+#ensemble-grid {
+    position: absolute;
+    top: 50px;     /* below #top-nav */
+    left: 0;
+    right: 0;
+    bottom: 50px;  /* above desktop #timeline-container */
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 6px;
+    padding: 6px;
+    box-sizing: border-box;
+    background: #000000;
+    z-index: 5;    /* above #ensemble-canvas (4), below #timeline (10) and #top-nav (30) */
+    pointer-events: none; /* lets pan/zoom events reach the master map behind */
+}
+
+#ensemble-grid.is-expanded {
+    display: block;
+}
+
+body.light-mode #ensemble-grid {
+    background: #ffffff;
+}
+
+.map-card {
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    background: #000000;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.map-card.is-expanded {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    bottom: 6px;
+    left: 6px;
+}
+
+.map-card.is-collapsed {
+    display: none;
+}
+
+body.light-mode .map-card {
+    border-color: rgba(0, 0, 0, 0.18);
+    background: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.map-card::before {
+    content: attr(data-member);
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    padding: 3px 6px;
+    color: #ffffff;
+    background: rgba(0, 0, 0, 0.58);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 2px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
+}
+
+.ensemble-expand-btn {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    z-index: 3;
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    color: #ffffff;
+    background: rgba(0, 0, 0, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.ensemble-expand-btn:hover,
+.ensemble-expand-btn:focus-visible {
+    background: rgba(0, 0, 0, 0.82);
+    outline: 2px solid rgba(255, 255, 255, 0.8);
+    outline-offset: 1px;
+}
+
+@media (max-width: 1023px) {
+    #ensemble-canvas,
+    #ensemble-grid {
+        bottom: 84px; /* matches the taller mobile #timeline-container */
     }
-);
 
-map.on('error', (e) => {
-    console.warn("MapLibre Basemap load warning:", e);
-});
-
-map.on('load', async () => {
-    stateManager.currentMapStyle = './config/style_default.json';
-    setBasemapLabelsVisibility(map, false);
-    initBasemapMap();
-    initWeatherMap();
-    initAtmosphereHaloCanvas();
-    try { initVectorContours(map); } catch (err) {}
-    
-    // 🌟 Cache basemap layer IDs for single-pass viewport mode
-    basemapLayerIds = (map.getStyle().layers || [])
-        .map(l => l.id)
-        .filter(id => id !== 'weather-gpu-shader' && id !== 'contour-gpu-layer' && id !== 'contour-master-label-layer');
-});
-
-map.on('style.load', () => {
-    if (basemapMap && stateManager.currentMapStyle) {
-        updateBasemapMapStyle(stateManager.currentMapStyle);
+    #ensemble-grid {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(5, 1fr);
     }
-});
-
-let liveRenderQueued = false;
-map.on('move', () => {
-    syncBasemapMapCamera();
-    if (!isDrawingEnsemble) return;
-    isBasemapCaptured = false;
-    if (!liveRenderQueued) {
-        liveRenderQueued = true;
-        requestAnimationFrame(() => { liveRenderQueued = false; renderAllEnsembleMembers(); });
-    }
-});
-
-map.on('render', () => {
-    if (!isDrawingEnsemble || isRenderingEnsemble) return;
-
-    if (map.isMoving()) {
-        isBasemapCaptured = false; // 🌟 Force a fresh clean snapshot next time we stop
-    }
-});
-
-map.on('moveend', () => {
-    if (isDrawingEnsemble) {
-        updateCachedDimensions();
-        renderAllEnsembleMembers();
-    }
-});
-
-map.on('click', (e) => {
-    if (stateManager.activeMode === 'radar') return;
-    if (!stateManager.manifest || !stateManager.activeFrameState) return;
-
-    const decodedVal = sampleBilinearValue(e.lngLat.lng, e.lngLat.lat, stateManager.activeFrameState, stateManager.manifest);
-    const formattedText = formatParameterValue(decodedVal, stateManager.manifest);
-    const paramName = stateManager.manifest.name || stateManager.manifest.parameter || 'Value';
-
-    popup.setLngLat(e.lngLat)
-         .setHTML(`<div class="temp-f">${formattedText}</div><div class="temp-c">${paramName}</div>`)
-         .addTo(map);
-});
+}
