@@ -454,21 +454,6 @@ async function renderEnsemblePanels() {
 
         const targetW = size.w;
         const targetH = size.h;
-        const srcAspect = mapCanvas.width / mapCanvas.height;
-        const dstAspect = targetW / targetH;
-        let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
-        if (srcAspect > dstAspect) {
-            sWidth = mapCanvas.height * dstAspect;
-            sx = (mapCanvas.width - sWidth) / 2;
-        } else {
-            sHeight = mapCanvas.width / dstAspect;
-            sy = (mapCanvas.height - sHeight) / 2;
-        }
-
-            if (!isBasemapCaptured) {
-                await captureBasemap();
-            }
-
         const mapRect = mapCanvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const rects = cards.map(item => {
@@ -495,9 +480,7 @@ async function renderEnsemblePanels() {
                 item.canvas.width = targetW;
                 item.canvas.height = targetH;
             }
-            if (staticBasemapCanvas) {
-                item.ctx.drawImage(staticBasemapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-            }
+            item.ctx.clearRect(0, 0, targetW, targetH);
             const sourceY = panelCanvas.height - rect.y - rect.h;
             item.ctx.drawImage(panelCanvas, rect.x, sourceY, rect.w, rect.h, 0, 0, targetW, targetH);
         });
