@@ -1465,6 +1465,10 @@ body.light-mode .map-card {
     outline-offset: 1px;
 }
 
+body.ensemble-expanded .maplibregl-marker {
+    z-index: 10 !important;
+}
+
 @media (max-width: 1023px) {
     #ensemble-canvas,
     #ensemble-grid {

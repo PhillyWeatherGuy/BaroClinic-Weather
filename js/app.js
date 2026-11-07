@@ -410,6 +410,15 @@ function reduceEnsembleChunkToMember(chunkIndex, memberIndex) {
     const volume = stateManager.loadedChunkBitmaps[chunkIndex];
     if (!volume?.isEnsemble || !Array.isArray(volume.frames) || reducedEnsembleChunks.has(String(chunkIndex))) return;
 
+    const rawData = stateManager.chunkPixelData[chunkIndex];
+    const chunkManifest = stateManager.manifest?.chunks?.[chunkIndex];
+    if (rawData instanceof Uint8Array) {
+        const memberCount = stateManager.manifest?.members || 10;
+        const memberSize = chunkManifest?.member_size_bytes || Math.floor(rawData.byteLength / memberCount);
+        const memberStart = memberIndex * memberSize;
+        stateManager.chunkPixelData[chunkIndex] = rawData.slice(memberStart, memberStart + memberSize);
+    }
+
     volume.frames = volume.frames.map(frame => {
         if (!Array.isArray(frame)) return frame;
         const selected = frame[memberIndex];
@@ -461,8 +470,18 @@ function setExpandedEnsembleMember(memberIndex = null) {
 
     if (expandedEnsembleMember !== null) {
         unloadOtherEnsembleMembers(expandedEnsembleMember);
+        document.body.classList.add('ensemble-expanded');
+        setBasemapLabelsVisibility(map, true);
+        initCityOverlay(map).then(() => {
+            if (expandedEnsembleMember !== null) {
+                setBasemapLabelsVisibility(map, true);
+                updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
+            }
+        }).catch(() => {});
     } else {
         restoreEnsembleMembers();
+        document.body.classList.remove('ensemble-expanded');
+        destroyCityOverlay();
     }
     grid.querySelectorAll('.map-card').forEach((card, index) => {
         const isExpanded = expandedEnsembleMember === index;
@@ -701,7 +720,7 @@ export async function renderAllEnsembleMembers() {
 
         // Assemble the frozen basemap and the matching scissored member into each card.
         const isExpanded = expandedEnsembleMember !== null;
-        const linesCanvas = isExpanded ? null : (renderLinesMap() || staticOverlayCanvas);
+        const linesCanvas = renderLinesMap() || staticOverlayCanvas;
         cardList.forEach((item, memberIndex) => {
             if (isExpanded && memberIndex !== expandedEnsembleMember) return;
 
@@ -717,10 +736,11 @@ export async function renderAllEnsembleMembers() {
             const weatherW = box?.w || weatherCanvas.width;
             const weatherH = box?.h || weatherCanvas.height;
 
-            // Expanded mode leaves the canvas transparent so the live standard basemap shows through.
-            if (!isExpanded && staticBasemapCanvas) {
+            // Expanded mode uses the live map canvas as the normal basemap beneath the weather.
+            const baseCanvas = isExpanded ? mapCanvas : staticBasemapCanvas;
+            if (baseCanvas) {
                 item.ctx.drawImage(
-                    staticBasemapCanvas, 
+                    baseCanvas,
                     sx, sy, sWidth, sHeight, 
                     0, 0, targetW, targetH
                 );
