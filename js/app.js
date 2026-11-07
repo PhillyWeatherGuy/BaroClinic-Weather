@@ -414,6 +414,7 @@ function setExpandedEnsembleMember(memberIndex = null) {
 
     grid.classList.toggle('is-expanded', expandedEnsembleMember !== null);
     grid.style.display = expandedEnsembleMember === null ? 'grid' : 'block';
+    setBasemapLabelsVisibility(map, expandedEnsembleMember === null ? false : true);
     grid.querySelectorAll('.map-card').forEach((card, index) => {
         const isExpanded = expandedEnsembleMember === index;
         card.classList.toggle('is-expanded', isExpanded);
@@ -646,8 +647,11 @@ export async function renderAllEnsembleMembers() {
         customShaderLayer.setGridMode(false, null);
 
         // Assemble the frozen basemap and the matching scissored member into each card.
-        const linesCanvas = renderLinesMap() || staticOverlayCanvas;
+        const isExpanded = expandedEnsembleMember !== null;
+        const linesCanvas = isExpanded ? null : (renderLinesMap() || staticOverlayCanvas);
         cardList.forEach((item, memberIndex) => {
+            if (isExpanded && memberIndex !== expandedEnsembleMember) return;
+
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
                 cvs.width = targetW;
@@ -660,8 +664,8 @@ export async function renderAllEnsembleMembers() {
             const weatherW = box?.w || weatherCanvas.width;
             const weatherH = box?.h || weatherCanvas.height;
 
-            // Draw crisp frozen basemap background
-            if (staticBasemapCanvas) {
+            // Expanded mode leaves the canvas transparent so the live standard basemap shows through.
+            if (!isExpanded && staticBasemapCanvas) {
                 item.ctx.drawImage(
                     staticBasemapCanvas, 
                     sx, sy, sWidth, sHeight, 
@@ -695,6 +699,7 @@ function syncEnsembleGrid() {
     if (!shouldShow && expandedEnsembleMember !== null) {
         expandedEnsembleMember = null;
         grid.classList.remove('is-expanded');
+        setBasemapLabelsVisibility(map, false);
     }
     grid.style.display = shouldShow ? (expandedEnsembleMember === null ? 'grid' : 'block') : 'none';
     
