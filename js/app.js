@@ -29,7 +29,7 @@ import {
     setBasemapLabelsVisibility 
 } from './layers/cityOverlay.js'; 
 import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember } from './layers/vectorContours.js';
-import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint } from './layers/polarMap.js';
+import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setHemisphere } from './layers/polarMap.js';
 
 // 🛰️ Real-Time Radar Engine
 import { initRadarMode, destroyRadarMode, updateRadarUnitLabels } from './components/radarUI.js';
@@ -772,7 +772,7 @@ export function updateBasemapStyle(styleUrl) {
         console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
         if (typeof map.setProjection === 'function') {
-            map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
+            map.setProjection({ type: 'mercator' });
         }
 
         if (stateManager.activeMode === 'radar') {
@@ -877,13 +877,13 @@ export function applyView(targetView) {
     document.body.classList.toggle('globe-view', targetView === '3d');
     if (!haloCanvas) initAtmosphereHaloCanvas();
     if (haloCanvas) {
-        haloCanvas.style.display = targetView === '3d' ? 'block' : 'none';
+        haloCanvas.style.display = 'none';
         if (targetView !== '3d' && haloCtx) {
             haloCtx.clearRect(0, 0, haloCanvas.width, haloCanvas.height);
         }
     }
 
-    if (targetView === '2d' || targetView === '3d') {
+    if (targetView === '2d') {
         hidePolarMap();
         clearPolarTextures();
 
@@ -895,7 +895,7 @@ export function applyView(targetView) {
 
         if (map) {
             if (typeof map.setProjection === 'function') {
-                map.setProjection({ type: targetView === '3d' ? 'globe' : 'mercator' });
+                map.setProjection({ type: 'mercator' });
             }
             map.resize();
             if (basemapMap) basemapMap.resize();
@@ -909,7 +909,7 @@ export function applyView(targetView) {
                 updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
             }
         }
-    } else if (targetView === 'polar') {
+    } else if (targetView === '3d' || targetView === 'polar') {
         const mapDiv = document.getElementById('map');
         if (mapDiv) mapDiv.style.display = 'none';
 
@@ -925,6 +925,10 @@ export function applyView(targetView) {
 
         showPolarMap();
 
+        if (targetView === '3d') {
+            setHemisphere('north');
+        }
+
         if (stateManager.activeFrameState) {
             updatePolarFrame(stateManager.activeFrameState);
         }
@@ -937,7 +941,7 @@ export function applyView(targetView) {
 export function handleKeyboardZoom(direction, x, y) {
     const activeView = stateManager.activeView || '2d';
 
-    if ((activeView === '2d' || activeView === '3d') && map) {
+    if (activeView === '2d' && map) {
         const targetLngLat = map.unproject([x, y]);
         const deltaZoom = direction > 0 ? 0.65 : -0.65;
         map.easeTo({
@@ -945,7 +949,7 @@ export function handleKeyboardZoom(direction, x, y) {
             around: targetLngLat,
             duration: 150
         });
-    } else if (activeView === 'polar' && polarMapLoaded) {
+    } else if ((activeView === '3d' || activeView === 'polar') && polarMapLoaded) {
         if (typeof zoomPolarAtPoint === 'function') {
             zoomPolarAtPoint(direction, x, y);
         }
@@ -1137,7 +1141,7 @@ async function renderFrame(globalIdx) {
         if (customShaderLayer) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
         }
-    } else if (activeView === 'polar' && polarMapLoaded) {
+    } else if ((activeView === '3d' || activeView === 'polar') && polarMapLoaded) {
         updatePolarFrame(stateManager.activeFrameState);
     }
 
@@ -1356,7 +1360,7 @@ export async function switchAppMode(targetMode) {
                 loaded = true;
 
                 if (typeof map.setProjection === 'function') {
-                    map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
+                    map.setProjection({ type: 'mercator' });
                 }
 
                 try { initCityOverlay(map); } catch (e) {}
@@ -1370,7 +1374,7 @@ export async function switchAppMode(targetMode) {
             map.setStyle(targetStyle);
         } else {
             if (typeof map.setProjection === 'function') {
-                map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
+                map.setProjection({ type: 'mercator' });
             }
 
             try { initCityOverlay(map); } catch (e) {}
