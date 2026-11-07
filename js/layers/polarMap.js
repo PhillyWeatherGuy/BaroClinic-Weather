@@ -1,5 +1,5 @@
 // js/layers/polarMap.js
-import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE } from '../config/palettes.js';
+import { getPaletteForParameter as getLightPalette, TEMP_PALETTE, PRECIP_PALETTE, FRZR_PALETTE, SLEET_PALETTE, SNOW_PALETTE } from '../config/palettes.js';
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { stateManager } from '../core/stateManager.js';
 
@@ -12,6 +12,7 @@ const STATE_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vec
 const COUNTY_BORDERS_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_2_counties.geojson';
 
 let scene, camera, renderer, polarGroup, polarMesh, material, paletteTex;
+let frzrPaletteTex, sleetPaletteTex, snowPaletteTex;
 let oceanMesh = null, landMesh = null, lakesMesh = null;
 let polarChunkTextures = {};
 let isPolarActive = false;
@@ -225,9 +226,13 @@ const fsPolar = `
     precision highp float;
     uniform sampler2D u_dataTexture;
     uniform sampler2D u_paletteTexture;
+    uniform sampler2D u_frzrPalette;
+    uniform sampler2D u_sleetPalette;
+    uniform sampler2D u_snowPalette;
     uniform vec2 u_uvOffset;
     uniform vec2 u_uvScale;
     uniform float u_opacity;
+    uniform float u_hasPtype;
     uniform float u_centralLon;
     uniform float u_poleSign;
     uniform vec2 u_texResolution;
@@ -276,6 +281,41 @@ const fsPolar = `
         return clamp(total, 0.0, 1.0);
     }
 
+    vec4 sampleSmoothPtypeColor(sampler2D ptypeTex, vec2 uv, vec2 texRes, float palU) {
+        vec2 pos = uv * texRes - 0.5;
+        vec2 i = floor(pos);
+        vec2 f = fract(pos);
+        vec2 invTex = 1.0 / texRes;
+        const float invTwoSigmaSq = 0.378;
+        float wSnow = 0.0;
+        float wFrzr = 0.0;
+        float wSleet = 0.0;
+        float wRain = 0.0;
+
+        for (int dy = -2; dy <= 2; dy++) {
+            float dyf = float(dy) - f.y;
+            float weightY = exp(-dyf * dyf * invTwoSigmaSq);
+            float yCoord = clamp((i.y + float(dy) + 0.5) * invTex.y, 0.0, 1.0);
+            for (int dx = -2; dx <= 2; dx++) {
+                float dxf = float(dx) - f.x;
+                float weight = weightY * exp(-dxf * dxf * invTwoSigmaSq);
+                float xCoord = fract((i.x + float(dx) + 0.5) * invTex.x + 1.0);
+                float code = floor(texture2D(ptypeTex, vec2(xCoord, yCoord)).g * 255.0 + 0.5);
+
+                if (code == 5.0 || code == 6.0 || code == 9.0 || code == 10.0) wSnow += weight;
+                else if (code == 3.0 || code == 4.0 || code == 12.0) wFrzr += weight;
+                else if (code == 7.0 || code == 8.0) wSleet += weight;
+                else if (code > 0.5) wRain += weight;
+            }
+        }
+
+        float maxWeight = max(max(wSnow, wFrzr), max(wSleet, wRain));
+        if (maxWeight == wFrzr) return texture2D(u_frzrPalette, vec2(palU, 0.5));
+        if (maxWeight == wSleet) return texture2D(u_sleetPalette, vec2(palU, 0.5));
+        if (maxWeight == wSnow) return texture2D(u_snowPalette, vec2(palU, 0.5));
+        return texture2D(u_paletteTexture, vec2(palU, 0.5));
+    }
+
     void main() {
         float r = length(v_pos);
 
@@ -308,7 +348,9 @@ const fsPolar = `
 
         float palIndex = clamp(rawVal * 255.0, 0.0, 255.0);
         float palU = (palIndex + 0.5) / 256.0;
-        vec4 color = texture2D(u_paletteTexture, vec2(palU, 0.5));
+        vec4 color = u_hasPtype > 0.5
+            ? sampleSmoothPtypeColor(u_dataTexture, sprite_uv, u_texResolution, palU)
+            : texture2D(u_paletteTexture, vec2(palU, 0.5));
 
         if (color.a == 0.0) {
             discard;
@@ -1068,6 +1110,9 @@ export function initPolarMap() {
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     const initialPalette = paletteFunc(stateManager.activeParam || '2t');
     paletteTex = createPaletteTexture(initialPalette);
+    frzrPaletteTex = createPaletteTexture(FRZR_PALETTE, true);
+    sleetPaletteTex = createPaletteTexture(SLEET_PALETTE, true);
+    snowPaletteTex = createPaletteTexture(SNOW_PALETTE, true);
 
     material = new THREE.ShaderMaterial({
         vertexShader: vsPolar,
@@ -1075,9 +1120,13 @@ export function initPolarMap() {
         uniforms: {
             u_dataTexture: { value: null },
             u_paletteTexture: { value: paletteTex },
+            u_frzrPalette: { value: frzrPaletteTex },
+            u_sleetPalette: { value: sleetPaletteTex },
+            u_snowPalette: { value: snowPaletteTex },
             u_uvOffset: { value: new THREE.Vector2(0, 0) },
             u_uvScale: { value: new THREE.Vector2(1, 1) },
             u_opacity: { value: 1 },
+            u_hasPtype: { value: 0 },
             u_centralLon: { value: NORTH_CENTRAL_LON },
             u_poleSign: { value: 1.0 },
             u_texResolution: { value: new THREE.Vector2(2880.0, 1442.0) }
@@ -1124,6 +1173,9 @@ export function updatePolarPalette(paramIdOrHexArray) {
     }
     paletteTex = createPaletteTexture(hexArray);
     material.uniforms.u_paletteTexture.value = paletteTex;
+    material.uniforms.u_frzrPalette.value = frzrPaletteTex;
+    material.uniforms.u_sleetPalette.value = sleetPaletteTex;
+    material.uniforms.u_snowPalette.value = snowPaletteTex;
     material.needsUpdate = true;
 
     const themeKey = (stateManager.currentTheme === 'dark') ? 'dark' : 'light';
@@ -1167,6 +1219,11 @@ export function updatePolarFrame(frameState) {
     }
 
     material.uniforms.u_dataTexture.value = polarChunkTextures[frameKey];
+    const chunkManifest = stateManager.manifest?.chunks?.[cIdx];
+    material.uniforms.u_hasPtype.value = (
+        stateManager.activeShader === 'precipType' ||
+        (stateManager.activeParam === 'prate' && Boolean(chunkManifest?.ptype_file))
+    ) ? 1 : 0;
     material.uniforms.u_uvOffset.value.set(frameState.uvOffset[0], frameState.uvOffset[1]);
     material.uniforms.u_uvScale.value.set(frameState.uvScale[0], frameState.uvScale[1]);
     
