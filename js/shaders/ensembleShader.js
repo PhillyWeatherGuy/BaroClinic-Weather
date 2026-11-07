@@ -234,6 +234,7 @@ export function createEnsembleShaderLayer(mapInstance) {
         currentFrameState: null,
         isGridMode: false,
         gridRects: null,
+        gridSourceRect: null,
         texResolution: [1440.0, 721.0],
         programs: {},
         vertexCount: 0,
@@ -308,6 +309,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 in vec2 a_pos;
                 in vec2 a_uv;
                 out vec2 v_uv;
+                uniform vec4 u_grid_transform;
 
                 void main() {
                     v_uv = a_uv;
@@ -337,6 +339,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                         gl_Position = projectTile(a_pos);
                     }
                     `}
+                    gl_Position.xy = gl_Position.xy * u_grid_transform.xy + u_grid_transform.zw;
                 }
                 `;
 
@@ -392,6 +395,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 attribute vec2 a_pos;
                 attribute vec2 a_uv;
                 varying vec2 v_uv;
+                uniform vec4 u_grid_transform;
                 uniform mat4 u_matrix;
 
                 void main() {
@@ -401,6 +405,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                     } else {
                         gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
                     }
+                    gl_Position.xy = gl_Position.xy * u_grid_transform.xy + u_grid_transform.zw;
                 }
                 `;
 
@@ -572,9 +577,10 @@ export function createEnsembleShaderLayer(mapInstance) {
             }
         },
 
-        setGridMode: function(enabled, rects = null) {
+        setGridMode: function(enabled, rects = null, sourceRect = null) {
             this.isGridMode = enabled;
             this.gridRects = rects;
+            this.gridSourceRect = sourceRect;
             mapInstance.triggerRepaint();
         },
 
@@ -674,6 +680,20 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
             gl.enable(gl.SCISSOR_TEST);
 
+            const sourceRect = this.gridSourceRect;
+            const sourceW = sourceRect?.w || gl.drawingBufferWidth;
+            const sourceH = sourceRect?.h || gl.drawingBufferHeight;
+            const canvasW = sourceRect?.canvasW || gl.drawingBufferWidth;
+            const canvasH = sourceRect?.canvasH || gl.drawingBufferHeight;
+            const sourceX = sourceRect?.x || 0;
+            const sourceY = sourceRect?.y || 0;
+            const gridTransform = [
+                canvasW / sourceW,
+                canvasH / sourceH,
+                canvasW / sourceW - (2.0 * sourceX / sourceW) - 1.0,
+                1.0 - canvasH / sourceH + (2.0 * sourceY / sourceH)
+            ];
+
             for (let m = 0; m < 10; m++) {
                 const rect = boxRects[m];
                 if (!rect || rect.w <= 0 || rect.h <= 0) continue;
@@ -687,6 +707,10 @@ export function createEnsembleShaderLayer(mapInstance) {
                 gl.activeTexture(gl.TEXTURE0);
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.uniform1i(gl.getUniformLocation(program, 'u_dataTexture'), 0);
+                gl.uniform4f(
+                    gl.getUniformLocation(program, 'u_grid_transform'),
+                    gridTransform[0], gridTransform[1], gridTransform[2], gridTransform[3]
+                );
 
                 gl.drawArrays(gl.TRIANGLES, 0, this.vertexCount);
             }
@@ -714,6 +738,7 @@ export function createEnsembleShaderLayer(mapInstance) {
             if (!program) return;
 
             gl.useProgram(program);
+            gl.uniform4f(gl.getUniformLocation(program, 'u_grid_transform'), 1.0, 1.0, 0.0, 0.0);
             
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, this.activeTex);

@@ -347,7 +347,14 @@ export async function renderAllEnsembleMembers() {
         });
 
         // Render all ten members in one MapLibre pass, one texture per scissored card.
-        customShaderLayer.setGridMode(true, boxRects);
+        customShaderLayer.setGridMode(true, boxRects, {
+            x: sx,
+            y: sy,
+            w: sWidth,
+            h: sHeight,
+            canvasW: mapCanvas.width,
+            canvasH: mapCanvas.height
+        });
         if (typeof map._render === 'function') {
             map._render();
         }
