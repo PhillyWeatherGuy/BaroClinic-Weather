@@ -161,7 +161,7 @@ function themeContourFeatures(featureCollection, masterData) {
         const isW250 = (activeParam === 'w250' || activeParam === 'z250');
 
         const contourColor = isW250
-            ? (isDarkTheme ? '#E0F2FE' : '#000000')
+            ? (isDarkTheme ? '#000000' : '#000000')
             : getPvaContourThemeColor();
 
         const glowColor = isW250
