@@ -1,5 +1,5 @@
 // js/shaders/hrrrShader.js
-// Native-grid HRRR layer: raw uint8 data in an R8 or RG8 texture with Bicubic B-Spline
+// Native-grid HRRR layer: raw uint8 data in an R8 or RG8 texture with Cell-Confined Bilinear
 // and 5x5 Isotropic Gaussian Curvature Filter interpolation.
 // Works in mercator (2D) and globe (3D) modes.
 import { getPaletteForParameter as getLightPalette } from '../config/palettes.js';
@@ -151,42 +151,24 @@ const FRAGMENT_BODY = `
 
     const float PI = 3.14159265358979;
 
-    // 🌟 Cubic B-Spline basis functions
-    vec4 cubicBSpline(float f) {
-        float f2 = f * f;
-        float f3 = f2 * f;
-        return vec4(
-            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
-            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
-            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
-            f3 / 6.0
-        );
-    }
-
-    // 🌟 16-tap bicubic B-spline sampling on the native Lambert grid (Intensity / dBZ)
-    float sampleSmoothSplineHRRR(sampler2D tex, vec2 gridPos, vec2 gridSize) {
+    // 🌟 Cell-Confined Bilinear Interpolation on the native Lambert grid
+    // Confined strictly to the 4 corners of the active grid cell
+    float sampleCellBilinearHRRR(sampler2D tex, vec2 gridPos, vec2 gridSize) {
         vec2 f = fract(gridPos);
         vec2 i = floor(gridPos);
-
-        vec4 wx = cubicBSpline(f.x);
-        vec4 wy = cubicBSpline(f.y);
-
         ivec2 maxCoord = ivec2(gridSize) - 1;
 
-        float total = 0.0;
-        for (int dy = -1; dy <= 2; dy++) {
-            int yCoord = clamp(int(i.y) + dy, 0, maxCoord.y);
-            
-            float rowVal = wx.x * texelFetch(tex, ivec2(clamp(int(i.x) - 1, 0, maxCoord.x), yCoord), 0).r +
-                           wx.y * texelFetch(tex, ivec2(clamp(int(i.x) + 0, 0, maxCoord.x), yCoord), 0).r +
-                           wx.z * texelFetch(tex, ivec2(clamp(int(i.x) + 1, 0, maxCoord.x), yCoord), 0).r +
-                           wx.w * texelFetch(tex, ivec2(clamp(int(i.x) + 2, 0, maxCoord.x), yCoord), 0).r;
+        int x0 = clamp(int(i.x), 0, maxCoord.x);
+        int x1 = clamp(int(i.x) + 1, 0, maxCoord.x);
+        int y0 = clamp(int(i.y), 0, maxCoord.y);
+        int y1 = clamp(int(i.y) + 1, 0, maxCoord.y);
 
-            float w_y = (dy == -1) ? wy.x : ((dy == 0) ? wy.y : ((dy == 1) ? wy.z : wy.w));
-            total += w_y * rowVal;
-        }
+        float v00 = texelFetch(tex, ivec2(x0, y0), 0).r;
+        float v10 = texelFetch(tex, ivec2(x1, y0), 0).r;
+        float v01 = texelFetch(tex, ivec2(x0, y1), 0).r;
+        float v11 = texelFetch(tex, ivec2(x1, y1), 0).r;
 
-        return clamp(total, 0.0, 1.0);
+        return mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y);
     }
 
     // 🌟 5x5 Isotropic Gaussian Curvature Filter (sigma = 1.15) for smooth natural p-type transitions
@@ -274,8 +256,8 @@ const FRAGMENT_BODY = `
             discard;
         }
 
-        // 🌟 Bicubic B-Spline smooth intensity / dBZ
-        float rawVal = sampleSmoothSplineHRRR(u_dataTexture, gridPos, u_gridSize);
+        // 🌟 Cell-Confined Bilinear smooth intensity / dBZ
+        float rawVal = sampleCellBilinearHRRR(u_dataTexture, gridPos, u_gridSize);
 
         if (rawVal < 0.00001) {
             discard;
