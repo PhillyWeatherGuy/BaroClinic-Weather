@@ -73,45 +73,27 @@ function createSubdividedGrid(minX = -1.0, maxX = 2.0, cols = 96, rows = 48) {
 }
 
 const fragmentShaderBody = `
-    vec4 cubicBSpline(float f) {
-        float f2 = f * f;
-        float f3 = f2 * f;
-        return vec4(
-            (1.0 - 3.0*f + 3.0*f2 - f3) / 6.0,
-            (4.0 - 6.0*f2 + 3.0*f3) / 6.0,
-            (1.0 + 3.0*f + 3.0*f2 - 3.0*f3) / 6.0,
-            f3 / 6.0
-        );
-    }
-
-    float sampleSmoothSpline(sampler2D tex, vec2 uv, vec2 texRes) {
+    // 🌟 Cell-Confined Bilinear Interpolation (Confined strictly to the 4 corners of the active grid cell)
+    // Prevents steep gradients (e.g. 15-20" snow 35 miles away) from artificially bleeding across boundaries.
+    float sampleCellBilinear(sampler2D tex, vec2 uv, vec2 texRes) {
         vec2 pos = uv * texRes - 0.5;
-        vec2 f = fract(pos);
         vec2 i = floor(pos);
-
-        vec4 wx = cubicBSpline(f.x);
-        vec4 wy = cubicBSpline(f.y);
+        vec2 f = fract(pos);
 
         vec2 invTex = 1.0 / texRes;
-        float x0 = (i.x - 0.5) * invTex.x;
-        float x1 = (i.x + 0.5) * invTex.x;
-        float x2 = (i.x + 1.5) * invTex.x;
-        float x3 = (i.x + 2.5) * invTex.x;
+        
+        // Cyclic longitude wrap on X, clamped latitude on Y
+        float x0 = fract((i.x + 0.5) * invTex.x);
+        float x1 = fract((i.x + 1.5) * invTex.x);
+        float y0 = clamp((i.y + 0.5) * invTex.y, 0.0, 1.0);
+        float y1 = clamp((i.y + 1.5) * invTex.y, 0.0, 1.0);
 
-        float total = 0.0;
-        for (int y = -1; y <= 2; y++) {
-            float yCoord = clamp((i.y + float(y) + 0.5) * invTex.y, 0.0, 1.0);
-            
-            float rowVal = wx.x * texture(tex, vec2(x0, yCoord)).r +
-                           wx.y * texture(tex, vec2(x1, yCoord)).r +
-                           wx.z * texture(tex, vec2(x2, yCoord)).r +
-                           wx.w * texture(tex, vec2(x3, yCoord)).r;
+        float v00 = texture(tex, vec2(x0, y0)).r;
+        float v10 = texture(tex, vec2(x1, y0)).r;
+        float v01 = texture(tex, vec2(x0, y1)).r;
+        float v11 = texture(tex, vec2(x1, y1)).r;
 
-            float w_y = (y == -1) ? wy.x : ((y == 0) ? wy.y : ((y == 1) ? wy.z : wy.w));
-            total += w_y * rowVal;
-        }
-
-        return clamp(total, 0.0, 1.0);
+        return mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y);
     }
 `;
 
@@ -267,7 +249,7 @@ export function createPrecipShaderLayer(mapInstance) {
                     if (u_isPixelated > 0.5) {
                         rawVal = texture(u_dataTexture, uv).r;
                     } else {
-                        rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
+                        rawVal = sampleCellBilinear(u_dataTexture, uv, u_texResolution);
                     }
 
                     if (rawVal < 0.00001) {
@@ -320,7 +302,7 @@ export function createPrecipShaderLayer(mapInstance) {
                     if (u_isPixelated > 0.5) {
                         rawVal = texture2D(u_dataTexture, uv).r;
                     } else {
-                        rawVal = sampleSmoothSpline(u_dataTexture, uv, u_texResolution);
+                        rawVal = sampleCellBilinear(u_dataTexture, uv, u_texResolution);
                     }
 
                     if (rawVal < 0.00001) {
@@ -454,7 +436,7 @@ export function createPrecipShaderLayer(mapInstance) {
             gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
 
-            // 🌟 DYNAMIC UNIFORM: Tells fragment shader to bypass B-spline for HRRR
+            // 🌟 DYNAMIC UNIFORM: Tells fragment shader to bypass bilinear for HRRR
             gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), stateManager.activeModel === 'hrrr' ? 1.0 : 0.0);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
