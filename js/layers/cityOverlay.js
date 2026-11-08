@@ -115,7 +115,10 @@ export function decodePixelValue(rawVal, manifest) {
 }
 
 /**
- * 🌟 GENERIC BILINEAR SAMPLER (Supports both Equirectangular ECMWF and Lambert Conformal HRRR)
+ * 🌟 GENERIC POINT SAMPLER
+ * - Continuous fields (Temperature, Wind, Height): True Bilinear Interpolation
+ * - Precipitation & Snowfall (asnow, tp, prate, refc): True Local Grid Cell Sampling
+ *   Prevents artificial gradient bleed across rain/snow front boundaries (e.g. DC 5" error).
  */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameState = activeFrameState || stateManager.activeFrameState;
@@ -128,6 +131,13 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const activeManifest = manifest || stateManager.manifest;
     const grid = activeManifest?.grid;
 
+    // Detect if field has sharp physical boundaries (snow, rain, radar)
+    const paramId = (activeManifest?.id || activeManifest?.parameter || stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+    const isPrecipOrAccum = paramId.startsWith('asnow') ||
+                            paramId.startsWith('tp') ||
+                            paramId === 'prate' ||
+                            paramId === 'refc';
+
     // =========================================================================
     // 🌟 PATH A: HRRR Native Lambert Conformal Conic Grid
     // =========================================================================
@@ -139,6 +149,20 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
             return NaN;
         }
 
+        const frameW = grid.nx;
+        const frameH = grid.ny;
+        const frameSize = frameW * frameH;
+        const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
+        const frameOffset = frameIdx * frameSize;
+
+        // For precip/snow: sample the exact local grid cell to prevent gradient bleed
+        if (isPrecipOrAccum) {
+            const nearX = Math.min(Math.max(Math.round(pt.x), 0), grid.nx - 1);
+            const nearY = Math.min(Math.max(Math.round(pt.y), 0), grid.ny - 1);
+            const v = pixelData[frameOffset + nearY * frameW + nearX];
+            return v !== undefined ? decodePixelValue(v, activeManifest) : NaN;
+        }
+
         const x0 = Math.floor(pt.x);
         const x1 = Math.min(x0 + 1, grid.nx - 1);
         const y0 = Math.floor(pt.y);
@@ -146,12 +170,6 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 
         const fracX = pt.x - x0;
         const fracY = pt.y - y0;
-
-        const frameW = grid.nx;
-        const frameH = grid.ny;
-        const frameSize = frameW * frameH;
-        const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
-        const frameOffset = frameIdx * frameSize;
 
         // HRRR row order: 0 is south, ny - 1 is north
         const idx00 = frameOffset + y0 * frameW + x0;
@@ -177,7 +195,7 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     }
 
     // =========================================================================
-    // 🌟 PATH B: Global Equirectangular Grid (ECMWF)
+    // 🌟 PATH B: Global Equirectangular Grid (ECMWF, GFS, AIFS)
     // =========================================================================
     let normLng = ((lng % 360) + 360) % 360;
     if (normLng > 180) normLng -= 360;
@@ -192,8 +210,25 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameSize = frameW * frameH;
     const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
 
+    // Account for active member slice in ensemble chunked arrays
+    let frameOffset = frameIdx * frameSize;
+    if (activeManifest?.type === 'ensemble_chunked') {
+        const activeMember = stateManager.activeMember || 0;
+        const numFrames = (activeManifest.chunks?.[chunkIdx]?.forecast_steps || []).length || 10;
+        const memberSizeBytes = activeManifest.chunks?.[chunkIdx]?.member_size_bytes || (numFrames * frameSize);
+        frameOffset = (activeMember * memberSizeBytes) + (frameIdx * frameSize);
+    }
+
     const contX = (((normX % 1) + 1) % 1) * frameW;
     const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
+
+    // For precip/snow: sample the exact local grid cell to prevent gradient bleed
+    if (isPrecipOrAccum) {
+        const nearX = Math.round(contX) % frameW;
+        const nearY = Math.min(Math.max(Math.round(contY), 0), frameH - 1);
+        const v = pixelData[frameOffset + nearY * frameW + nearX];
+        return v !== undefined ? decodePixelValue(v, activeManifest) : 0.0;
+    }
 
     const x0 = Math.floor(contX) % frameW;
     const x1 = (x0 + 1) % frameW;
@@ -202,8 +237,6 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
 
     const fracX = contX - Math.floor(contX);
     const fracY = contY - y0;
-
-    const frameOffset = frameIdx * frameSize;
 
     const idx00 = frameOffset + y0 * frameW + x0;
     const idx10 = frameOffset + y0 * frameW + x1;
