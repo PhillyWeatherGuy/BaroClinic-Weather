@@ -224,8 +224,8 @@
         "gust10"
       ]
     },
-    "november_gale_of_1975": {
-      "id": "november_gale_of_1975",
+    "era5_november_gale_75": {
+      "id": "era5_november_gale_75",
       "name": "November Gale of '75",
       "category": "ERA5",
       "resolution": "31km",
