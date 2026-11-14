@@ -239,6 +239,8 @@ export function createPrecipShaderLayer(mapInstance) {
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
                 uniform float u_isPixelated;
+                uniform float u_isobarVal;
+                uniform vec4 u_isobarColor;
 
                 ${fragmentShaderBody}
 
@@ -262,6 +264,16 @@ export function createPrecipShaderLayer(mapInstance) {
                     
                     if (color.a == 0.0) {
                         discard;
+                    }
+
+                    if (u_isobarVal > 0.0) {
+                        float dist = abs(rawVal - u_isobarVal);
+                        float w = length(vec2(dFdx(rawVal), dFdy(rawVal)));
+                        float lineDist = dist / max(w, 0.00001);
+                        if (lineDist < 1.0) {
+                            float t = smoothstep(1.0, 0.0, lineDist);
+                            color = mix(color, u_isobarColor, t);
+                        }
                     }
 
                     fragColor = vec4(color.rgb, color.a * u_opacity);
@@ -292,6 +304,8 @@ export function createPrecipShaderLayer(mapInstance) {
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
                 uniform float u_isPixelated;
+                uniform float u_isobarVal;
+                uniform vec4 u_isobarColor;
 
                 ${fragmentShaderBody.replace(/texture\(/g, 'texture2D(')}
 
@@ -315,6 +329,13 @@ export function createPrecipShaderLayer(mapInstance) {
                     
                     if (color.a == 0.0) {
                         discard;
+                    }
+
+                    if (u_isobarVal > 0.0) {
+                        float dist = abs(rawVal - u_isobarVal);
+                        if (dist < 0.0015) {
+                            color = u_isobarColor;
+                        }
                     }
 
                     gl_FragColor = vec4(color.rgb, color.a * u_opacity);
@@ -438,6 +459,19 @@ export function createPrecipShaderLayer(mapInstance) {
 
             // 🌟 DYNAMIC UNIFORM: Tells fragment shader to bypass bilinear for HRRR
             gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), stateManager.activeModel === 'hrrr' ? 1.0 : 0.0);
+
+            // 🌟 Isotherm / Boundary Contour (e.g. 32°F boundary on 2t)
+            const is2t = (stateManager.activeParam === '2t' || stateManager.activeParam === 'temp');
+            const locIsobarVal = gl.getUniformLocation(program, 'u_isobarVal');
+            const locIsobarColor = gl.getUniformLocation(program, 'u_isobarColor');
+            if (locIsobarVal) {
+                // byte 130 boundary in rawVal [0, 1] is exactly 130.0 / 255.0
+                gl.uniform1f(locIsobarVal, is2t ? (130.0 / 255.0) : 0.0);
+            }
+            if (locIsobarColor) {
+                // #e3e9e9 -> vec4(227/255, 233/255, 233/255, 1.0)
+                gl.uniform4f(locIsobarColor, 227.0 / 255.0, 233.0 / 255.0, 233.0 / 255.0, 1.0);
+            }
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             

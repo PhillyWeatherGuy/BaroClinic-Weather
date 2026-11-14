@@ -152,15 +152,8 @@ function createLinearPalette(colors, numEntries = 256, injections = null) {
 }
 
 export const TEMP_PALETTE = createTemperaturePalette(TEMP_COLORS, TEMP_STOPS_F);
-// byte 130 = 32°F boundary (273.15K out of 216.4833–327.5944K range → byte ~130)
-// DEBUG: using black to confirm injection position — swap back to '#e3e9e9' once confirmed
-export const TEMP_2M_PALETTE = createLinearPalette(TEMP_2M_COLORS, 256, [
-    { byte: 128, color: '#000000' },
-    { byte: 129, color: '#000000' },
-    { byte: 130, color: '#000000' },
-    { byte: 131, color: '#000000' },
-    { byte: 132, color: '#000000' },
-]);
+// byte 130 = 32°F boundary
+export const TEMP_2M_PALETTE = createLinearPalette(TEMP_2M_COLORS, 256);
 
 // 🌧️ Matplotlib Light Mode Precip Levels (Inches)
 const LIGHT_PRECIP_LEVELS = [
