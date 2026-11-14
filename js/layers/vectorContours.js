@@ -200,8 +200,9 @@ function themeContourFeatures(featureCollection, masterData) {
 const INSTANCE_STRIDE = 32;
 
 const WIDTH_STOPS = [
-    [1.5,  0.45, 1.6, 0.25],
-    [2.5,  0.60, 1.8, 0.40],
+    [1.0,  0.45, 1.6, 0.30],
+    [1.6,  0.55, 1.8, 0.55],
+    [2.0,  0.70, 2.0, 1.00],
     [3.2,  0.85, 2.2, 1.00],
     [5.0,  1.00, 2.6, 1.00],
     [8.0,  1.30, 3.2, 1.00],
