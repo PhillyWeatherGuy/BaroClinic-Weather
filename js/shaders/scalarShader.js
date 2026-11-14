@@ -172,7 +172,7 @@ export function createScalarShaderLayer(mapInstance) {
                 hexArray = paramIdOrHexArray;
             } else {
                 const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-                hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam || '2t');
+                hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam || '2t', stateManager.manifest);
             }
             
             if (this.paletteTex) {
@@ -193,7 +193,7 @@ export function createScalarShaderLayer(mapInstance) {
             gl.bufferData(gl.ARRAY_BUFFER, gridData, gl.STATIC_DRAW);
 
             const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-            const initialPalette = paletteFunc(stateManager.activeParam || '2t');
+            const initialPalette = paletteFunc(stateManager.activeParam || '2t', stateManager.manifest);
             this.paletteTex = createPaletteTexture(gl, initialPalette);
         },
 

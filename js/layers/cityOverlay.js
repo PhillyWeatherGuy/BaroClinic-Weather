@@ -288,7 +288,18 @@ export function formatParameterValue(decodedVal, manifest) {
     }
 
     // 3. Temperatures
-    if (unit.includes('°') || normalizedUnit.includes('fahrenheit') || normalizedUnit.includes('celsius')) {
+    const isTempParam = unit.includes('°') ||
+        normalizedUnit.includes('fahrenheit') ||
+        normalizedUnit.includes('celsius') ||
+        normalizedUnit.includes('kelvin') ||
+        normalizedUnit === 'k' ||
+        normalizedUnit === 'c' ||
+        normalizedUnit === 'f' ||
+        (paramId.startsWith('t') && !paramId.startsWith('tp')) ||
+        paramId === '2t' ||
+        paramId === 'd2m';
+
+    if (isTempParam) {
         let celsius = decodedVal;
         if (decodedVal > 150) {
             celsius = decodedVal - 273.15;

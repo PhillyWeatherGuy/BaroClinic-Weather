@@ -319,7 +319,7 @@ export function createHrrrShaderLayer(mapInstance) {
                 hexArray = paramIdOrHexArray;
             } else {
                 const fn = stateManager.currentTheme === 'dark' ? getDarkPalette : getLightPalette;
-                hexArray = fn(paramIdOrHexArray || activeParam);
+                hexArray = fn(paramIdOrHexArray || activeParam, stateManager.manifest);
             }
 
             if (this.paletteTex) this.gl.deleteTexture(this.paletteTex);
@@ -334,7 +334,7 @@ export function createHrrrShaderLayer(mapInstance) {
             const activeParam = stateManager.activeParam || '2t';
             const basePalette = (activeParam === 'refc') 
                 ? buildMaueRadarPalette() 
-                : ((stateManager.currentTheme === 'dark' ? getDarkPalette : getLightPalette)(activeParam));
+                : ((stateManager.currentTheme === 'dark' ? getDarkPalette : getLightPalette)(activeParam, stateManager.manifest));
 
             this.paletteTex = createPaletteTexture(gl, basePalette);
             this.frzrPaletteTex = createPaletteTexture(gl, buildFrozenPalette(FRZR_COLORS, 5.0, 47.0));

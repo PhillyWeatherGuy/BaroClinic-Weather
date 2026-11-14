@@ -993,7 +993,7 @@ export async function applyTheme(theme) {
 
     const paramId = stateManager.paramConfig?.id || stateManager.activeParam;
     const paletteFunc = (theme === 'dark') ? getDarkPalette : getLightPalette;
-    const newPalette = paletteFunc(paramId);
+    const newPalette = paletteFunc(paramId, stateManager.manifest);
 
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
         customShaderLayer.updatePalette(newPalette);
@@ -1034,7 +1034,7 @@ export function initLayer(shaderType = null) {
     
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
     if (customShaderLayer && typeof customShaderLayer.updatePalette === 'function') {
-        customShaderLayer.updatePalette(paletteFunc(stateManager.activeParam));
+        customShaderLayer.updatePalette(paletteFunc(stateManager.activeParam, stateManager.manifest));
     }
 
     for (const chunkIdx in stateManager.loadedChunkBitmaps) {

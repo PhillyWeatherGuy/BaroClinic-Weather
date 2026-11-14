@@ -1,63 +1,14 @@
 // js/config/darkPalettes.js
-import { PRATE_PALETTE as LIGHT_PRATE_PALETTE, TEMP_PALETTE as LIGHT_TEMP_PALETTE, TEMP_2M_PALETTE as LIGHT_TEMP_2M_PALETTE } from './palettes.js';
-
-/**
- * 🌡️ Exact 2m Temperature Palette extracted from provided_colors[::-1]
- */
-const DARK_TEMP_COLORS = [
-"#B0A6B6", "#ADA0B5", "#AA9BB4", "#A796B2", "#A490B1", "#A08BB0", "#9D86AE", "#9A80AC",
-  "#977BAB", "#9476AA", "#9170A9", "#8E6AA8", "#8B65A6", "#8860A4", "#855AA3", "#8254A2",
-  "#7F4FA0", "#7C4A9F", "#79449E", "#763E9C", "#73399B", "#70349A", "#6C2F98", "#692A96",
-  "#662495", "#631E94", "#601993", "#5D1492", "#5A0E90", "#54078D", "#4E008A", "#570089",
-  "#610088", "#6A0087", "#730086", "#7D0085", "#860084", "#8F0083", "#990082", "#A20181",
-  "#AB0180", "#B5017F", "#BE017E", "#C7017D", "#D1017C", "#DA017B", "#E4017A", "#ED0179",
-  "#F10B7F", "#F51585", "#F6208B", "#F72B91", "#F83496", "#F83C9B", "#F944A0", "#FA4DA4",
-  "#FB56A9", "#FC5EAE", "#FD66B2", "#FE6FB7", "#FC7ABC", "#FB84C2", "#F48CC6", "#ED94CA",
-  "#EA98CC", "#E69DCD", "#DFA5D1", "#D8ADD5", "#D1B5D9", "#CABDDD", "#C6C2DE", "#C3C6E0",
-  "#BCCEE4", "#B5D6E8", "#AEDEEC", "#A7E6F0", "#A4EAF2", "#A0EFF3", "#99F7F7", "#92F2F0",
-  "#8AE9E7", "#83E0DE", "#7CD7D5", "#75CECC", "#6EC5C3", "#66BCBA", "#5FB3B1", "#58AAA8",
-  "#50A19F", "#499896", "#428F8D", "#3A8684", "#341E9D", "#381E98", "#3C1E94", "#431E8C",
-  "#4B1E84", "#521F7B", "#5A1F73", "#611F6B", "#681F62", "#701F5A", "#771F52", "#7F1F4A",
-  "#862041", "#8E2039", "#952031", "#99202C", "#9D2028", "#A4262A", "#AA2C2C", "#AC3232",
-  "#AF3939", "#B23F3F", "#B54545", "#B84C4C", "#BB5252", "#BE5858", "#C05E5E", "#C36464",
-  "#C66A6A", "#C97070", "#CC7777", "#CF7D7D", "#D28383", "#D48989", "#D78F8F", "#DA9696",
-  "#DD9C9C", "#E0A2A2", "#E3A8A8", "#E6AEAE", "#E8B4B4", "#EBBABA", "#EEC1C1", "#F1C7C7",
-  "#F4CDCD", "#F6D4D4", "#F9DADA", "#FCE0E0", "#FFE6E6", "#F7E7E7", "#EEE8E8", "#E7E9E9",
-  "#E3E9E9", "#E1EAEA", "#DDEBEC", "#D9EAEC", "#D6EAEC", "#D3EBEE", "#D0ECEE", "#CCEDEE",
-  "#C8ECEE", "#C4EAEC", "#BBE4EA", "#B2DDE7", "#AFDCEA", "#AAD7E7", "#A4D2E4", "#9CCCE3",
-  "#95C5E0", "#8EBEDD", "#8CBCE1", "#86B6DE", "#81B1DA", "#7BAAD6", "#76A4D2", "#719FCD",
-  "#739FCD", "#6E9AC8", "#6A94C2", "#6D92C2", "#6A8EBE", "#6889B9", "#6684B6", "#6380B2",
-  "#607CAD", "#6079AB", "#5D75A6", "#5A71A2", "#586D9F", "#55689A", "#526395", "#535F93",
-  "#4F578C", "#50548B", "#53558C", "#54558D", "#5A5B94", "#61619A", "#60619B", "#6666A2",
-  "#6C6CA8", "#7271AE", "#7877B2", "#7E7DB7", "#7F7FB4", "#8484B6", "#8988B8", "#8F8DB0",
-  "#9694B2", "#9D9AB3", "#A1A0AC", "#A8A6AC", "#AEADAD", "#AFAFA4", "#B6B6A6", "#BDBDA8",
-  "#BEBF9F", "#C6C6A2", "#CDCDA4", "#CFCE9A", "#D4D49C", "#DADA9E", "#E1E097", "#E8E897",
-  "#EFEF97", "#F5F490", "#FAF890", "#FEFD91", "#FFFE8C", "#FCF885", "#FAF27E", "#FCF07C",
-  "#FAEC78", "#F8E874", "#FCE774", "#FAE26F", "#F7DD6A", "#F9DA68", "#F6D563", "#F4D05E",
-  "#F3CD5B", "#F0C654", "#F2C352", "#EFBB4B", "#EFB748", "#EBAF42", "#EFAF43", "#ECA63D",
-  "#EDA13C", "#F19C3B", "#EF9838", "#EE9336", "#F09137", "#EC8A33", "#EC8632", "#EC8431",
-  "#EC8232", "#E87B2F", "#E8772E", "#E8722E", "#E66C2C", "#E76B2C", "#E5682C", "#E4672B",
-  "#E5652A", "#E5642C", "#E1612C", "#DA5C28", "#D45725", "#CD5124", "#C64B22", "#C44A24",
-  "#BE4520", "#B8401B", "#B13A1C", "#AA3319", "#A52E16", "#A02A14", "#9C2816", "#962717",
-  "#902314", "#8A1F12", "#841C10", "#7E190F", "#78160D", "#73140B", "#70170F", "#6A160F",
-  "#671A11", "#651B10", "#652011", "#622210", "#602515", "#5C2B1A", "#572E1D", "#523020",
-  "#4F3526", "#4F3A2A", "#52412F", "#52452F", "#564A34", "#595039", "#5D5142", "#615446",
-  "#65574A", "#6A594D", "#6E5D52", "#736156", "#766359", "#7C675E", "#806A62", "#836E65",
-  "#88726B", "#8D7771", "#8E7674", "#947E79", "#907C75", "#96827A", "#9D8980", "#A18D82",
-  "#A68F85", "#AA8B82", "#AD8780", "#AB847E", "#A87F7A", "#A47976", "#A27574", "#A17272",
-  "#9F6E6F", "#9F6C6E", "#9E6A6C", "#9B6569", "#996166", "#985E63", "#975B61", "#95575E",
-  "#93545C", "#92515B", "#914E59", "#8F4A57", "#8D4755", "#8C4555", "#8C4356", "#873F52",
-  "#833C50", "#803A4E", "#7E394D", "#7A374B", "#763449", "#733348", "#713246", "#6E3145",
-  "#6B3144", "#663344", "#633644", "#5F3844", "#583D44", "#5C4449", "#614C4E", "#5C5150",
-  "#53504D", "#52544E", "#53544C", "#58594E", "#565B4E", "#596052", "#5C6555", "#5A6452",
-  "#5D6854", "#5F6D57", "#63755D", "#60765F", "#607B64", "#5F7C65", "#628069", "#64856D",
-  "#64856F", "#648572", "#668576", "#69867C", "#728982", "#7A8A86", "#85918E", "#909896",
-  "#929B98", "#949E9A", "#96A09C", "#98A39E", "#9AA6A0", "#9CA8A2", "#9FABA4", "#A1AEA6",
-  "#A3B1A8", "#A5B4AA", "#A7B6AC", "#A9B9AE"
-];
+import { 
+    PRATE_PALETTE as LIGHT_PRATE_PALETTE, 
+    TEMP_PALETTE as LIGHT_TEMP_PALETTE, 
+    TEMP_2M_PALETTE as LIGHT_TEMP_2M_PALETTE,
+    getPaletteForParameter as getLightPalette
+} from './palettes.js';
 
 export const TEMP_PALETTE = LIGHT_TEMP_PALETTE;
 export const TEMP_2M_PALETTE = LIGHT_TEMP_2M_PALETTE;
+
 
 // 🌧️ Dark Mode Precip Levels (Inches)
 const DARK_PRECIP_LEVELS = [
@@ -394,7 +345,7 @@ export const W925_PALETTE = createNonLinearPrecipPalette(
 /**
  * 🌟 Dynamic Palette Selector
  */
-export function getPaletteForParameter(paramId) {
+export function getPaletteForParameter(paramId, manifest = null) {
     const id = (paramId || '').toLowerCase();
     if (id === '2t') {
         return TEMP_2M_PALETTE;
@@ -438,5 +389,6 @@ export function getPaletteForParameter(paramId) {
     if (id.includes('wind')) {
         return W850_PALETTE;
     }
-    return TEMP_PALETTE;
+    return getLightPalette(paramId, manifest);
 }
+

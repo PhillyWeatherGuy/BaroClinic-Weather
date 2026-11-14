@@ -1,131 +1,88 @@
-// js/config/palettes.js
+import { stateManager } from '../core/stateManager.js';
 
-/**
- * 🌡️ Exact 2m Temperature Palette extracted from provided_colors[::-1]
- */
-const TEMP_COLORS = [
-    "#B0A6B6", "#ADA0B5", "#AA9BB4", "#A796B2", "#A490B1", "#A08BB0", "#9D86AE", "#9A80AC",
-  "#977BAB", "#9476AA", "#9170A9", "#8E6AA8", "#8B65A6", "#8860A4", "#855AA3", "#8254A2",
-  "#7F4FA0", "#7C4A9F", "#79449E", "#763E9C", "#73399B", "#70349A", "#6C2F98", "#692A96",
-  "#662495", "#631E94", "#601993", "#5D1492", "#5A0E90", "#54078D", "#4E008A", "#570089",
-  "#610088", "#6A0087", "#730086", "#7D0085", "#860084", "#8F0083", "#990082", "#A20181",
-  "#AB0180", "#B5017F", "#BE017E", "#C7017D", "#D1017C", "#DA017B", "#E4017A", "#ED0179",
-  "#F10B7F", "#F51585", "#F6208B", "#F72B91", "#F83496", "#F83C9B", "#F944A0", "#FA4DA4",
-  "#FB56A9", "#FC5EAE", "#FD66B2", "#FE6FB7", "#FC7ABC", "#FB84C2", "#F48CC6", "#ED94CA",
-  "#EA98CC", "#E69DCD", "#DFA5D1", "#D8ADD5", "#D1B5D9", "#CABDDD", "#C6C2DE", "#C3C6E0",
-  "#BCCEE4", "#B5D6E8", "#AEDEEC", "#A7E6F0", "#A4EAF2", "#A0EFF3", "#99F7F7", "#92F2F0",
-  "#8AE9E7", "#83E0DE", "#7CD7D5", "#75CECC", "#6EC5C3", "#66BCBA", "#5FB3B1", "#58AAA8",
-  "#50A19F", "#499896", "#428F8D", "#3A8684", "#341E9D", "#381E98", "#3C1E94", "#431E8C",
-  "#4B1E84", "#521F7B", "#5A1F73", "#611F6B", "#681F62", "#701F5A", "#771F52", "#7F1F4A",
-  "#862041", "#8E2039", "#952031", "#99202C", "#9D2028", "#A4262A", "#AA2C2C", "#AC3232",
-  "#AF3939", "#B23F3F", "#B54545", "#B84C4C", "#BB5252", "#BE5858", "#C05E5E", "#C36464",
-  "#C66A6A", "#C97070", "#CC7777", "#CF7D7D", "#D28383", "#D48989", "#D78F8F", "#DA9696",
-  "#DD9C9C", "#E0A2A2", "#E3A8A8", "#E6AEAE", "#E8B4B4", "#EBBABA", "#EEC1C1", "#F1C7C7",
-  "#F4CDCD", "#F6D4D4", "#F9DADA", "#FCE0E0", "#FFE6E6", "#F7E7E7", "#EEE8E8", "#E7E9E9",
-  "#E3E9E9", "#E1EAEA", "#DDEBEC", "#D9EAEC", "#D6EAEC", "#D3EBEE", "#D0ECEE", "#CCEDEE",
-  "#C8ECEE", "#C4EAEC", "#BBE4EA", "#B2DDE7", "#AFDCEA", "#AAD7E7", "#A4D2E4", "#9CCCE3",
-  "#95C5E0", "#8EBEDD", "#8CBCE1", "#86B6DE", "#81B1DA", "#7BAAD6", "#76A4D2", "#719FCD",
-  "#739FCD", "#6E9AC8", "#6A94C2", "#6D92C2", "#6A8EBE", "#6889B9", "#6684B6", "#6380B2",
-  "#607CAD", "#6079AB", "#5D75A6", "#5A71A2", "#586D9F", "#55689A", "#526395", "#535F93",
-  "#4F578C", "#50548B", "#53558C", "#54558D", "#5A5B94", "#61619A", "#60619B", "#6666A2",
-  "#6C6CA8", "#7271AE", "#7877B2", "#7E7DB7", "#7F7FB4", "#8484B6", "#8988B8", "#8F8DB0",
-  "#9694B2", "#9D9AB3", "#A1A0AC", "#A8A6AC", "#AEADAD", "#AFAFA4", "#B6B6A6", "#BDBDA8",
-  "#BEBF9F", "#C6C6A2", "#CDCDA4", "#CFCE9A", "#D4D49C", "#DADA9E", "#E1E097", "#E8E897",
-  "#EFEF97", "#F5F490", "#FAF890", "#FEFD91", "#FFFE8C", "#FCF885", "#FAF27E", "#FCF07C",
-  "#FAEC78", "#F8E874", "#FCE774", "#FAE26F", "#F7DD6A", "#F9DA68", "#F6D563", "#F4D05E",
-  "#F3CD5B", "#F0C654", "#F2C352", "#EFBB4B", "#EFB748", "#EBAF42", "#EFAF43", "#ECA63D",
-  "#EDA13C", "#F19C3B", "#EF9838", "#EE9336", "#F09137", "#EC8A33", "#EC8632", "#EC8431",
-  "#EC8232", "#E87B2F", "#E8772E", "#E8722E", "#E66C2C", "#E76B2C", "#E5682C", "#E4672B",
-  "#E5652A", "#E5642C", "#E1612C", "#DA5C28", "#D45725", "#CD5124", "#C64B22", "#C44A24",
-  "#BE4520", "#B8401B", "#B13A1C", "#AA3319", "#A52E16", "#A02A14", "#9C2816", "#962717",
-  "#902314", "#8A1F12", "#841C10", "#7E190F", "#78160D", "#73140B", "#70170F", "#6A160F",
-  "#671A11", "#651B10", "#652011", "#622210", "#602515", "#5C2B1A", "#572E1D", "#523020",
-  "#4F3526", "#4F3A2A", "#52412F", "#52452F", "#564A34", "#595039", "#5D5142", "#615446",
-  "#65574A", "#6A594D", "#6E5D52", "#736156", "#766359", "#7C675E", "#806A62", "#836E65",
-  "#88726B", "#8D7771", "#8E7674", "#947E79", "#907C75", "#96827A", "#9D8980", "#A18D82",
-  "#A68F85", "#AA8B82", "#AD8780", "#AB847E", "#A87F7A", "#A47976", "#A27574", "#A17272",
-  "#9F6E6F", "#9F6C6E", "#9E6A6C", "#9B6569", "#996166", "#985E63", "#975B61", "#95575E",
-  "#93545C", "#92515B", "#914E59", "#8F4A57", "#8D4755", "#8C4555", "#8C4356", "#873F52",
-  "#833C50", "#803A4E", "#7E394D", "#7A374B", "#763449", "#733348", "#713246", "#6E3145",
-  "#6B3144", "#663344", "#633644", "#5F3844", "#583D44", "#5C4449", "#614C4E", "#5C5150",
-  "#53504D", "#52544E", "#53544C", "#58594E", "#565B4E", "#596052", "#5C6555", "#5A6452",
-  "#5D6854", "#5F6D57", "#63755D", "#60765F", "#607B64", "#5F7C65", "#628069", "#64856D",
-  "#64856F", "#648572", "#668576", "#69867C", "#728982", "#7A8A86", "#85918E", "#909896",
-  "#929B98", "#949E9A", "#96A09C", "#98A39E", "#9AA6A0", "#9CA8A2", "#9FABA4", "#A1AEA6",
-  "#A3B1A8", "#A5B4AA", "#A7B6AC", "#A9B9AE"
-];
-
-export const TEMP_STOPS_F = [
-    -70.0, -69.6, -69.2, -68.8, -68.4, -68.0, -67.6, -67.2, -66.8, -66.4,
-    -66.0, -65.6, -65.2, -64.8, -64.4, -64.0, -63.6, -63.2, -62.8, -62.4,
-    -62.0, -61.6, -61.2, -60.8, -60.4, -60.0, -59.6, -59.2, -58.8, -58.4,
-    -58.0, -56.04, -54.09, -52.13, -50.17, -48.22, -46.26, -44.3, -42.35, -40.39,
-    -38.43, -36.48, -34.52, -32.57, -30.61, -28.65, -26.7, -24.74, -23.76, -22.78,
-    -21.8, -20.83, -19.85, -18.87, -17.89, -16.91, -15.94, -14.96, -13.98, -13.0,
-    -12.02, -11.04, -9.09, -7.13, -6.15, -5.17, -3.22, -1.26, 0.7, 2.65,
-    3.63, 4.61, 6.57, 8.52, 10.48, 12.43, 13.41, 14.39, 16.35, 18.3,
-    19.28, 20.26, 21.24, 22.22, 23.2, 24.17, 25.15, 26.13, 27.11, 28.09,
-    29.06, 30.04, 32.0, 32.33, 32.65, 33.31, 33.96, 34.62, 35.27, 35.93,
-    36.58, 37.24, 37.89, 38.55, 39.2, 39.85, 40.51, 40.83, 41.16, 41.49,
-    41.82, 42.14, 42.47, 42.8, 43.13, 43.45, 43.78, 44.11, 44.44, 44.77,
-    45.09, 45.42, 45.75, 46.08, 46.4, 46.72, 47.05, 47.38, 47.71, 48.03,
-    48.36, 48.69, 49.02, 49.34, 49.67, 50.0, 50.33, 50.66, 50.98, 51.31,
-    51.64, 52.29, 52.95, 53.6, 53.98, 54.35, 54.73, 55.11, 55.48, 55.86,
-    56.24, 56.62, 56.99, 57.37, 57.56, 57.75, 58.12, 58.31, 58.5, 58.88,
-    59.06, 59.25, 59.63, 59.82, 60.01, 60.39, 60.58, 60.76, 61.14, 61.33,
-    61.52, 61.89, 62.08, 62.27, 62.65, 62.84, 63.02, 63.4, 63.59, 63.78,
-    64.15, 64.34, 64.53, 64.91, 65.29, 65.66, 66.04, 66.42, 66.61, 66.79,
-    67.17, 67.36, 67.55, 67.92, 68.11, 68.3, 68.68, 68.87, 69.06, 69.43,
-    69.62, 69.81, 70.19, 70.38, 70.56, 70.94, 71.13, 71.32, 71.69, 71.88,
-    72.07, 72.45, 72.64, 72.83, 73.2, 73.39, 73.58, 73.96, 74.14, 74.33,
-    74.71, 74.9, 75.09, 75.46, 75.65, 75.84, 76.22, 76.41, 76.59, 76.97,
-    77.16, 77.35, 77.73, 78.1, 78.48, 78.86, 79.23, 79.61, 79.99, 80.36,
-    80.74, 81.12, 81.5, 81.87, 82.25, 82.63, 83.0, 83.38, 83.76, 84.13,
-    84.51, 84.89, 85.26, 85.64, 86.02, 86.4, 86.77, 87.15, 87.53, 87.72,
-    87.9, 88.28, 88.66, 89.03, 89.22, 89.41, 89.79, 90.17, 90.36, 90.54,
-    90.92, 91.3, 91.48, 91.67, 91.86, 92.05, 92.24, 92.43, 92.8, 93.18,
-    93.56, 93.94, 94.31, 94.69, 95.07, 95.44, 95.82, 96.2, 96.57, 96.95,
-    97.33, 97.7, 97.89, 98.08, 98.46, 98.65, 98.84, 99.21, 99.4, 99.59,
-    99.97, 100.34, 100.53, 100.72, 100.91, 101.1, 101.47, 101.85, 102.23, 102.42,
-    102.61, 102.98, 103.36, 103.55, 103.74, 104.11, 104.49, 104.87, 105.24, 105.62,
-    106.0, 106.37, 106.75, 107.13, 107.51, 107.88, 108.26, 108.64, 109.01, 109.39,
-    109.77, 110.14, 110.52, 110.9, 111.28, 111.65, 112.03, 112.41, 112.78, 113.16,
-    113.54, 113.91, 114.29, 114.67, 115.05, 115.42, 115.8, 116.18, 116.55, 116.74,
-    116.93, 117.31, 117.68, 118.06, 118.44, 118.81, 119.19, 119.38, 119.57, 119.95,
-    120.32, 120.7, 121.08, 121.45, 121.83, 122.21, 122.39, 122.58, 122.96, 123.34,
-    123.72, 124.09, 124.47, 124.85, 125.03, 125.22, 125.6, 125.97, 126.33, 126.7,
-    127.07, 127.43, 127.8, 128.17, 128.53, 128.9, 129.27, 129.63
-];
-
-export const TEMP_MIN_F = -70.0;
-export const TEMP_MAX_F = 130.0;
-export const TEMP_TICKS_F = [-70.0, -58.0, -49.0, -40.0, -31.0, -22.0, -13.0, -4.0, 5.0, 14.0, 23.0, 32.0, 39.2, 46.4, 53.6, 60.8, 68.0, 75.2, 82.4, 89.6, 96.8, 104.0, 111.2, 118.4, 125.6, 130.0];
-
-export function tempToColorF(f) {
-    if (f <= TEMP_MIN_F) return TEMP_COLORS[0];
-    if (f >= TEMP_MAX_F) return TEMP_COLORS[TEMP_COLORS.length - 1];
-
-    let lo = 0;
-    let hi = TEMP_STOPS_F.length - 1;
-    while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (TEMP_STOPS_F[mid] <= f) lo = mid;
-        else hi = mid - 1;
+export function valueToFahrenheit(val, unit = '') {
+    if (val === undefined || isNaN(val)) return 0;
+    const u = (unit || '').toLowerCase();
+    if (val > 150) {
+        // Kelvin (e.g. 216.4833 K = -70°F, 273.15 K = 32°F)
+        return (val - 273.15) * (9 / 5) + 32;
     }
-    return TEMP_COLORS[lo];
+    if (u.includes('c') || u.includes('celsius')) {
+        return (val * 9 / 5) + 32;
+    }
+    return val;
 }
 
-function createTemperaturePalette(colors, stops, numEntries = 256) {
-    return Array.from({ length: numEntries }, (_, index) => {
-        const f = TEMP_MIN_F + (index / (numEntries - 1)) * (TEMP_MAX_F - TEMP_MIN_F);
-        let lo = 0;
-        let hi = stops.length - 1;
-        while (lo < hi) {
-            const mid = (lo + hi + 1) >> 1;
-            if (stops[mid] <= f) lo = mid;
-            else hi = mid - 1;
+/**
+ * 🌡️ Exact Temperature Palette (-58°F to 104°F)
+ */
+const TEMP_COLORS = [
+    "#2F1E68", "#3B2184", "#461D87", "#5A1087", "#5B1086", "#5A0F85", "#5A0F85", "#5A0F85",
+    "#5C0F88", "#752180", "#822972", "#85296C", "#842970", "#812A6F", "#942674", "#AD267C",
+    "#BA277E", "#B6277C", "#B4267E", "#B6277C", "#BB2777", "#DD3D8F", "#DF3C88", "#E03C8A",
+    "#E03C8A", "#E03C8A", "#E03C8A", "#E03C8A", "#E03D88", "#E661AA", "#E066AA", "#EB69AF",
+    "#EA6AAF", "#E869AD", "#E87DBA", "#E78FC4", "#E392C3", "#E491C1", "#E491C2", "#DD96C3",
+    "#DCA5CD", "#D7A6CC", "#D7A6CC", "#D7A6CE", "#DAA5CE", "#D4A7CD", "#D0BAD7", "#C6C3DA",
+    "#C7C2DD", "#C7C2DE", "#C5C6DF", "#C2CFE4", "#BDD1E4", "#BDD3E7", "#BDDAEB", "#B9DEEB",
+    "#B6E1EC", "#B6E5EE", "#B3E8F1", "#B5EFF5", "#B1F1F6", "#AFF6F6", "#AAF2F2", "#A0E5E6",
+    "#95D9DA", "#8BCCCE", "#80C0C1", "#77B4B6", "#6DA8A8", "#5B9493", "#518787", "#457877",
+    "#3B6C6B", "#32605F", "#285452", "#1F4747", "#173D3D", "#264E4E", "#335A5B", "#456A6A",
+    "#527373", "#5D7B7B", "#6C8789", "#768F91", "#84999B", "#94A4A4", "#A0ADAD", "#AEB6BA",
+    "#B9C1BB", "#D2D0E6", "#332378", "#39208D", "#47227E", "#54216B", "#60235F", "#6B2553",
+    "#7D283F", "#872B35", "#983533", "#A2423C", "#AD5956", "#BD706E", "#C68887", "#D59F9E",
+    "#E1B4B2", "#EAC9C8", "#F3DCDB", "#F3E8E8", "#E6EAEA", "#D9EBEF", "#CFEDEC", "#B3DEEA",
+    "#9ACAE8", "#73A2CE", "#6D92C1", "#6177AA", "#526096", "#51558F", "#6969A6", "#8989B7",
+    "#A5A4A8", "#C0C19E", "#DFDF9C", "#FEFD92", "#FBEB76", "#F3D561", "#F1BE4D", "#EEAE40",
+    "#F09D39", "#ED8B34", "#E97B30", "#E66A2C", "#E4632B", "#D15326", "#B9401E", "#9A2916",
+    "#751913", "#671815", "#54211E", "#523528", "#594642", "#705E5D", "#836866", "#968278",
+    "#B1857E", "#B2847F", "#B07F7C", "#AA7272", "#8D6262", "#8C6361", "#945F62", "#8A3D46",
+    "#722746", "#70264E", "#584640", "#514745", "#404547", "#445354", "#36684C", "#357544",
+    "#357643", "#418D4D", "#377347"
+];
+
+export const TEMP_STOPS_F = Array.from({ length: 163 }, (_, i) => -58 + i);
+
+export const TEMP_MIN_F = -58.0;
+export const TEMP_MAX_F = 104.0;
+export const TEMP_TICKS_F = [-58.0, -40.0, -20.0, 0.0, 20.0, 32.0, 40.0, 60.0, 80.0, 100.0, 104.0];
+
+export function tempToColorF(f) {
+    if (f <= TEMP_STOPS_F[0]) return TEMP_COLORS[0];
+    if (f >= TEMP_STOPS_F[TEMP_STOPS_F.length - 1]) return TEMP_COLORS[TEMP_COLORS.length - 1];
+
+    const idx = Math.round(f) - TEMP_STOPS_F[0];
+    return TEMP_COLORS[Math.max(0, Math.min(TEMP_COLORS.length - 1, idx))];
+}
+
+export function createTemperaturePalette(colors = TEMP_COLORS, stops = TEMP_STOPS_F, numEntries = 256, customManifest = null, customMinF = null, customMaxF = null) {
+    let minF = customMinF;
+    let maxF = customMaxF;
+
+    if (minF === null || maxF === null) {
+        const activeManifest = customManifest || stateManager.manifest;
+        const activeConfig = stateManager.paramConfig;
+        const scaling = activeManifest?.scaling || activeConfig?.scaling;
+        const unit = (activeManifest?.unit || activeConfig?.unit || '').trim();
+
+        if (scaling && scaling.min_val !== undefined && scaling.max_val !== undefined) {
+            minF = valueToFahrenheit(Number(scaling.min_val), unit);
+            maxF = valueToFahrenheit(Number(scaling.max_val), unit);
+        } else {
+            // Default backend range in parameters.json is 216.4833K (-70°F) to 327.5944K (130°F)
+            minF = -70.0;
+            maxF = 130.0;
         }
-        return colors[lo];
+    }
+
+    const minStop = stops[0];
+    const maxStop = stops[stops.length - 1];
+
+    return Array.from({ length: numEntries }, (_, index) => {
+        const f = minF + (index / (numEntries - 1)) * (maxF - minF);
+        if (f <= minStop) return colors[0];
+        if (f >= maxStop) return colors[colors.length - 1];
+        const idx = Math.round(f) - minStop;
+        return colors[Math.max(0, Math.min(colors.length - 1, idx))];
     });
 }
 
@@ -602,7 +559,7 @@ export const W10_PALETTE = createNonLinearPrecipPalette(
 /**
  * 🌟 Dynamic Palette Selector
  */
-export function getPaletteForParameter(paramId) {
+export function getPaletteForParameter(paramId, manifest = null) {
     const id = (paramId || '').toLowerCase();
     if (id === '2t') {
         return TEMP_2M_PALETTE;
@@ -646,5 +603,7 @@ export function getPaletteForParameter(paramId) {
     if (id.includes('wind')) {
         return W850_PALETTE;
     }
-    return TEMP_PALETTE;
+    // All other parameters (temperatures: t1000, t925, t850, t700, t600, t500, t400, etc.)
+    return createTemperaturePalette(TEMP_COLORS, TEMP_STOPS_F, 256, manifest);
 }
+

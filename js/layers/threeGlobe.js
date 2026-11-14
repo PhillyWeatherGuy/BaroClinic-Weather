@@ -488,7 +488,7 @@ export function initThreeGlobe() {
     load3DBasemapFills();
 
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-    const initialPalette = paletteFunc(stateManager.activeParam || '2t');
+    const initialPalette = paletteFunc(stateManager.activeParam || '2t', stateManager.manifest);
     paletteTex = createPaletteTexture(initialPalette);
 
     material = new THREE.ShaderMaterial({
@@ -535,7 +535,7 @@ export function updateThreeGlobePalette(paramIdOrHexArray) {
         hexArray = paramIdOrHexArray;
     } else {
         const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-        hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam);
+        hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam, stateManager.manifest);
     }
     
     if (paletteTex) {

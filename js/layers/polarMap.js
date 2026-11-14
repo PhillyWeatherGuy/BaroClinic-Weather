@@ -1108,7 +1108,7 @@ export function initPolarMap() {
 
     // Layer 3: Weather Shader Layer (z = 0.0010)
     const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-    const initialPalette = paletteFunc(stateManager.activeParam || '2t');
+    const initialPalette = paletteFunc(stateManager.activeParam || '2t', stateManager.manifest);
     paletteTex = createPaletteTexture(initialPalette);
     frzrPaletteTex = createPaletteTexture(FRZR_PALETTE, true);
     sleetPaletteTex = createPaletteTexture(SLEET_PALETTE, true);
@@ -1165,7 +1165,7 @@ export function updatePolarPalette(paramIdOrHexArray) {
         hexArray = paramIdOrHexArray;
     } else {
         const paletteFunc = (stateManager.currentTheme === 'dark') ? getDarkPalette : getLightPalette;
-        hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam);
+        hexArray = paletteFunc(paramIdOrHexArray || stateManager.activeParam, stateManager.manifest);
     }
 
     if (paletteTex) {
