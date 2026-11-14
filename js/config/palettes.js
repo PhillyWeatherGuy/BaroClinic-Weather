@@ -138,15 +138,24 @@ const TEMP_2M_COLORS = [
     "#728982", "#7A8A86", "#909896"
 ];
 
-function createLinearPalette(colors, numEntries = 256) {
-    return Array.from({ length: numEntries }, (_, index) => {
+function createLinearPalette(colors, numEntries = 256, injections = null) {
+    const palette = Array.from({ length: numEntries }, (_, index) => {
         const colorIndex = Math.round((index / (numEntries - 1)) * (colors.length - 1));
         return colors[colorIndex];
     });
+    if (injections) {
+        for (const { byte: b, color } of injections) {
+            if (b >= 0 && b < numEntries) palette[b] = color;
+        }
+    }
+    return palette;
 }
 
 export const TEMP_PALETTE = createTemperaturePalette(TEMP_COLORS, TEMP_STOPS_F);
-export const TEMP_2M_PALETTE = createLinearPalette(TEMP_2M_COLORS);
+// byte 130 = 32°F boundary (273.15K out of 216.4833–327.5944K range → byte ~130)
+export const TEMP_2M_PALETTE = createLinearPalette(TEMP_2M_COLORS, 256, [
+    { byte: 130, color: '#e3e9e9' }
+]);
 
 // 🌧️ Matplotlib Light Mode Precip Levels (Inches)
 const LIGHT_PRECIP_LEVELS = [
