@@ -1024,10 +1024,11 @@ export function initParameterCategoryBar() {
                     initLayer(param.shader || 'scalar');
                 }
 
+                const targetPaletteParam = param.id === '2t' ? '2t' : (param.palette || param.id);
                 if (shaderLayerRef && typeof shaderLayerRef.updatePalette === 'function') {
-                    shaderLayerRef.updatePalette(param.palette || param.id);
+                    shaderLayerRef.updatePalette(targetPaletteParam);
                 }
-                try { updatePolarPalette(param.palette || param.id); } catch (e) {}
+                try { updatePolarPalette(targetPaletteParam); } catch (e) {}
 
                 try {
                     // 🌟 2. Pass activeRunObj so the same forecast run (e.g. 00Z) loads for the new parameter

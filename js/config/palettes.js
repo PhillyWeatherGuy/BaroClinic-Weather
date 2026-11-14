@@ -561,7 +561,8 @@ export const W10_PALETTE = createNonLinearPrecipPalette(
  */
 export function getPaletteForParameter(paramId, manifest = null) {
     const id = (paramId || '').toLowerCase();
-    if (id === '2t') {
+    const active = (stateManager.activeParam || stateManager.paramConfig?.id || '').toLowerCase();
+    if (id === '2t' || (id === 'temp' && (active === '2t' || !active))) {
         return TEMP_2M_PALETTE;
     }
     if (id === 'prate') {

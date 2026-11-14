@@ -536,7 +536,7 @@
       "unit": "°F",
       "category": "Thermodynamics",
       "shader": "precip",
-      "palette": "temp",
+      "palette": "2t",
       "upscale_2x": false,
       "scaling": {
         "mode": "linear",
