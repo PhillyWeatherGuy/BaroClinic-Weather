@@ -171,7 +171,7 @@ function themeContourFeatures(featureCollection, masterData) {
         for (const feature of featureCollection.features) {
             if (!feature || !feature.properties) continue;
             const is540Line = Number(feature.properties.name) === 540;
-            const featureColor = is540Line ? '#4169E1' : contourColor;
+            const featureColor = is540Line ? '#2e28a1' : contourColor;
 
             feature.properties.color = featureColor;
             feature.properties.stroke = featureColor;
