@@ -82,9 +82,9 @@ const fragmentShaderBody = `
 
         vec2 invTex = 1.0 / texRes;
         
-        // Cyclic longitude wrap on X, clamped latitude on Y
-        float x0 = fract((i.x + 0.5) * invTex.x);
-        float x1 = fract((i.x + 1.5) * invTex.x);
+        // Cyclic longitude wrap on global grids, clamped on regional crops
+        float x0 = u_isRegional > 0.5 ? clamp((i.x + 0.5) * invTex.x, 0.0, 1.0) : fract((i.x + 0.5) * invTex.x);
+        float x1 = u_isRegional > 0.5 ? clamp((i.x + 1.5) * invTex.x, 0.0, 1.0) : fract((i.x + 1.5) * invTex.x);
         float y0 = clamp((i.y + 0.5) * invTex.y, 0.0, 1.0);
         float y1 = clamp((i.y + 1.5) * invTex.y, 0.0, 1.0);
 
@@ -127,7 +127,9 @@ const fragmentShaderBody = `
             float weightY = wy[dy + 2];
 
             for (int dx = -2; dx <= 2; dx++) {
-                float xCoord = fract((i.x + float(dx) + 0.5) * invTex.x + 1.0);
+                float xCoord = u_isRegional > 0.5
+                    ? clamp((i.x + float(dx) + 0.5) * invTex.x, 0.0, 1.0)
+                    : fract((i.x + float(dx) + 0.5) * invTex.x + 1.0);
                 float weight = weightY * wx[dx + 2];
 
                 // 🌟 P-Type code is sampled directly from the green channel
@@ -341,11 +343,28 @@ export function createEnsembleShaderLayer(mapInstance) {
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
                 uniform float u_isPixelated;
+                uniform vec4 u_bounds;
+                uniform float u_isRegional;
 
                 ${fragmentShaderBody}
 
                 void main() {
-                    vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
+                    vec2 uv;
+                    if (u_isRegional > 0.5) {
+                        float lon = fract(v_uv.x) * 360.0 - 180.0;
+                        float lat = 90.0 - clamp(v_uv.y, 0.0, 1.0) * 180.0;
+                        if (lon < u_bounds.x || lon > u_bounds.y || lat < u_bounds.z || lat > u_bounds.w) {
+                            discard;
+                        }
+                        float rx = (lon - u_bounds.x) / (u_bounds.y - u_bounds.x);
+                        float ry = (u_bounds.w - lat) / (u_bounds.w - u_bounds.z);
+                        uv = vec2(
+                            (0.5 + rx * (u_texResolution.x - 1.0)) / u_texResolution.x,
+                            (0.5 + ry * (u_texResolution.y - 1.0)) / u_texResolution.y
+                        );
+                    } else {
+                        uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
+                    }
                     
                     float rawVal;
                     if (u_isPixelated > 0.5) {
@@ -404,11 +423,28 @@ export function createEnsembleShaderLayer(mapInstance) {
                 uniform float u_opacity;
                 uniform vec2 u_texResolution;
                 uniform float u_isPixelated;
+                uniform vec4 u_bounds;
+                uniform float u_isRegional;
 
                 ${fragmentShaderBody.replace(/texture\(/g, 'texture2D(')}
 
                 void main() {
-                    vec2 uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
+                    vec2 uv;
+                    if (u_isRegional > 0.5) {
+                        float lon = fract(v_uv.x) * 360.0 - 180.0;
+                        float lat = 90.0 - clamp(v_uv.y, 0.0, 1.0) * 180.0;
+                        if (lon < u_bounds.x || lon > u_bounds.y || lat < u_bounds.z || lat > u_bounds.w) {
+                            discard;
+                        }
+                        float rx = (lon - u_bounds.x) / (u_bounds.y - u_bounds.x);
+                        float ry = (u_bounds.w - lat) / (u_bounds.w - u_bounds.z);
+                        uv = vec2(
+                            (0.5 + rx * (u_texResolution.x - 1.0)) / u_texResolution.x,
+                            (0.5 + ry * (u_texResolution.y - 1.0)) / u_texResolution.y
+                        );
+                    } else {
+                        uv = vec2(fract(v_uv.x), clamp(v_uv.y, 0.0, 1.0));
+                    }
                     
                     float rawVal;
                     if (u_isPixelated > 0.5) {
@@ -461,6 +497,7 @@ export function createEnsembleShaderLayer(mapInstance) {
 
             const w = source.width || 1440;
             const h = source.height || 721;
+            const wrapS = stateManager.manifest?.bounds ? gl.CLAMP_TO_EDGE : gl.REPEAT;
 
             // 🌟 Option 2: Uploads 1-byte R8 for scalar parameters, 2-byte RG8 for ptype
             const uploadSingle = (item) => {
@@ -492,7 +529,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 return tex;
             };
@@ -652,6 +689,17 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
             gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), 0.0);
 
+            const b = stateManager.manifest?.bounds;
+            const isRegional = Boolean(b && b.west !== undefined && b.east !== undefined && b.south !== undefined && b.north !== undefined);
+            gl.uniform1f(gl.getUniformLocation(program, 'u_isRegional'), isRegional ? 1.0 : 0.0);
+            gl.uniform4f(
+                gl.getUniformLocation(program, 'u_bounds'),
+                isRegional ? b.west : -180.0,
+                isRegional ? b.east : 180.0,
+                isRegional ? b.south : -90.0,
+                isRegional ? b.north : 90.0
+            );
+
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             const aPos = gl.getAttribLocation(program, 'a_pos');
             gl.enableVertexAttribArray(aPos);
@@ -784,6 +832,17 @@ export function createEnsembleShaderLayer(mapInstance) {
             gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), 1.0);
             gl.uniform2f(gl.getUniformLocation(program, 'u_texResolution'), this.texResolution[0], this.texResolution[1]);
             gl.uniform1f(gl.getUniformLocation(program, 'u_isPixelated'), 0.0);
+
+            const b = stateManager.manifest?.bounds;
+            const isRegional = Boolean(b && b.west !== undefined && b.east !== undefined && b.south !== undefined && b.north !== undefined);
+            gl.uniform1f(gl.getUniformLocation(program, 'u_isRegional'), isRegional ? 1.0 : 0.0);
+            gl.uniform4f(
+                gl.getUniformLocation(program, 'u_bounds'),
+                isRegional ? b.west : -180.0,
+                isRegional ? b.east : 180.0,
+                isRegional ? b.south : -90.0,
+                isRegional ? b.north : 90.0
+            );
 
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
             
