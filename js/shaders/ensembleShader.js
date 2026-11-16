@@ -505,6 +505,7 @@ export function createEnsembleShaderLayer(mapInstance) {
                 const tex = gl.createTexture();
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+                gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
                 // Zero-copy raw byte slice from dataLoader
                 if (item.data && item.data instanceof Uint8Array) {
@@ -526,6 +527,8 @@ export function createEnsembleShaderLayer(mapInstance) {
                 else {
                     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, item);
                 }
+
+                gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
                 
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
