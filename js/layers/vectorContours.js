@@ -13,6 +13,7 @@ let activeContourFeatures = [];
 let currentVisibleStep = 0;
 let currentMember = 0; // 🌟 Tracks the active ensemble member (0-9)
 let lastCullCenter = null; // 🌟 Tracks the last parsed map center for spatial culling
+let onContoursReadyCallback = null;
 
 let displayedStep = null;
 let pendingApply = null;
@@ -28,6 +29,12 @@ const GPU_LAYER_ID = 'contour-gpu-layer';
 const LABEL_SOURCE_ID = 'contour-label-source';
 const LABEL_LAYER_ID = 'contour-master-label-layer';
 const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
+const ENSEMBLE_MODEL_REGEX = /^aifs_ens(?:_(?:11_20|21_30|31_40|41_50))?$/;
+
+function isEnsembleModel() {
+    const m = (stateManager.activeModel || stateManager.manifest?.model || '').toLowerCase();
+    return ENSEMBLE_MODEL_REGEX.test(m);
+}
 
 function getPvaContourThemeColor() {
     return stateManager.currentTheme === 'dark' ? '#ffffff' : '#000000';
@@ -105,10 +112,10 @@ function themeContourFeatures(featureCollection, masterData) {
             const nameStr = String(props.name || '').toLowerCase();
 
             let isThickness = (mslpCount > 0 && i >= mslpCount) ||
-                              unit === 'dam' || 
-                              idStr.includes('thick') || 
+                              unit === 'dam' ||
+                              idStr.includes('thick') ||
                               nameStr.includes('thick') ||
-                              (val >= 350 && val <= 750) || 
+                              (val >= 350 && val <= 750) ||
                               (val >= 3500 && val <= 7500);
 
             if (isThickness) {
@@ -226,6 +233,7 @@ uniform float u_scale;
 uniform float u_glow;
 uniform float u_alpha;
 uniform float u_dpr;
+uniform vec4 u_grid_transform;
 
 out vec4 v_color;
 out float v_dist;
@@ -234,6 +242,9 @@ out float v_dashed;
 void main() {
     vec4 c0 = PROJECT(vec2(a_p0.x + u_offsetX, a_p0.y));
     vec4 c1 = PROJECT(vec2(a_p1.x + u_offsetX, a_p1.y));
+    c0.xy = c0.xy * u_grid_transform.xy + u_grid_transform.zw * c0.w;
+    c1.xy = c1.xy * u_grid_transform.xy + u_grid_transform.zw * c1.w;
+
     vec2 hv = u_viewport * 0.5;
     vec2 s0 = c0.xy / c0.w * hv;
     vec2 s1 = c1.xy / c1.w * hv;
@@ -261,10 +272,10 @@ void main() {
     float wv = mix(c0.w, c1.w, a_corner.x);
     float zv = USE_PROJ_Z == 1 ? mix(c0.z, c1.z, a_corner.x) : 0.0;
     gl_Position = vec4(pos / hv * wv, zv, wv);
-    
+
     v_color = vec4(col.rgb, col.a * u_alpha);
     v_dashed = isDashed ? 1.0 : 0.0;
-    
+
     // Pass cumulative Mercator distance along the line segment
     float segMercLen = length(a_p1 - a_p0);
     v_dist = a_dist + (a_corner.x * segMercLen);
@@ -313,8 +324,31 @@ const gpu = {
     map: null, gl: null, ready: false,
     program: null, vao: null, cornerBuf: null, instBuf: null, u: {},
     pending: null, pendingCount: 0, dirty: false, count: 0,
+    memberSlots: [],
+    isGridMode: false, gridRects: null, gridSourceRect: null,
     globePrograms: new Map(), dbg: {}
 };
+
+function createInstancedVao(gl, cornerBuf, instBuf) {
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, instBuf);
+    const S = INSTANCE_STRIDE;
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, S, 0);  gl.vertexAttribDivisor(1, 1);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, S, 8);  gl.vertexAttribDivisor(2, 1);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, S, 16); gl.vertexAttribDivisor(3, 1);
+    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, S, 20); gl.vertexAttribDivisor(4, 1);
+    gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, S, 24); gl.vertexAttribDivisor(5, 1);
+    gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 1, gl.FLOAT, false, S, 28); gl.vertexAttribDivisor(6, 1);
+
+    gl.bindVertexArray(null);
+    return vao;
+}
 
 function compileShader(gl, type, src) {
     const sh = gl.createShader(type);
@@ -361,6 +395,7 @@ function getGlobeProgram(gl, sd) {
             u: {
                 viewport: L('u_viewport'), offsetX: L('u_offsetX'), pass: L('u_pass'),
                 scale: L('u_scale'), glow: L('u_glow'), alpha: L('u_alpha'), dpr: L('u_dpr'),
+                gridTransform: L('u_grid_transform'),
                 pMatrix: L('u_projection_matrix'),
                 pTile: L('u_projection_tile_mercator_coords'),
                 pClip: L('u_projection_clipping_plane'),
@@ -420,7 +455,8 @@ const gpuLayer = {
             scale: gl.getUniformLocation(prog, 'u_scale'),
             glow: gl.getUniformLocation(prog, 'u_glow'),
             alpha: gl.getUniformLocation(prog, 'u_alpha'),
-            dpr: gl.getUniformLocation(prog, 'u_dpr')
+            dpr: gl.getUniformLocation(prog, 'u_dpr'),
+            gridTransform: gl.getUniformLocation(prog, 'u_grid_transform')
         };
 
         gpu.cornerBuf = gl.createBuffer();
@@ -428,23 +464,14 @@ const gpuLayer = {
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 0, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
 
         gpu.instBuf = gl.createBuffer();
-        gpu.vao = gl.createVertexArray();
-        gl.bindVertexArray(gpu.vao);
+        gpu.vao = createInstancedVao(gl, gpu.cornerBuf, gpu.instBuf);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, gpu.cornerBuf);
-        gl.enableVertexAttribArray(0);
-        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        gpu.memberSlots = Array.from({ length: 10 }, () => {
+            const instBuf = gl.createBuffer();
+            const vao = createInstancedVao(gl, gpu.cornerBuf, instBuf);
+            return { instBuf, vao, key: null, count: 0 };
+        });
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, gpu.instBuf);
-        const S = INSTANCE_STRIDE;
-        gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, S, 0);  gl.vertexAttribDivisor(1, 1);
-        gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, S, 8);  gl.vertexAttribDivisor(2, 1);
-        gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, S, 16); gl.vertexAttribDivisor(3, 1);
-        gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, S, 20); gl.vertexAttribDivisor(4, 1);
-        gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, S, 24); gl.vertexAttribDivisor(5, 1);
-        gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 1, gl.FLOAT, false, S, 28); gl.vertexAttribDivisor(6, 1);
-
-        gl.bindVertexArray(null);
         gpu.ready = true;
         window.__contourGPU = gpu;
         logOnce('ready', 'GPU layer initialised, WebGL2 OK');
@@ -453,14 +480,20 @@ const gpuLayer = {
     render(gl, arg) {
         if (!gpu.ready) { logOnce('render-before-ready'); return; }
 
-        if (gpu.dirty) {
-            gl.bindBuffer(gl.ARRAY_BUFFER, gpu.instBuf);
-            gl.bufferData(gl.ARRAY_BUFFER, gpu.pending || new Uint8Array(0), gl.DYNAMIC_DRAW);
-            gpu.count = gpu.pending ? gpu.pendingCount : 0;
-            gpu.dirty = false;
-            logOnce('first-upload', 'segments:', gpu.count);
+        const isGrid = Boolean(gpu.isGridMode && gpu.gridRects && gpu.gridRects.length > 0);
+
+        if (isGrid) {
+            if (!activeMasterContours?.steps || currentVisibleStep === null) return;
+        } else {
+            if (gpu.dirty) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, gpu.instBuf);
+                gl.bufferData(gl.ARRAY_BUFFER, gpu.pending || new Uint8Array(0), gl.DYNAMIC_DRAW);
+                gpu.count = gpu.pending ? gpu.pendingCount : 0;
+                gpu.dirty = false;
+                logOnce('first-upload', 'segments:', gpu.count);
+            }
+            if (!gpu.count) { logOnce('no-segments', 'render ran but there is nothing to draw'); return; }
         }
-        if (!gpu.count) { logOnce('no-segments', 'render ran but there is nothing to draw'); return; }
 
         const map = gpu.map;
         const pd = arg && arg.defaultProjectionData;
@@ -517,7 +550,6 @@ const gpuLayer = {
         gl.disable(gl.DEPTH_TEST);
         gl.disable(gl.STENCIL_TEST);
         gl.disable(gl.CULL_FACE);
-        gl.disable(gl.SCISSOR_TEST);
         gl.colorMask(true, true, true, true);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -532,11 +564,72 @@ const gpuLayer = {
         } else {
             gl.uniformMatrix4fv(U.matrix, false, new Float32Array(m));
         }
-        gl.uniform2f(U.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.uniform1f(U.scale, scaleVal);
         gl.uniform1f(U.glow, glowWidth);
         gl.uniform1f(U.alpha, zs.alpha);
         gl.uniform1f(U.dpr, dpr);
+
+        if (isGrid) {
+            const sr = gpu.gridSourceRect;
+            const sourceW = sr?.w || gl.drawingBufferWidth;
+            const sourceH = sr?.h || gl.drawingBufferHeight;
+            const canvasW = sr?.canvasW || gl.drawingBufferWidth;
+            const canvasH = sr?.canvasH || gl.drawingBufferHeight;
+            const sourceX = sr?.x || 0;
+            const sourceY = sr?.y || 0;
+
+            gl.uniform4f(
+                U.gridTransform,
+                canvasW / sourceW,
+                canvasH / sourceH,
+                canvasW / sourceW - (2.0 * sourceX / sourceW) - 1.0,
+                1.0 - canvasH / sourceH + (2.0 * sourceY / sourceH)
+            );
+            gl.enable(gl.SCISSOR_TEST);
+
+            const theme = stateManager.currentTheme || 'light';
+            for (let memberIndex = 0; memberIndex < gpu.gridRects.length; memberIndex++) {
+                const rect = gpu.gridRects[memberIndex];
+                if (!rect || rect.w <= 0 || rect.h <= 0) continue;
+
+                const slot = gpu.memberSlots[memberIndex];
+                if (!slot) continue;
+
+                const slotKey = `${currentVisibleStep}_m${memberIndex}_${theme}`;
+                if (slot.key !== slotKey) {
+                    const data = getStepData(currentVisibleStep, activeMasterContours, currentVisibleStep, memberIndex);
+                    slot.key = slotKey;
+                    slot.count = data ? data.count : 0;
+                    if (slot.count > 0) {
+                        gl.bindBuffer(gl.ARRAY_BUFFER, slot.instBuf);
+                        gl.bufferData(gl.ARRAY_BUFFER, data.bytes, gl.DYNAMIC_DRAW);
+                    }
+                }
+                if (!slot.count) continue;
+
+                gl.viewport(rect.x, rect.y, rect.w, rect.h);
+                gl.scissor(rect.x, rect.y, rect.w, rect.h);
+                gl.uniform2f(U.viewport, rect.w, rect.h);
+
+                gl.bindVertexArray(slot.vao);
+                for (let pass = 1; pass >= 0; pass--) {
+                    gl.uniform1f(U.pass, pass);
+                    for (const w of offsets) {
+                        gl.uniform1f(U.offsetX, w);
+                        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, slot.count);
+                    }
+                }
+            }
+
+            gl.bindVertexArray(null);
+            gl.disable(gl.SCISSOR_TEST);
+            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+            return;
+        }
+
+        gl.disable(gl.SCISSOR_TEST);
+        gl.uniform4f(U.gridTransform, 1.0, 1.0, 0.0, 0.0);
+        gl.uniform2f(U.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
         gl.bindVertexArray(gpu.vao);
         for (let pass = 1; pass >= 0; pass--) {
@@ -573,6 +666,11 @@ const gpuLayer = {
             if (gpu.cornerBuf) gl.deleteBuffer(gpu.cornerBuf);
             if (gpu.instBuf) gl.deleteBuffer(gpu.instBuf);
             if (gpu.vao) gl.deleteVertexArray(gpu.vao);
+            for (const slot of gpu.memberSlots) {
+                if (slot.instBuf) gl.deleteBuffer(slot.instBuf);
+                if (slot.vao) gl.deleteVertexArray(slot.vao);
+            }
+            gpu.memberSlots = [];
         } catch (e) {}
         gpu.program = gpu.cornerBuf = gpu.instBuf = gpu.vao = null;
         gpu.ready = false;
@@ -700,15 +798,15 @@ function packColor(str, alpha, fallback = '#ffffff') {
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const isEnsemble = stateManager.activeModel === 'aifs_ens' || /^aifs_ens_(11_20|21_30|31_40|41_50)$/.test(stateManager.activeModel);
-    
+    const isEnsemble = isEnsembleModel();
+
     // 🌟 Force 1 subdivision in ensemble mode (cards are too small to need high-res splines)
     const SUBDIVISIONS = (isMobile || isEnsemble) ? 1 : 3;
     const zoom = mapInstance ? mapInstance.getZoom() : 0;
-    
+
     let cullCenter = null;
     let cullRadiusSq = 0;
-    
+
     // 🌟 Spatial Culling: Pre-calculate screen boundaries to skip storms in other continents
     if (mapInstance && zoom > 2.5) {
         cullCenter = mapInstance.getCenter();
@@ -744,7 +842,7 @@ function prepareStep(featureCollection) {
     for (const { props, lines } of items) {
         const hasOutline = props.outlineColor !== undefined && props.outlineColor !== null;
         const rawWidth = Number(props.width) > 0 ? Number(props.width) : 2.0;
-        
+
         // 🌟 Negative width flags dashed lines for the GPU fragment shader (0 memory cost)
         const isDashed = Boolean(props.dotted);
         const width = isDashed ? -rawWidth : rawWidth;
@@ -755,7 +853,7 @@ function prepareStep(featureCollection) {
 
         for (const rawLine of lines) {
             if (rawLine.length < 2) continue;
-            
+
             // 🌟 SPATIAL CULLING: Drop lines completely outside the screen buffer
             if (cullCenter) {
                 let inBounds = false;
@@ -787,9 +885,9 @@ function prepareStep(featureCollection) {
                 if (Math.abs(dx) < 0.5) {
                     if (n * 8 + 7 >= f32.length) break;
                     const o = n * 8;
-                    f32[o]     = prev[0]; 
+                    f32[o]     = prev[0];
                     f32[o + 1] = prev[1];
-                    f32[o + 2] = cur[0];  
+                    f32[o + 2] = cur[0];
                     f32[o + 3] = cur[1];
                     f32[o + 4] = width;
                     u32[o + 5] = color;
@@ -833,12 +931,12 @@ function prepareStep(featureCollection) {
     return { bytes, count: n, labels: { type: 'FeatureCollection', features: labelFeatures } };
 }
 
-function getStepData(stepNum, masterData, rawStep = stepNum) {
+function getStepData(stepNum, masterData, rawStep = stepNum, memberIndex = currentMember) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const cacheKey = `${stepNum}_m${currentMember}_${stateManager.currentTheme || 'light'}`;
+    const cacheKey = `${stepNum}_m${memberIndex}_${stateManager.currentTheme || 'light'}`;
     if (stepCache.has(cacheKey)) return stepCache.get(cacheKey);
 
-    const stepData = masterData.steps[`${stepNum}_m${currentMember}`] ||
+    const stepData = masterData.steps[`${stepNum}_m${memberIndex}`] ||
                      masterData.steps[String(stepNum)] ||
                      masterData.steps[String(stepNum).padStart(3, '0')] ||
                      masterData.steps[`F${String(stepNum).padStart(3, '0')}`] ||
@@ -846,14 +944,14 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
                      masterData.steps[rawStep];
     if (!stepData) return null;
 
-    const decoded = binaryStepToGeoJson(stepNum, masterData) ||
+    const decoded = binaryStepToGeoJson(stepNum, masterData, memberIndex) ||
                     { ...stepData, features: (stepData.features || []).slice() };
     const themed = themeContourFeatures(decoded, masterData);
     const prepared = prepareStep(themed);
     prepared.features = themed.features || [];
-    
+
     if (prepared.count > 0 || !masterData.binary) {
-        const maxCacheSize = isMobile ? 8 : 40;
+        const maxCacheSize = isEnsembleModel() ? (isMobile ? 60 : 150) : (isMobile ? 8 : 40);
         if (stepCache.size > maxCacheSize) {
             const oldestKey = stepCache.keys().next().value;
             stepCache.delete(oldestKey);
@@ -868,7 +966,19 @@ function getStepData(stepNum, masterData, rawStep = stepNum) {
 function ensureLayers() {
     if (!mapInstance) return false;
     try {
-        if (!mapInstance.getLayer(GPU_LAYER_ID)) { mapInstance.addLayer(gpuLayer); logOnce('layer-added', 'custom layer added to map'); }
+        if (!mapInstance.getLayer(GPU_LAYER_ID)) {
+            mapInstance.addLayer(gpuLayer);
+            logOnce('layer-added', 'custom layer added to map');
+        } else if (isEnsembleModel() && mapInstance.getLayer('weather-gpu-shader')) {
+            const layers = mapInstance.getStyle()?.layers || [];
+            const wIdx = layers.findIndex(l => l.id === 'weather-gpu-shader');
+            const cIdx = layers.findIndex(l => l.id === GPU_LAYER_ID);
+            if (wIdx !== -1 && cIdx !== -1 && cIdx < wIdx) {
+                mapInstance.moveLayer(GPU_LAYER_ID);
+            }
+        }
+
+        if (isEnsembleModel()) return true;
 
         if (!mapInstance.getSource(LABEL_SOURCE_ID)) {
             mapInstance.addSource(LABEL_SOURCE_ID, { type: 'geojson', data: EMPTY_GEOJSON });
@@ -905,9 +1015,9 @@ function ensureLayers() {
 
 function setLabels(fc) {
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
-    
+
     // 🌟 Disable slow GeoJSON worker loop in ensemble mode
-    if (stateManager.activeModel === 'aifs_ens' || /^aifs_ens_(11_20|21_30|31_40|41_50)$/.test(stateManager.activeModel)) return;
+    if (isEnsembleModel()) return;
 
     const src = mapInstance && mapInstance.getSource(LABEL_SOURCE_ID);
     if (src) src.setData(fc || EMPTY_GEOJSON);
@@ -954,18 +1064,39 @@ function startPreload(masterData, aroundStep) {
 
     const run = ++preloadRun;
     preloadStartedFor = masterData;
-    const nums = Object.keys(masterData?.steps || {})
-        .map(k => parseInt(String(k).replace(/\D/g, ''), 10))
-        .filter(n => !isNaN(n))
-        .sort((a, b) => Math.abs(a - aroundStep) - Math.abs(b - aroundStep));
+    const nums = [...new Set(
+        Object.keys(masterData?.steps || {})
+            .map(k => parseInt(String(k).split('_')[0].replace(/\D/g, ''), 10))
+            .filter(n => !isNaN(n))
+    )].sort((a, b) => Math.abs(a - aroundStep) - Math.abs(b - aroundStep));
     let idx = 0;
 
     const next = () => {
         if (run !== preloadRun || !mapInstance || activeMasterContours !== masterData) return;
         const currentTheme = stateManager.currentTheme || 'light';
-        while (idx < nums.length && stepCache.has(`${nums[idx]}_m${currentMember}_${currentTheme}`)) idx++;
+        const ensembleMode = isEnsembleModel();
+        const memberCount = ensembleMode ? 10 : 1;
+
+        while (idx < nums.length) {
+            const s = nums[idx];
+            let allCached = true;
+            for (let m = 0; m < memberCount; m++) {
+                const mem = ensembleMode ? m : currentMember;
+                if (!stepCache.has(`${s}_m${mem}_${currentTheme}`)) {
+                    allCached = false;
+                    break;
+                }
+            }
+            if (!allCached) break;
+            idx++;
+        }
         if (idx >= nums.length) return;
-        getStepData(nums[idx++], masterData);
+
+        const stepToPrep = nums[idx++];
+        for (let m = 0; m < memberCount; m++) {
+            const mem = ensembleMode ? m : currentMember;
+            getStepData(stepToPrep, masterData, stepToPrep, mem);
+        }
         setTimeout(next, PRELOAD_INTERVAL_MS);
     };
     setTimeout(next, 0);
@@ -979,36 +1110,64 @@ export function setContourActiveMember(memberIndex) {
     }
 }
 
+export function setContourGridMode(enabled, rects = null, sourceRect = null) {
+    gpu.isGridMode = enabled;
+    gpu.gridRects = rects;
+    gpu.gridSourceRect = sourceRect;
+}
+
+export function ensureEnsembleContourLayer() {
+    ensureLayers();
+}
+
 export function getActiveContourFeatures() {
     return activeContourFeatures;
 }
 
-export function initVectorContours(map) {
+export function initVectorContours(map, onContoursReady = null) {
+    if (onContoursReady) onContoursReadyCallback = onContoursReady;
+
+    if (mapInstance && mapInstance !== map) {
+        try {
+            if (mapInstance.getLayer(GPU_LAYER_ID)) mapInstance.removeLayer(GPU_LAYER_ID);
+            if (mapInstance.getLayer(LABEL_LAYER_ID)) mapInstance.removeLayer(LABEL_LAYER_ID);
+            if (mapInstance.getSource(LABEL_SOURCE_ID)) mapInstance.removeSource(LABEL_SOURCE_ID);
+        } catch (e) {}
+        gpu.ready = false;
+    }
+
     mapInstance = map;
+    if (!map) return;
 
     // 🌟 Panning Culling Tracker: If user pans a lot, rebuild the culled contours
-    map.on('moveend', () => {
-        if (lastCullCenter) {
-            const currentCenter = map.getCenter();
-            let dx = Math.abs(currentCenter.lng - lastCullCenter.lng);
-            while (dx > 180) dx = Math.abs(dx - 360);
-            let dy = currentCenter.lat - lastCullCenter.lat;
-            const dist = Math.hypot(dx, dy);
-            
-            // If panned 20+ degrees or zoomed significantly, invalidate cache & rerender
-            if (dist > 20 || Math.abs(map.getZoom() - lastCullCenter.zoom) > 0.5) {
-                if (stateManager.currentStepIndex !== undefined) {
-                    const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
-                    if (step !== undefined) updateVectorContours(step, true); // Force update
+    if (!map._contoursMoveBound) {
+        map._contoursMoveBound = true;
+        map.on('moveend', async () => {
+            if (lastCullCenter) {
+                const currentCenter = map.getCenter();
+                let dx = Math.abs(currentCenter.lng - lastCullCenter.lng);
+                while (dx > 180) dx = Math.abs(dx - 360);
+                let dy = currentCenter.lat - lastCullCenter.lat;
+                const dist = Math.hypot(dx, dy);
+
+                // If panned 20+ degrees or zoomed significantly, invalidate cache & rerender
+                if (dist > 20 || Math.abs(map.getZoom() - lastCullCenter.zoom) > 0.5) {
+                    if (stateManager.currentStepIndex !== undefined) {
+                        const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
+                        if (step !== undefined) {
+                            await updateVectorContours(step, true);
+                            if (isEnsembleModel() && onContoursReadyCallback) onContoursReadyCallback();
+                        }
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 
     if (!map._contoursZoomBound) {
         map._contoursZoomBound = true;
         map._contoursLowZoom = map.getZoom() < 5.0;
-        map.on('zoomend', () => {
+        map.on('zoomend', async () => {
             const lowZoom = map.getZoom() < 5.0;
             if (lowZoom === map._contoursLowZoom) return;
             map._contoursLowZoom = lowZoom;
@@ -1016,7 +1175,10 @@ export function initVectorContours(map) {
             const activeParam = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
             if (activeParam === 'prate' && stateManager.currentStepIndex !== undefined) {
                 const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
-                if (step !== undefined) updateVectorContours(step, true);
+                if (step !== undefined) {
+                    await updateVectorContours(step, true);
+                    if (isEnsembleModel() && onContoursReadyCallback) onContoursReadyCallback();
+                }
             }
         });
     }
@@ -1035,6 +1197,14 @@ export function clearVectorContours() {
     pendingApply = null;
     stepCache.clear();
 
+    gpu.isGridMode = false;
+    gpu.gridRects = null;
+    gpu.gridSourceRect = null;
+    for (const slot of gpu.memberSlots) {
+        slot.key = null;
+        slot.count = 0;
+    }
+
     if (mapInstance) {
         try {
             if (mapInstance.getLayer(GPU_LAYER_ID)) mapInstance.removeLayer(GPU_LAYER_ID);
@@ -1052,11 +1222,12 @@ function getMasterKeyComponents() {
     const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
-    return { model, param, targetDate, runCycle, key: `${model}_${param}_${targetDate}_${runCycle}` };
+    const memberRange = stateManager.manifest?.member_range || '';
+    return { model, param, targetDate, runCycle, memberRange, key: `${model}_${param}_${targetDate}_${runCycle}_${memberRange}` };
 }
 
 async function loadMasterContourFile() {
-    const { model, param, targetDate, runCycle, key } = getMasterKeyComponents();
+    const { model, param, targetDate, runCycle, memberRange, key } = getMasterKeyComponents();
 
     if (activeMasterKey === key && activeMasterContours) {
         return activeMasterContours;
@@ -1071,6 +1242,14 @@ async function loadMasterContourFile() {
     const urlsToTry = [];
     const cycleWithZ = runCycle ? (runCycle.endsWith('z') ? runCycle : `${runCycle}z`) : '';
     const cycleNoZ = runCycle ? runCycle.replace(/z$/, '') : '';
+
+    if (memberRange && memberRange !== 'm01-m10') {
+        if (targetDate && runCycle) {
+            if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleWithZ}_contours_${memberRange}.json?v=${Date.now()}`);
+            if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleNoZ}_contours_${memberRange}.json?v=${Date.now()}`);
+        }
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours_${memberRange}.json?v=${Date.now()}`);
+    }
 
     if (param === 'pva' || param === 'z500_anom') {
         if (targetDate && runCycle) {
@@ -1238,7 +1417,7 @@ function decodeContourV2(view, coordinateScale) {
 
         if (offset !== payloadEnd) return null;
         steps.set(String(step), features);
-        
+
         if (step >= 1000) {
             const sNum = Math.floor(step / 1000);
             const mNum = step % 1000;
@@ -1252,17 +1431,17 @@ function decodeContourV2(view, coordinateScale) {
     return steps;
 }
 
-function binaryStepToGeoJson(step, masterData) {
+function binaryStepToGeoJson(step, masterData, memberIndex = currentMember) {
     if (!masterData?.steps) return null;
     const stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     const stepKey = String(stepNum);
 
-    const features = activeContourBinary?.get(`${stepKey}_m${currentMember}`) ||
-                     activeContourBinary?.get(stepKey) || 
+    const features = activeContourBinary?.get(`${stepKey}_m${memberIndex}`) ||
+                     activeContourBinary?.get(stepKey) ||
                      activeContourBinary?.get(String(step)) ||
                      activeContourBinary?.get(stepKey.padStart(3, '0'));
 
-    const stepObj = masterData.steps[`${stepKey}_m${currentMember}`] ||
+    const stepObj = masterData.steps[`${stepKey}_m${memberIndex}`] ||
                     masterData.steps[stepKey] ||
                     masterData.steps[stepKey.padStart(3, '0')] ||
                     masterData.steps[`F${stepKey.padStart(3, '0')}`] ||
@@ -1291,14 +1470,23 @@ export async function updateVectorContours(step, forceUpdate = false) {
 
     if (forceUpdate) {
         stepCache.clear();
+        for (const slot of gpu.memberSlots) {
+            slot.key = null;
+            slot.count = 0;
+        }
         preloadStartedFor = null;
     }
 
-    scheduleApply(stepNum, step, forceUpdate);
+    if (isEnsembleModel()) {
+        ensureLayers();
+    } else {
+        scheduleApply(stepNum, step, forceUpdate);
+    }
+
     if (preloadStartedFor !== masterData) startPreload(masterData, stepNum);
 }
 
 export async function preloadAllContours() {
     const masterData = await loadMasterContourFile();
-    if (!masterData?.steps && preloadStartedFor !== masterData) startPreload(masterData, currentVisibleStep);
+    if (masterData?.steps && preloadStartedFor !== masterData) startPreload(masterData, currentVisibleStep);
 }
