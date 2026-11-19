@@ -1078,23 +1078,50 @@ async function loadMasterContourFile() {
     const cycleWithZ = runCycle ? (runCycle.endsWith('z') ? runCycle : `${runCycle}z`) : '';
     const cycleNoZ = runCycle ? runCycle.replace(/z$/, '') : '';
 
+    const rawModel = (stateManager.manifest?.model || stateManager.activeModel || '').toLowerCase();
+    let memberTag = null;
+    const memberMatch = rawModel.match(/_(\d+)_(\d+)$/);
+    if (memberMatch) {
+        memberTag = `m${String(memberMatch[1]).padStart(2, '0')}-m${String(memberMatch[2]).padStart(2, '0')}`;
+    } else if (rawModel.includes('ens')) {
+        memberTag = 'm01-m10';
+    }
+
     if (param === 'pva' || param === 'z500_anom') {
         if (targetDate && runCycle) {
+            if (memberTag) {
+                if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${cycleWithZ}_${memberTag}_contours.json?v=${Date.now()}`);
+                if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${cycleNoZ}_${memberTag}_contours.json?v=${Date.now()}`);
+            }
             if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${cycleWithZ}_contours.json?v=${Date.now()}`);
             if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${targetDate}_${cycleNoZ}_contours.json?v=${Date.now()}`);
         }
+        if (memberTag) urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_${memberTag}_contours.json?v=${Date.now()}`);
         urlsToTry.push(`${stateManager.BASE_URL}${model}_z500_contours.json?v=${Date.now()}`);
     } else if (param.startsWith('w')) {
         const zParam = param.replace('w', 'z');
         if (targetDate && runCycle) {
+            if (memberTag) {
+                if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${cycleWithZ}_${memberTag}_contours.json?v=${Date.now()}`);
+                if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${cycleNoZ}_${memberTag}_contours.json?v=${Date.now()}`);
+            }
             if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${cycleWithZ}_contours.json?v=${Date.now()}`);
             if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${targetDate}_${cycleNoZ}_contours.json?v=${Date.now()}`);
         }
+        if (memberTag) urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_${memberTag}_contours.json?v=${Date.now()}`);
         urlsToTry.push(`${stateManager.BASE_URL}${model}_${zParam}_contours.json?v=${Date.now()}`);
     }
     if (targetDate && runCycle) {
+        if (memberTag) {
+            if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleWithZ}_${memberTag}_contours.json?v=${Date.now()}`);
+            if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleNoZ}_${memberTag}_contours.json?v=${Date.now()}`);
+        }
         if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleWithZ}_contours.json?v=${Date.now()}`);
         if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleNoZ}_contours.json?v=${Date.now()}`);
+    }
+    if (memberTag) {
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${memberTag}_contours.json?v=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${rawModel}_${param}_contours.json?v=${Date.now()}`);
     }
     urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours.json?v=${Date.now()}`);
     if (param === '2t' || param.includes('temp')) {
@@ -1173,6 +1200,15 @@ async function decodeContourBinary(buffer, coordinateScale = 1000) {
             features.push({ type: 'Feature', geometry: { type: 'MultiLineString', coordinates: lines } });
         }
         steps.set(String(step), features);
+        if (step >= 1000) {
+            const sNum = Math.floor(step / 1000);
+            const mNum = step % 1000;
+            steps.set(`${sNum}_m${mNum}`, features);
+            steps.set(`${sNum}_${mNum}`, features);
+        } else if (step < 100) {
+            steps.set(`0_m${step}`, features);
+            steps.set(`0_${step}`, features);
+        }
     }
     return steps;
 }
@@ -1250,7 +1286,7 @@ function decodeContourV2(view, coordinateScale) {
             const mNum = step % 1000;
             steps.set(`${sNum}_m${mNum}`, features);
             steps.set(`${sNum}_${mNum}`, features);
-        } else if (step < 10) {
+        } else if (step < 100) {
             steps.set(`0_m${step}`, features);
             steps.set(`0_${step}`, features);
         }
@@ -1258,25 +1294,58 @@ function decodeContourV2(view, coordinateScale) {
     return steps;
 }
 
-function binaryStepToGeoJson(step, masterData) {
+function binaryStepToGeoJson(step, masterData, memberIdx = currentMember) {
     if (!masterData?.steps) return null;
     const stepNum = typeof step === 'number' ? step : parseInt(String(step).replace(/\D/g, ''), 10) || 0;
     const stepKey = String(stepNum);
 
-    const features = activeContourBinary?.get(`${stepKey}_m${currentMember}`) ||
-                     activeContourBinary?.get(stepKey) || 
-                     activeContourBinary?.get(String(step)) ||
-                     activeContourBinary?.get(stepKey.padStart(3, '0'));
+    const rawModel = (stateManager.manifest?.model || stateManager.activeModel || '').toLowerCase();
+    const match = rawModel.match(/_(\d+)_(\d+)$/);
+    const startIdx = match ? parseInt(match[1], 10) : 1; // e.g. 11 for 11_20, or 1 for 1_10
 
-    const stepObj = masterData.steps[`${stepKey}_m${currentMember}`] ||
-                    masterData.steps[stepKey] ||
-                    masterData.steps[stepKey.padStart(3, '0')] ||
-                    masterData.steps[`F${stepKey.padStart(3, '0')}`] ||
-                    masterData.steps[step] ||
-                    masterData.steps[String(step)];
+    const candKeys = [
+        `${stepKey}_m${memberIdx}`,
+        `${stepKey}_m${startIdx + memberIdx}`,
+        `${stepKey}_m${startIdx + memberIdx - 1}`,
+        `${stepKey}_m${memberIdx + 1}`,
+        `${stepKey}_${memberIdx}`,
+        `${stepKey}_${startIdx + memberIdx}`,
+        stepKey,
+        stepKey.padStart(3, '0'),
+        String(step)
+    ];
+
+    let features = null;
+    let stepObj = null;
+
+    if (activeContourBinary) {
+        for (const k of candKeys) {
+            features = activeContourBinary.get(k);
+            if (features) break;
+        }
+    }
+
+    if (masterData.steps) {
+        for (const k of candKeys) {
+            stepObj = masterData.steps[k];
+            if (stepObj) break;
+        }
+        if (!stepObj) {
+            stepObj = masterData.steps[`F${stepKey.padStart(3, '0')}`];
+        }
+    }
 
     const metadata = stepObj?.features?.map(feature => feature.properties) || [];
-    if (!features) return null;
+    if (!features) {
+        if (stepObj?.features) {
+            return {
+                type: 'FeatureCollection',
+                features: stepObj.features
+            };
+        }
+        return null;
+    }
+
     return {
         type: 'FeatureCollection',
         features: features.map((feature, index) => ({
@@ -1284,6 +1353,72 @@ function binaryStepToGeoJson(step, masterData) {
             properties: metadata[index] || {}
         }))
     };
+}
+
+export function getFeaturesForMember(stepNum, memberIdx) {
+    if (!activeMasterContours?.steps) return [];
+    const decoded = binaryStepToGeoJson(stepNum, activeMasterContours, memberIdx);
+    if (!decoded || !decoded.features || decoded.features.length === 0) return [];
+    const themed = themeContourFeatures(decoded, activeMasterContours);
+    return themed?.features || [];
+}
+
+export function drawMemberContoursToCanvas(ctx, memberIndex, stepNum, sx, sy, sWidth, sHeight, targetW, targetH, map) {
+    if (!ctx || !map) return;
+    const feats = getFeaturesForMember(stepNum, memberIndex);
+    if (!feats || feats.length === 0) return;
+
+    const scaleX = targetW / sWidth;
+    const scaleY = targetH / sHeight;
+
+    ctx.save();
+    for (const f of feats) {
+        const g = f?.geometry;
+        if (!g) continue;
+        const props = f.properties || {};
+        const strokeColor = props.stroke || props.color || '#000000';
+        const isDotted = Boolean(props.dotted || props.width < 0);
+        const lineWidth = Math.max(1.0, (Number(props.width) || 1.4) * 0.9);
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = lineWidth;
+        if (isDotted) {
+            ctx.setLineDash([3, 3]);
+        } else {
+            ctx.setLineDash([]);
+        }
+
+        const lines = g.type === 'MultiLineString' ? g.coordinates : (g.type === 'LineString' ? [g.coordinates] : null);
+        if (!lines) continue;
+
+        for (const line of lines) {
+            if (!line || line.length < 2) continue;
+            ctx.beginPath();
+            let started = false;
+            let lastX = 0, lastY = 0;
+
+            for (let i = 0; i < line.length; i++) {
+                const pt = map.project([line[i][0], line[i][1]]);
+                const cx = (pt.x - sx) * scaleX;
+                const cy = (pt.y - sy) * scaleY;
+
+                if (!started) {
+                    ctx.moveTo(cx, cy);
+                    started = true;
+                } else {
+                    if (Math.hypot(cx - lastX, cy - lastY) > targetW * 0.5) {
+                        ctx.moveTo(cx, cy);
+                    } else {
+                        ctx.lineTo(cx, cy);
+                    }
+                }
+                lastX = cx;
+                lastY = cy;
+            }
+            ctx.stroke();
+        }
+    }
+    ctx.restore();
 }
 
 export async function updateVectorContours(step, forceUpdate = false) {

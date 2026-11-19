@@ -27,8 +27,7 @@ import {
     formatParameterValue,
     destroyCityOverlay,
     setBasemapLabelsVisibility 
-} from './layers/cityOverlay.js'; 
-import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures } from './layers/vectorContours.js';
+import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures, drawMemberContoursToCanvas } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setPolarContourFeatures } from './layers/polarMap.js';
 
 // 🛰️ Real-Time Radar Engine
@@ -683,6 +682,10 @@ export async function renderAllEnsembleMembers() {
             if (linesCanvas) {
                 item.ctx.drawImage(linesCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
             }
+
+            // 🌟 Overlay vector contours for this member (MSLP, thickness, 32°F, etc.)
+            const currentStep = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step ?? 0;
+            drawMemberContoursToCanvas(item.ctx, memberIndex, currentStep, sx, sy, sWidth, sHeight, targetW, targetH, map);
         });
 
     } finally {
