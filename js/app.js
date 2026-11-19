@@ -462,14 +462,14 @@ function getCardCanvases() {
         return cachedCardCanvases;
     }
     const cards = document.querySelectorAll('.map-card');
-    cachedCardCanvases = Array.from(cards).map(card => {
+    cachedCardCanvases = Array.from(cards).map((card, index) => {
         const expandButton = card.querySelector('.ensemble-expand-btn');
         if (expandButton && !expandButton.dataset.bound) {
             expandButton.dataset.bound = 'true';
             expandButton.addEventListener('click', event => {
                 event.preventDefault();
                 event.stopPropagation();
-                setExpandedEnsembleMember(Number(card.dataset.member.replace(/\D/g, '')) - 1);
+                setExpandedEnsembleMember(index);
             });
         }
         let canvas = card.querySelector('canvas');
