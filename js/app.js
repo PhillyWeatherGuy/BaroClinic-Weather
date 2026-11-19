@@ -27,6 +27,7 @@ import {
     formatParameterValue,
     destroyCityOverlay,
     setBasemapLabelsVisibility 
+} from './layers/cityOverlay.js'; 
 import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures, drawMemberContoursToCanvas } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setPolarContourFeatures } from './layers/polarMap.js';
 
