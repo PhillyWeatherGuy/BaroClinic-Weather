@@ -700,7 +700,9 @@ function packColor(str, alpha, fallback = '#ffffff') {
 function prepareStep(featureCollection) {
     const feats = featureCollection?.features || [];
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const isEnsemble = stateManager.activeModel === 'aifs_ens' || /^aifs_ens_(11_20|21_30|31_40|41_50)$/.test(stateManager.activeModel);
+    const isEnsemble = stateManager.manifest?.type === 'ensemble_chunked' || 
+                       stateManager.activeModel?.includes('ens') || 
+                       stateManager.manifest?.model?.includes('ens');
     
     // 🌟 Force 1 subdivision in ensemble mode (cards are too small to need high-res splines)
     const SUBDIVISIONS = (isMobile || isEnsemble) ? 1 : 3;
@@ -907,7 +909,9 @@ function setLabels(fc) {
     if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     
     // 🌟 Disable slow GeoJSON worker loop in ensemble mode
-    if (stateManager.activeModel === 'aifs_ens' || /^aifs_ens_(11_20|21_30|31_40|41_50)$/.test(stateManager.activeModel)) return;
+    if (stateManager.manifest?.type === 'ensemble_chunked' || 
+        stateManager.activeModel?.includes('ens') || 
+        stateManager.manifest?.model?.includes('ens')) return;
 
     const src = mapInstance && mapInstance.getSource(LABEL_SOURCE_ID);
     if (src) src.setData(fc || EMPTY_GEOJSON);
@@ -1048,7 +1052,9 @@ export function clearVectorContours() {
 }
 
 function getMasterKeyComponents() {
-    const model = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
+    let rawModel = (stateManager.manifest?.model || stateManager.activeModel || 'ecmwf').toLowerCase();
+    // Normalize ensemble variants (e.g. aifs_ens_11_20 -> aifs_ens)
+    const model = rawModel.replace(/_(\d+)_(\d+)$/, '');
     const param = (stateManager.paramConfig?.id || stateManager.activeParam || stateManager.manifest?.parameter || '2t').toLowerCase();
     const targetDate = stateManager.manifest?.date || stateManager.currentDate;
     const runCycle = (stateManager.manifest?.run || stateManager.currentCycle || '').toLowerCase();
