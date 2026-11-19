@@ -28,7 +28,7 @@ import {
     destroyCityOverlay,
     setBasemapLabelsVisibility 
 } from './layers/cityOverlay.js'; 
-import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures } from './layers/vectorContours.js';
+import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures, setContourGridMode, ensureEnsembleContourLayer } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setPolarContourFeatures } from './layers/polarMap.js';
 
 // 🛰️ Real-Time Radar Engine
@@ -237,6 +237,8 @@ function addEnsembleLayerToWeatherMap(layer) {
         if (customShaderLayer !== layer) return; // superseded by a newer initLayer()
         if (weatherMap.getLayer('weather-gpu-shader')) weatherMap.removeLayer('weather-gpu-shader');
         weatherMap.addLayer(layer);
+        initVectorContours(weatherMap, () => renderAllEnsembleMembers());
+        ensureEnsembleContourLayer();
 
         for (const chunkIdx in stateManager.loadedChunkBitmaps) {
             const volume = stateManager.loadedChunkBitmaps[chunkIdx];
@@ -414,6 +416,10 @@ const ENSEMBLE_RANGE_MODELS = new Set([
 
 function isEnsembleRangeModel(modelId = stateManager.activeModel) {
     return ENSEMBLE_RANGE_MODELS.has(modelId);
+}
+
+function getContourTargetMap() {
+    return isEnsembleRangeModel() ? (weatherMap || map) : map;
 }
 
 function setExpandedEnsembleMember(memberIndex = null) {
@@ -642,19 +648,23 @@ export async function renderAllEnsembleMembers() {
         });
 
         // Render all ten members in one MapLibre pass, one texture per scissored card.
-        customShaderLayer.setGridMode(true, boxRects, {
+        const gridSourceRect = {
             x: sx,
             y: sy,
             w: sWidth,
             h: sHeight,
             canvasW: weatherCanvas.width,
             canvasH: weatherCanvas.height
-        });
+        };
+        ensureEnsembleContourLayer();
+        customShaderLayer.setGridMode(true, boxRects, gridSourceRect);
+        setContourGridMode(true, boxRects, gridSourceRect);
         // Synchronous redraw of the hidden weather map: the grid is drawn into ITS canvas only
         if (typeof weatherMap.redraw === 'function') weatherMap.redraw();
         else weatherMap._render();
 
         customShaderLayer.setGridMode(false, null);
+        setContourGridMode(false, null);
 
         // Assemble the frozen basemap and the matching scissored member into each card.
         const linesCanvas = renderLinesMap() || staticOverlayCanvas;
@@ -782,7 +792,7 @@ export function updateBasemapStyle(styleUrl) {
         } else {
             setBasemapLabelsVisibility(map, false);
             try { initLayer(); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
+            try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
             try { initCityOverlay(map); } catch (e) {}
 
             if (stateManager.currentStepIndex !== undefined) {
@@ -905,7 +915,7 @@ export function applyView(targetView) {
             customShaderLayer.updateFrame(stateManager.activeFrameState);
             try { updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest); } catch (e) {}
             if (stateManager.globalSteps && stateManager.globalSteps[stateManager.currentStepIndex]) {
-                try { initVectorContours(map); } catch (e) {}
+                try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
                 updateVectorContours(stateManager.globalSteps[stateManager.currentStepIndex].step);
             }
         }
@@ -1123,7 +1133,7 @@ async function renderFrame(globalIdx) {
 
     if (activeView === '2d' || activeView === '3d' || activeView === 'polar') {
         // 🌟 Load and update vector contours for ALL models (including AIFS-ENS)
-        try { initVectorContours(map); } catch (e) {}
+        try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
         await updateVectorContours(frameInfo.step);
 
         if (renderId !== activeRenderId) return;
@@ -1217,7 +1227,7 @@ async function loadInitialModelData() {
 
         await fetchManifest(null, stateManager.activeModel, stateManager.activeParam);
         initLayer();
-        try { initVectorContours(map); } catch (e) {}
+        try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
         syncModelRunDropdown();
 
         if (stateManager.manifest && stateManager.manifest.chunks) {
@@ -1282,7 +1292,7 @@ export async function switchAppMode(targetMode) {
         if (timeline) timeline.style.display = 'none';
         if (radarTools) radarTools.style.display = 'none';
         if (modelBtn) modelBtn.style.display = 'none';
-        if (paramBtn) modelBtn.style.display = 'none';
+        if (paramBtn) paramBtn.style.display = 'none';
         showComingSoonScreen(targetMode);
         return;
     }
@@ -1364,7 +1374,7 @@ export async function switchAppMode(targetMode) {
                 }
 
                 try { initCityOverlay(map); } catch (e) {}
-                try { initVectorContours(map); } catch (e) {}
+                try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
                 await loadInitialModelData();
                 hideToast();
             };
@@ -1378,7 +1388,7 @@ export async function switchAppMode(targetMode) {
             }
 
             try { initCityOverlay(map); } catch (e) {}
-            try { initVectorContours(map); } catch (e) {}
+            try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
             await loadInitialModelData();
             hideToast();
         }
@@ -1427,7 +1437,7 @@ map.on('load', async () => {
     initBasemapMap();
     initWeatherMap();
     initAtmosphereHaloCanvas();
-    try { initVectorContours(map); } catch (err) {}
+    try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (err) {}
     
     // 🌟 Cache basemap layer IDs for single-pass viewport mode
     basemapLayerIds = (map.getStyle().layers || [])
