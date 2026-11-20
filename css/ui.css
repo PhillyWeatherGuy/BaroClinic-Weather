@@ -1552,8 +1552,9 @@ body.light-mode .map-card {
     width: calc(50vw - 24px);
     z-index: 28;
     background: #131722;
-    border: 1px solid #232b3c;
-    border-radius: 10px;
+    border: 1px solid #ffffff;
+    outline: 1px solid #000000;
+    border-radius: 0;
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
     display: flex;
     flex-direction: column;
@@ -1563,6 +1564,11 @@ body.light-mode .map-card {
     opacity: 0;
     pointer-events: none;
     transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+/* Optional: square off the close button inside the header too */
+.basemap-editor-panel .close-btn {
+    border-radius: 0;
 }
 
 .basemap-editor-panel.open {
