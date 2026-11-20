@@ -4,6 +4,7 @@ import { getViewerPreferences, saveViewerPreferences } from '../core/viewerPrefe
 import { fetchManifest, loadChunkBitmap, purgeAllAppMemory } from '../core/dataLoader.js';
 import { preloadRemainingChunks, updateBasemapStyle, initLayer } from '../app.js';
 import { updatePolarPalette } from '../layers/polarMap.js';
+import { initBasemapEditor } from './basemapEditor.js';
 
 // 🛰️ Radar Imports
 import { radarState } from '../core/radarLoader.js';
@@ -1203,6 +1204,7 @@ export function initViewerUI(stepCallback, themeCallback = null, viewCallback = 
     initParameterCategoryBar();
     initThemeToggle();
     initUnitToggle(unitsCallback);
+    initBasemapEditor();
     initViewSelector(viewCallback);
     initKeyboardControls(zoomCallback);
     initTiltSelector();
