@@ -1508,3 +1508,101 @@ body.light-mode .map-card {
         grid-template-rows: repeat(5, 1fr);
     }
 }
+
+/* ==========================================
+   BASEMAP EDITOR BUTTON & EXPANDING PANEL
+   ========================================== */
+.basemap-toggle-btn {
+    position: absolute;
+    top: 62px;
+    right: 16px;
+    z-index: 26;
+    width: 34px;
+    height: 30px;
+    padding: 0;
+    background: #151a24;
+    border: 1px solid #232b3c;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    color: #94a3b8;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.basemap-toggle-btn:hover {
+    background: #1b212e;
+    border-color: #313c52;
+    color: #ffffff;
+}
+
+.basemap-toggle-btn.active {
+    background: #2563eb;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+
+.basemap-editor-panel {
+    position: absolute;
+    top: 62px;
+    right: 16px;
+    bottom: 58px;
+    width: calc(50vw - 24px);
+    z-index: 28;
+    background: #131722;
+    border: 1px solid #232b3c;
+    border-radius: 10px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform-origin: top right;
+    transform: scale(0.05);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+.basemap-editor-panel.open {
+    transform: scale(1);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.basemap-editor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid #232b3c;
+    flex-shrink: 0;
+}
+
+.basemap-editor-title {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.4px;
+    color: #f8fafc;
+}
+
+.basemap-editor-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+}
+
+@media (max-width: 1023px) {
+    .unit-toggle-pill {
+        right: 58px;
+        left: auto;
+    }
+
+    .basemap-editor-panel {
+        width: calc(100vw - 32px);
+        bottom: 96px;
+    }
+}
