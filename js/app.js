@@ -75,9 +75,9 @@ const map = new maplibregl.Map({
 });
 
 function syncBasemapMapCamera() {
+    if (!basemapMap || !basemapMapReady) return;
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && basemapMap.setProjection && basemapMap.getProjection()?.type !== proj.type) basemapMap.setProjection(proj);
-    if (!basemapMap || !basemapMapReady) return;
     basemapMap.jumpTo({
         center: map.getCenter(),
         zoom: map.getZoom(),
@@ -103,15 +103,25 @@ function initLinesMap() {
         center: map.getCenter(), zoom: map.getZoom(),
         interactive: false, attributionControl: false, preserveDrawingBuffer: true
     });
-    linesMap.once('load', () => { linesMapReady = true; });
+    linesMap.once('load', () => {
+        linesMapReady = true;
+        if (isDrawingEnsemble) renderAllEnsembleMembers();
+    });
 }
 
 function renderLinesMap() {
     if (!linesMap || !linesMapReady) return null;
     const c = map.getCanvas();
-    linesContainer.style.width = c.clientWidth + 'px';
-    linesContainer.style.height = c.clientHeight + 'px';
-    linesMap.resize();
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    if (!w || !h) return null;
+    const wPx = `${w}px`;
+    const hPx = `${h}px`;
+    if (linesContainer.style.width !== wPx || linesContainer.style.height !== hPx) {
+        linesContainer.style.width = wPx;
+        linesContainer.style.height = hPx;
+        linesMap.resize();
+    }
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && linesMap.getProjection()?.type !== proj.type) linesMap.setProjection(proj);
     linesMap.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
@@ -174,7 +184,14 @@ function updateBasemapMapStyle(styleUrl) {
         setBasemapLabelsVisibility(basemapMap, false);
         syncBasemapMapCamera();
         isBasemapCaptured = false;
-        if (linesMap) linesMap.setStyle(buildLinesStyle());
+        if (linesMap) {
+            linesMapReady = false;
+            linesMap.once('style.load', () => {
+                linesMapReady = true;
+                if (isDrawingEnsemble) renderAllEnsembleMembers();
+            });
+            linesMap.setStyle(buildLinesStyle());
+        }
     });
     basemapMap.setStyle(styleUrl);
 }
@@ -194,9 +211,9 @@ function syncWeatherMapSize() {
 }
 
 function syncWeatherMapCamera() {
+    if (!weatherMap || !weatherMapReady) return;
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && weatherMap.setProjection && weatherMap.getProjection()?.type !== proj.type) weatherMap.setProjection(proj);
-    if (!weatherMap || !weatherMapReady) return;
     weatherMap.jumpTo({
         center: map.getCenter(),
         zoom: map.getZoom(),
@@ -619,17 +636,7 @@ export async function renderAllEnsembleMembers() {
             sy = (mapCanvas.height - sHeight) / 2;
         }
 
-        // 🌟 1. CAPTURE FROZEN BASEMAP (Only happens once when map stops moving)
-        if (!isBasemapCaptured) {
-            captureBasemap();
-            if (!isBasemapCaptured) {
-                // Basemap tiles for this camera aren't ready: keep the last frame, retry when idle
-                if (basemapMap) basemapMap.once('idle', () => renderAllEnsembleMembers());
-                return;
-            }
-        }
-
-        // 🌟 2. Sync the hidden weather-only map to the live camera and size
+        // 🌟 Sync the hidden weather-only map to the live camera and size
         if (!syncWeatherMapSize()) return;
         syncWeatherMapCamera();
         const weatherCanvas = weatherMap.getCanvas();
@@ -666,8 +673,8 @@ export async function renderAllEnsembleMembers() {
         customShaderLayer.setGridMode(false, null);
         setContourGridMode(false, null);
 
-        // Assemble the frozen basemap and the matching scissored member into each card.
-        const linesCanvas = renderLinesMap() || staticOverlayCanvas;
+        // Assemble neutral card background, weather + contours, and border/coast overlay.
+        const linesCanvas = renderLinesMap();
         cardList.forEach((item, memberIndex) => {
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
@@ -793,7 +800,10 @@ export function updateBasemapStyle(styleUrl) {
             setBasemapLabelsVisibility(map, false);
             try { initLayer(); } catch (e) {}
             try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
+            try {
+                if (!isEnsembleRangeModel()) initCityOverlay(map);
+                else destroyCityOverlay();
+            } catch (e) {}
 
             if (stateManager.currentStepIndex !== undefined) {
                 renderFrame(stateManager.currentStepIndex);
@@ -1373,7 +1383,10 @@ export async function switchAppMode(targetMode) {
                     map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
                 }
 
-                try { initCityOverlay(map); } catch (e) {}
+                try {
+                    if (!isEnsembleRangeModel()) initCityOverlay(map);
+                    else destroyCityOverlay();
+                } catch (e) {}
                 try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
                 await loadInitialModelData();
                 hideToast();
@@ -1387,7 +1400,10 @@ export async function switchAppMode(targetMode) {
                 map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
             }
 
-            try { initCityOverlay(map); } catch (e) {}
+            try {
+                if (!isEnsembleRangeModel()) initCityOverlay(map);
+                else destroyCityOverlay();
+            } catch (e) {}
             try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
             await loadInitialModelData();
             hideToast();
@@ -1453,9 +1469,10 @@ map.on('style.load', () => {
 
 let liveRenderQueued = false;
 map.on('move', () => {
-    syncBasemapMapCamera();
-    if (!isDrawingEnsemble) return;
-    isBasemapCaptured = false;
+    if (!isDrawingEnsemble) {
+        syncBasemapMapCamera();
+        return;
+    }
     if (!liveRenderQueued) {
         liveRenderQueued = true;
         requestAnimationFrame(() => { liveRenderQueued = false; renderAllEnsembleMembers(); });
