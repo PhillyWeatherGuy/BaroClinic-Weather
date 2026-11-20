@@ -1475,6 +1475,8 @@ initViewerUI(
 setBasemapPresetCallback(async (presetId) => {
     if (presetId === 'satellite') {
         updateBasemapStyle('./config/map_style_satellite.json', true);
+    } else if (presetId === 'street') {
+        updateBasemapStyle('./config/map_style_street.json', true);
     } else if (presetId === 'default') {
         if (stateManager.activeMode === 'radar') {
             if (stateManager.currentMapStyle !== './config/style_radar.json') {
