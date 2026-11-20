@@ -1097,6 +1097,9 @@ export function initLayer(shaderType = null) {
     const satIndex = layers.findIndex(layer => layer.id === 'satellite');
     if (satIndex !== -1) {
         firstContentLayerId = layers[satIndex + 1]?.id || null;
+    } else if (stateManager.activeBasemapPreset === 'street') {
+        const runwayIdx = layers.findIndex(layer => layer.id === 'aeroway_runway');
+        firstContentLayerId = runwayIdx !== -1 ? layers[runwayIdx].id : null;
     } else {
         for (const layer of layers) {
             if (layer.id !== 'background') {
