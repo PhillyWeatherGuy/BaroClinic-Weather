@@ -1143,6 +1143,7 @@ export function initVectorContours(map, onContoursReady = null) {
     if (!map._contoursMoveBound) {
         map._contoursMoveBound = true;
         map.on('moveend', async () => {
+            if (!activeMasterContours?.steps) { lastCullCenter = null; return; }
             if (lastCullCenter) {
                 const currentCenter = map.getCenter();
                 let dx = Math.abs(currentCenter.lng - lastCullCenter.lng);
@@ -1152,6 +1153,7 @@ export function initVectorContours(map, onContoursReady = null) {
 
                 // If panned 20+ degrees or zoomed significantly, invalidate cache & rerender
                 if (dist > 20 || Math.abs(map.getZoom() - lastCullCenter.zoom) > 0.5) {
+                    lastCullCenter = { lng: currentCenter.lng, lat: currentCenter.lat, zoom: map.getZoom() };
                     if (stateManager.currentStepIndex !== undefined) {
                         const step = stateManager.globalSteps?.[stateManager.currentStepIndex]?.step;
                         if (step !== undefined) {
