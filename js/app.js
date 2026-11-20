@@ -109,9 +109,16 @@ function initLinesMap() {
 function renderLinesMap() {
     if (!linesMap || !linesMapReady) return null;
     const c = map.getCanvas();
-    linesContainer.style.width = c.clientWidth + 'px';
-    linesContainer.style.height = c.clientHeight + 'px';
-    linesMap.resize();
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    if (!w || !h) return false;
+    const wPx = `${w}px`;
+    const hPx = `${h}px`;
+    if (linesContainer.style.width !== wPx || linesContainer.style.height !== hPx) {
+        linesContainer.style.width = wPx;
+        linesContainer.style.height = hPx;
+        linesMap.resize();
+    }
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && linesMap.getProjection()?.type !== proj.type) linesMap.setProjection(proj);
     linesMap.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
@@ -174,7 +181,14 @@ function updateBasemapMapStyle(styleUrl) {
         setBasemapLabelsVisibility(basemapMap, false);
         syncBasemapMapCamera();
         isBasemapCaptured = false;
-        if (linesMap) linesMap.setStyle(buildLinesStyle());
+        if (linesMap) {
+            linesMapReady = false;
+            linesMap.once('style.load', () => {
+                linesMapReady = true;
+                if (isDrawingEnsemble) renderAllEnsembleMembers();
+            });
+            linesMap.setStyle(buildLinesStyle());
+        }
     });
     basemapMap.setStyle(styleUrl);
 }
@@ -194,9 +208,9 @@ function syncWeatherMapSize() {
 }
 
 function syncWeatherMapCamera() {
+    if (!weatherMap || !weatherMapReady) return;
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && weatherMap.setProjection && weatherMap.getProjection()?.type !== proj.type) weatherMap.setProjection(proj);
-    if (!weatherMap || !weatherMapReady) return;
     weatherMap.jumpTo({
         center: map.getCenter(),
         zoom: map.getZoom(),
@@ -620,14 +634,15 @@ export async function renderAllEnsembleMembers() {
         }
 
         // 🌟 1. CAPTURE FROZEN BASEMAP (Only happens once when map stops moving)
-        if (!isBasemapCaptured) {
-            captureBasemap();
-            if (!isBasemapCaptured) {
-                // Basemap tiles for this camera aren't ready: keep the last frame, retry when idle
-                if (basemapMap) basemapMap.once('idle', () => renderAllEnsembleMembers());
-                return;
-            }
-        }
+        // Removed this block as it's not used and adds overhead.
+        // if (!isBasemapCaptured) {
+        //     captureBasemap();
+        //     if (!isBasemapCaptured) {
+        //         // Basemap tiles for this camera aren't ready: keep the last frame, retry when idle
+        //         if (basemapMap) basemapMap.once('idle', () => renderAllEnsembleMembers());
+        //         return;
+        //     }
+        // }
 
         // 🌟 2. Sync the hidden weather-only map to the live camera and size
         if (!syncWeatherMapSize()) return;
@@ -638,7 +653,7 @@ export async function renderAllEnsembleMembers() {
         const mapRect = mapCanvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const boxRects = cardList.map(item => {
-            const rect = item.canvas.getBoundingClientRect();
+            const rect = item.card.getBoundingClientRect();
             return {
                 x: Math.floor((rect.left - mapRect.left) * dpr),
                 y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
@@ -666,7 +681,7 @@ export async function renderAllEnsembleMembers() {
         customShaderLayer.setGridMode(false, null);
         setContourGridMode(false, null);
 
-        // Assemble the frozen basemap and the matching scissored member into each card.
+        // Assemble the neutral card background, weather + contours, and border/coast overlay.
         const linesCanvas = renderLinesMap() || staticOverlayCanvas;
         cardList.forEach((item, memberIndex) => {
             const cvs = item.canvas;
@@ -793,7 +808,11 @@ export function updateBasemapStyle(styleUrl) {
             setBasemapLabelsVisibility(map, false);
             try { initLayer(); } catch (e) {}
             try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
-            try { initCityOverlay(map); } catch (e) {}
+            try {
+                // Only init city overlay if not in ensemble mode
+                if (!isEnsembleRangeModel()) initCityOverlay(map);
+                else destroyCityOverlay();
+            } catch (e) {}
 
             if (stateManager.currentStepIndex !== undefined) {
                 renderFrame(stateManager.currentStepIndex);
@@ -1373,7 +1392,10 @@ export async function switchAppMode(targetMode) {
                     map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
                 }
 
-                try { initCityOverlay(map); } catch (e) {}
+                try {
+                    if (!isEnsembleRangeModel()) initCityOverlay(map);
+                    else destroyCityOverlay();
+                } catch (e) {}
                 try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
                 await loadInitialModelData();
                 hideToast();
@@ -1387,7 +1409,10 @@ export async function switchAppMode(targetMode) {
                 map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
             }
 
-            try { initCityOverlay(map); } catch (e) {}
+            try {
+                if (!isEnsembleRangeModel()) initCityOverlay(map);
+                else destroyCityOverlay();
+            } catch (e) {}
             try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
             await loadInitialModelData();
             hideToast();
@@ -1463,7 +1488,7 @@ map.on('move', () => {
 });
 
 map.on('render', () => {
-    if (!isDrawingEnsemble || isRenderingEnsemble) return;
+    if (!isDrawingEnensemble || isRenderingEnsemble) return;
 
     if (map.isMoving()) {
         isBasemapCaptured = false; // 🌟 Force a fresh clean snapshot next time we stop
