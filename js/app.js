@@ -42,27 +42,23 @@ let customShaderLayer = null;
 let renderDebounceId = null;
 let activeRenderId = 0;
 let polarMapLoaded = false;
-let isFirstLoad = true; // 🌟 Forces default model/param on initial site load
+let isFirstLoad = true;
 
-// 🌟 Dedicated Atmosphere Canvas (Placed BEHIND MapLibre canvas for draw-order occlusion)
+// 🌟 Dedicated Atmosphere Canvas
 let haloCanvas = null;
 let haloCtx = null;
 let lastGlobeMatrix = null;
 
-// 🌟 THE "FROZEN BASEMAP" SANDWICH CACHE
-let staticBasemapCanvas = null;
-let staticOverlayCanvas = null;
-let isBasemapCaptured = false;
-let basemapLayerIds = []; // 🌟 Cached for lightning-fast toggling
+let basemapLayerIds = [];
 let basemapMap = null;
 let basemapMapReady = false;
-// 🌟 Hidden map that renders ONLY the ensemble weather (empty style, camera synced to the live map)
+
+// 🌟 Hidden map that renders ONLY the ensemble weather
 let weatherMap = null;
 let weatherMapReady = false;
 let weatherMapContainer = null;
 
 const popup = new maplibregl.Popup({ closeButton: false });
-
 const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768;
 
 const map = new maplibregl.Map({
@@ -71,13 +67,13 @@ const map = new maplibregl.Map({
     center: [-96.5, 38.5], 
     zoom: isMobileViewport ? 3.2 : 3.8,
     keyboard: false,
-    preserveDrawingBuffer: true // 🌟 Required for real-time canvas copying
+    preserveDrawingBuffer: true
 });
 
 function syncBasemapMapCamera() {
+    if (!basemapMap || !basemapMapReady) return;
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && basemapMap.setProjection && basemapMap.getProjection()?.type !== proj.type) basemapMap.setProjection(proj);
-    if (!basemapMap || !basemapMapReady) return;
     basemapMap.jumpTo({
         center: map.getCenter(),
         zoom: map.getZoom(),
@@ -99,11 +95,18 @@ function initLinesMap() {
     linesContainer.style.cssText = 'position:fixed;left:-10000px;top:0;width:100px;height:100px;pointer-events:none';
     document.body.appendChild(linesContainer);
     linesMap = new maplibregl.Map({
-        container: linesContainer, style: buildLinesStyle(),
-        center: map.getCenter(), zoom: map.getZoom(),
-        interactive: false, attributionControl: false, preserveDrawingBuffer: true
+        container: linesContainer, 
+        style: buildLinesStyle(),
+        center: map.getCenter(), 
+        zoom: map.getZoom(),
+        interactive: false, 
+        attributionControl: false, 
+        preserveDrawingBuffer: true
     });
-    linesMap.once('load', () => { linesMapReady = true; });
+    linesMap.once('load', () => { 
+        linesMapReady = true;
+        if (isDrawingEnsemble) renderAllEnsembleMembers();
+    });
 }
 
 function renderLinesMap() {
@@ -111,7 +114,8 @@ function renderLinesMap() {
     const c = map.getCanvas();
     const w = c.clientWidth;
     const h = c.clientHeight;
-    if (!w || !h) return false;
+    if (!w || !h) return null;
+
     const wPx = `${w}px`;
     const hPx = `${h}px`;
     if (linesContainer.style.width !== wPx || linesContainer.style.height !== hPx) {
@@ -119,24 +123,13 @@ function renderLinesMap() {
         linesContainer.style.height = hPx;
         linesMap.resize();
     }
+
     const proj = map.getProjection ? map.getProjection() : null;
     if (proj && linesMap.getProjection()?.type !== proj.type) linesMap.setProjection(proj);
     linesMap.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
     linesMap._render();
     const lc = linesMap.getCanvas();
     return (lc.width === c.width && lc.height === c.height) ? lc : null;
-}
-
-function syncBasemapMapSize() {
-    if (!basemapMap) return false;
-    const c = map.getCanvas();
-    const w = c.clientWidth, h = c.clientHeight;
-    if (!w || !h) return false;
-    const el = basemapMap.getContainer();
-    el.style.width = `${w}px`;
-    el.style.height = `${h}px`;
-    basemapMap.resize();
-    return true;
 }
 
 function initBasemapMap() {
@@ -168,7 +161,6 @@ function initBasemapMap() {
         basemapMapReady = true;
         setBasemapLabelsVisibility(basemapMap, false);
         syncBasemapMapCamera();
-        isBasemapCaptured = false;
         initLinesMap();
     });
 }
@@ -180,7 +172,6 @@ function updateBasemapMapStyle(styleUrl) {
         basemapMapReady = true;
         setBasemapLabelsVisibility(basemapMap, false);
         syncBasemapMapCamera();
-        isBasemapCaptured = false;
         if (linesMap) {
             linesMapReady = false;
             linesMap.once('style.load', () => {
@@ -248,7 +239,7 @@ function initWeatherMap() {
 
 function addEnsembleLayerToWeatherMap(layer) {
     const add = () => {
-        if (customShaderLayer !== layer) return; // superseded by a newer initLayer()
+        if (customShaderLayer !== layer) return;
         if (weatherMap.getLayer('weather-gpu-shader')) weatherMap.removeLayer('weather-gpu-shader');
         weatherMap.addLayer(layer);
         initVectorContours(weatherMap, () => renderAllEnsembleMembers());
@@ -265,26 +256,19 @@ function addEnsembleLayerToWeatherMap(layer) {
     else weatherMap.once('load', add);
 }
 
-/**
- * 🌟 DERIVES THE EXACT ON-SCREEN PIXEL BOUNDARY OF THE 3D GLOBE DIRECTLY FROM CAMERA MATRIX
- * Guaranteed to stay 100% locked to the perimeter across all zoom levels, rotations, and screen sizes!
- */
 function getGlobeScreenCircle(matrix, w, h) {
     if (!matrix) return null;
 
-    // 1. Globe Center (0, 0, 0, 1) in screen pixels
     const cx_clip = matrix[12];
     const cy_clip = matrix[13];
     const cw_clip = matrix[15] || 1.0;
     const cx = (cx_clip / cw_clip * 0.5 + 0.5) * w;
     const cy = (0.5 - cy_clip / cw_clip * 0.5) * h;
 
-    // 2. Camera direction vector from matrix
     let vx = matrix[2], vy = matrix[6], vz = matrix[10];
     const vLen = Math.hypot(vx, vy, vz) || 1.0;
     vx /= vLen; vy /= vLen; vz /= vLen;
 
-    // 3. Up vector orthogonal to camera line of sight
     let ux = 0.0, uy = 1.0, uz = 0.0;
     if (Math.abs(vy) > 0.9) {
         ux = 1.0; uy = 0.0; uz = 0.0;
@@ -294,7 +278,6 @@ function getGlobeScreenCircle(matrix, w, h) {
     const uLen = Math.hypot(ux, uy, uz) || 1.0;
     ux /= uLen; uy /= uLen; uz /= uLen;
 
-    // 4. Project unit sphere horizon point (ux, uy, uz) to screen pixels
     const hx_clip = matrix[0] * ux + matrix[4] * uy + matrix[8] * uz + matrix[12];
     const hy_clip = matrix[1] * ux + matrix[5] * uy + matrix[9] * uz + matrix[13];
     const hw_clip = matrix[3] * ux + matrix[7] * uy + matrix[11] * uz + matrix[15];
@@ -330,7 +313,6 @@ function updateAtmosphereHalo(matrix) {
     const cy = circle.cy;
     const r = circle.r;
 
-    // 🌟 Thicker, multi-layered atmospheric rim glow drawn BEHIND the planet
     const outerR = r * 1.22;
     const grad = haloCtx.createRadialGradient(cx, cy, r * 0.96, cx, cy, outerR);
     grad.addColorStop(0.00, 'rgba(56, 189, 248, 0.0)');
@@ -356,7 +338,6 @@ function initAtmosphereHaloCanvas() {
     haloCanvas.style.width = '100%';
     haloCanvas.style.height = '100%';
     haloCanvas.style.pointerEvents = 'none';
-    
     haloCanvas.style.zIndex = '0';
     haloCanvas.style.display = 'none';
 
@@ -519,86 +500,6 @@ function updateCachedDimensions() {
     return cachedTargetSize;
 }
 
-// 🌟 Border/coast lines only, on a transparent canvas, drawn ABOVE the weather in each card
-function captureBasemapOverlay() {
-    const mapCanvas = map.getCanvas();
-    if (!staticOverlayCanvas) staticOverlayCanvas = document.createElement('canvas');
-    staticOverlayCanvas.width = mapCanvas.width;   // also clears it
-    staticOverlayCanvas.height = mapCanvas.height;
-
-    const hidden = [];
-    for (const layer of (basemapMap.getStyle().layers || [])) {
-        const keep = layer.type === 'line' && /boundary|coast|outline/i.test(layer.id);
-        if (keep || basemapMap.getLayoutProperty(layer.id, 'visibility') === 'none') continue;
-        basemapMap.setLayoutProperty(layer.id, 'visibility', 'none');
-        hidden.push(layer.id);
-    }
-
-    basemapMap._render();
-    staticOverlayCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
-
-    hidden.forEach(id => basemapMap.setLayoutProperty(id, 'visibility', 'visible'));
-}
-// 🌟 NEW: Snapshot the static basemap without the weather
-function captureBasemap() {
-    if (!map) return;
-    const mapCanvas = map.getCanvas();
-    if (!staticBasemapCanvas) {
-        staticBasemapCanvas = document.createElement('canvas');
-    }
-    staticBasemapCanvas.width = mapCanvas.width;
-    staticBasemapCanvas.height = mapCanvas.height;
-
-    if (basemapMap && basemapMapReady) {
-        if (!syncBasemapMapSize()) return;
-        const bc = basemapMap.getCanvas();
-        if (bc.width !== mapCanvas.width || bc.height !== mapCanvas.height) return;
-        syncBasemapMapCamera();
-        basemapMap._render();
-        if (!map.isMoving() && !basemapMap.areTilesLoaded()) return; // tiles for this camera aren't ready yet
-        staticBasemapCanvas.getContext('2d').drawImage(basemapMap.getCanvas(), 0, 0);
-        if (!map.isMoving()) captureBasemapOverlay();
-        isBasemapCaptured = true;
-        return;
-    }
-    if (!map.isStyleLoaded()) return;
-    // Temporarily hide our weather/contours to take a clean snapshot of the basemap
-    const toggleWeather = (show) => {
-        const vis = show ? 'visible' : 'none';
-        if (map.style._layers['weather-gpu-shader']) map.style._layers['weather-gpu-shader'].visibility = vis;
-        if (map.style._layers['contour-gpu-layer']) map.style._layers['contour-gpu-layer'].visibility = vis;
-        if (map.style._layers['contour-master-label-layer']) map.style._layers['contour-master-label-layer'].visibility = vis;
-    };
-
-    toggleWeather(false);
-    map._render(); 
-    
-    const ctx = staticBasemapCanvas.getContext('2d');
-    ctx.drawImage(mapCanvas, 0, 0);
-    
-    toggleWeather(true);
-    isBasemapCaptured = true;
-}
-
-// 🌟 NEW: Turn on/off cached basemap layers instantly using pre-filtered IDs
-function toggleBasemapLayers(show) {
-    if (!map || !map.isStyleLoaded() || basemapLayerIds.length === 0) return;
-    const vis = show ? 'visible' : 'none';
-    basemapLayerIds.forEach(id => {
-        const layer = map.style._layers[id];
-        if (layer) layer.visibility = vis;
-    });
-}
-
-function toggleEnsembleContours(show) {
-    if (!map || !map.isStyleLoaded()) return;
-    const vis = show ? 'visible' : 'none';
-    ['contour-gpu-layer', 'contour-master-label-layer'].forEach(id => {
-        const layer = map.style._layers[id];
-        if (layer) layer.visibility = vis;
-    });
-}
-
 // 🌟 POLARWEATHER-STYLE SINGLE-PASS VIEWPORT RENDERER
 export async function renderAllEnsembleMembers() {
     if (!isDrawingEnsemble || !customShaderLayer || typeof customShaderLayer.setGridMode !== 'function' || !weatherMapReady) return;
@@ -633,27 +534,15 @@ export async function renderAllEnsembleMembers() {
             sy = (mapCanvas.height - sHeight) / 2;
         }
 
-        // 🌟 1. CAPTURE FROZEN BASEMAP (Only happens once when map stops moving)
-        // Removed this block as it's not used and adds overhead.
-        // if (!isBasemapCaptured) {
-        //     captureBasemap();
-        //     if (!isBasemapCaptured) {
-        //         // Basemap tiles for this camera aren't ready: keep the last frame, retry when idle
-        //         if (basemapMap) basemapMap.once('idle', () => renderAllEnsembleMembers());
-        //         return;
-        //     }
-        // }
-
-        // 🌟 2. Sync the hidden weather-only map to the live camera and size
+        // 🌟 1. Sync hidden weather-only map camera to live viewport
         if (!syncWeatherMapSize()) return;
         syncWeatherMapCamera();
         const weatherCanvas = weatherMap.getCanvas();
 
-        // Compute card bounds relative to the map canvas (WebGL bottom-left origin)
         const mapRect = mapCanvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const boxRects = cardList.map(item => {
-            const rect = item.card.getBoundingClientRect();
+            const rect = item.canvas.getBoundingClientRect();
             return {
                 x: Math.floor((rect.left - mapRect.left) * dpr),
                 y: Math.floor((mapRect.bottom - rect.bottom) * dpr),
@@ -662,7 +551,7 @@ export async function renderAllEnsembleMembers() {
             };
         });
 
-        // Render all ten members in one MapLibre pass, one texture per scissored card.
+        // 🌟 2. Render all 10 members + vector contours onto weatherMap
         const gridSourceRect = {
             x: sx,
             y: sy,
@@ -674,15 +563,17 @@ export async function renderAllEnsembleMembers() {
         ensureEnsembleContourLayer();
         customShaderLayer.setGridMode(true, boxRects, gridSourceRect);
         setContourGridMode(true, boxRects, gridSourceRect);
-        // Synchronous redraw of the hidden weather map: the grid is drawn into ITS canvas only
+
         if (typeof weatherMap.redraw === 'function') weatherMap.redraw();
         else weatherMap._render();
 
         customShaderLayer.setGridMode(false, null);
         setContourGridMode(false, null);
 
-        // Assemble the neutral card background, weather + contours, and border/coast overlay.
-        const linesCanvas = renderLinesMap() || staticOverlayCanvas;
+        // 🌟 3. Render state/country/coastline borders directly via linesMap
+        const linesCanvas = renderLinesMap();
+
+        // 🌟 4. Composite onto each card: neutral base + weather/contours + borders
         cardList.forEach((item, memberIndex) => {
             const cvs = item.canvas;
             if (cvs.width !== targetW || cvs.height !== targetH) {
@@ -696,15 +587,15 @@ export async function renderAllEnsembleMembers() {
             const weatherW = box?.w || weatherCanvas.width;
             const weatherH = box?.h || weatherCanvas.height;
 
-            // Keep ensemble cards visually neutral so each member's weather field stands alone.
             item.ctx.fillStyle = stateManager.currentTheme === 'dark' ? '#3b4148' : '#d9dde1';
             item.ctx.fillRect(0, 0, targetW, targetH);
-            // Overlay the scissored, transparent weather on top
+
             item.ctx.drawImage(
                 weatherCanvas,
                 weatherX, weatherY, weatherW, weatherH,
                 0, 0, targetW, targetH
             );
+
             if (linesCanvas) {
                 item.ctx.drawImage(linesCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
             }
@@ -734,56 +625,12 @@ function syncEnsembleGrid() {
     cachedTargetSize = null;
     
     if (shouldShow) {
+        destroyCityOverlay();
         updateCachedDimensions();
         setTimeout(renderAllEnsembleMembers, 80);
     }
 }
 
-function drawEnsembleBoxes(targetMemberIndex = null) {
-    if (!isDrawingEnsemble) return;
-
-    const mapCanvas = map.getCanvas();
-    if (!mapCanvas) return;
-
-    const cardList = getCardCanvases();
-    if (cardList.length === 0) return;
-
-    let size = cachedTargetSize || updateCachedDimensions();
-    if (!size) return;
-
-    const targetW = size.w;
-    const targetH = size.h;
-
-    const srcAspect = mapCanvas.width / mapCanvas.height;
-    const dstAspect = targetW / targetH;
-    let sx = 0, sy = 0, sWidth = mapCanvas.width, sHeight = mapCanvas.height;
-
-    if (srcAspect > dstAspect) {
-        sWidth = mapCanvas.height * dstAspect;
-        sx = (mapCanvas.width - sWidth) / 2;
-    } else {
-        sHeight = mapCanvas.width / dstAspect;
-        sy = (mapCanvas.height - sHeight) / 2;
-    }
-
-    cardList.forEach((item, idx) => {
-        if (targetMemberIndex !== null && idx !== targetMemberIndex) return;
-
-        const cvs = item.canvas;
-        if (cvs.width !== targetW || cvs.height !== targetH) {
-            cvs.width = targetW;
-            cvs.height = targetH;
-        }
-
-        try {
-            item.ctx.drawImage(mapCanvas, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-        } catch (err) {}
-    });
-}
-
-/**
- * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
- */
 export function updateBasemapStyle(styleUrl) {
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
@@ -794,7 +641,6 @@ export function updateBasemapStyle(styleUrl) {
     const onStyleReady = () => {
         if (loaded) return;
         loaded = true;
-        console.log("✅ New basemap style loaded. Re-attaching weather layers...");
 
         if (typeof map.setProjection === 'function') {
             map.setProjection({ type: stateManager.activeView === '3d' ? 'globe' : 'mercator' });
@@ -809,7 +655,6 @@ export function updateBasemapStyle(styleUrl) {
             try { initLayer(); } catch (e) {}
             try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
             try {
-                // Only init city overlay if not in ensemble mode
                 if (!isEnsembleRangeModel()) initCityOverlay(map);
                 else destroyCityOverlay();
             } catch (e) {}
@@ -821,13 +666,10 @@ export function updateBasemapStyle(styleUrl) {
     };
 
     map.once('style.load', onStyleReady);
-    setTimeout(onStyleReady, 2000); // Fail-safe
+    setTimeout(onStyleReady, 2000);
     map.setStyle(styleUrl);
 }
 
-/**
- * 🌟 ZERO-RELOAD RADAR THEME SWITCHER
- */
 function applyRadarTheme(theme) {
     if (!map || !map.isStyleLoaded()) return;
     const isDark = (theme === 'dark');
@@ -837,33 +679,23 @@ function applyRadarTheme(theme) {
     }
 
     const waterColor = isDark ? 'rgba(2, 20, 37, 1)' : '#F5FDFF';
-    if (map.getLayer('ocean_far')) {
-        map.setPaintProperty('ocean_far', 'fill-color', waterColor);
-    }
-    if (map.getLayer('water')) {
-        map.setPaintProperty('water', 'fill-color', waterColor);
-    }
+    if (map.getLayer('ocean_far')) map.setPaintProperty('ocean_far', 'fill-color', waterColor);
+    if (map.getLayer('water')) map.setPaintProperty('water', 'fill-color', waterColor);
 
     const outlineColor = isDark ? '#ffffff' : '#000000';
-    const outlineLayers = [
+    [
         'coastline_far',
         'water_outline',
         'boundary_county',
         'boundary_state',
         'boundary_country_z0-4',
         'boundary_country_z5-'
-    ];
-    outlineLayers.forEach(id => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'line-color', outlineColor);
-        }
+    ].forEach(id => {
+        if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', outlineColor);
     });
 
-    const fillLayers = ['landuse_residential', 'landcover_wood', 'landcover_ice_shelf', 'landcover_glacier', 'building', 'aeroway-area', 'road_area_pier'];
-    fillLayers.forEach(id => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
-        }
+    ['landuse_residential', 'landcover_wood', 'landcover_ice_shelf', 'landcover_glacier', 'building', 'aeroway-area', 'road_area_pier'].forEach(id => {
+        if (map.getLayer(id)) map.setPaintProperty(id, 'fill-opacity', isDark ? 0.4 : 0);
     });
     if (map.getLayer('landuse_park')) {
         map.setPaintProperty('landuse_park', 'fill-color', isDark ? 'rgb(32,32,32)' : '#EDEDED');
@@ -871,7 +703,6 @@ function applyRadarTheme(theme) {
 
     const streetColor = isDark ? '#181818' : '#ffffff';
     const streetCasing = isDark ? 'rgba(60, 60, 60, 0.8)' : 'rgba(0, 0, 0, 0.25)';
-
     ['highway_motorway_inner', 'highway_major_inner', 'highway_major_subtle', 'highway_motorway_subtle'].forEach(id => {
         if (map.getLayer(id)) map.setPaintProperty(id, 'line-color', streetColor);
     });
@@ -884,12 +715,11 @@ function applyRadarTheme(theme) {
 
     const labelColor = isDark ? '#ffffff' : '#000000';
     const haloColor = isDark ? '#000000' : '#ffffff';
-    const labelLayers = [
+    [
         'place_other', 'place_suburb', 'place_village', 'place_town',
         'place_city', 'place_city_large', 'place_state', 'place_country_other',
         'place_country_minor', 'place_country_major'
-    ];
-    labelLayers.forEach(id => {
+    ].forEach(id => {
         if (map.getLayer(id)) {
             map.setPaintProperty(id, 'text-color', labelColor);
             map.setPaintProperty(id, 'text-halo-color', haloColor);
@@ -897,9 +727,6 @@ function applyRadarTheme(theme) {
     });
 }
 
-/**
- * 🌟 NATIVE PROJECTION / VIEW SWITCHER
- */
 export function applyView(targetView) {
     stateManager.activeView = targetView;
 
@@ -961,9 +788,6 @@ export function applyView(targetView) {
     }
 }
 
-/**
- * 🌟 CURSOR-CENTERED KEYBOARD ZOOM HANDLER
- */
 export function handleKeyboardZoom(direction, x, y) {
     const activeView = stateManager.activeView || '2d';
 
@@ -982,9 +806,6 @@ export function handleKeyboardZoom(direction, x, y) {
     }
 }
 
-/**
- * 🌟 DYNAMIC THEME APPLIER
- */
 export async function applyTheme(theme) {
     document.body.classList.toggle('light-mode', theme === 'light');
 
@@ -1049,7 +870,7 @@ export function initLayer(shaderType = null) {
     if (isEnsembleRangeModel()) {
         initWeatherMap();
         customShaderLayer = createEnsembleShaderLayer(weatherMap);
-        customShaderLayer.gridOnly = true; // never draw a full-screen copy on the hidden map
+        customShaderLayer.gridOnly = true;
     } else if (stateManager.activeModel === 'hrrr' || stateManager.activeModel === 'rrfs') {
         customShaderLayer = createHrrrShaderLayer(map);
     } else if (chosenShader === 'precipType') {
@@ -1097,7 +918,6 @@ export function initLayer(shaderType = null) {
     };
 
     if (isEnsembleRangeModel()) {
-        // Weather lives on its own hidden map; the live map stays a clean basemap
         addEnsembleLayerToWeatherMap(customShaderLayer);
     } else if (!map.getLayer('weather-gpu-shader')) {
         map.addLayer(customShaderLayer, firstContentLayerId);
@@ -1151,7 +971,6 @@ async function renderFrame(globalIdx) {
     const activeView = stateManager.activeView || '2d';
 
     if (activeView === '2d' || activeView === '3d' || activeView === 'polar') {
-        // 🌟 Load and update vector contours for ALL models (including AIFS-ENS)
         try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
         await updateVectorContours(frameInfo.step);
 
@@ -1159,7 +978,6 @@ async function renderFrame(globalIdx) {
 
         if (activeView === 'polar') {
             setPolarContourFeatures(getActiveContourFeatures());
-        // Skip heavy city text overlay in ensemble mode for speed
         } else if (!isEnsembleRangeModel()) {
             try {
                 updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
@@ -1174,7 +992,6 @@ async function renderFrame(globalIdx) {
         }
     }
 
-    // 🌟 ANIMATE ALL 10 MEMBERS SIMULTANEOUSLY DURING SCRUBBING
     if (isDrawingEnsemble) {
         renderAllEnsembleMembers();
     }
@@ -1464,7 +1281,6 @@ map.on('load', async () => {
     initAtmosphereHaloCanvas();
     try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (err) {}
     
-    // 🌟 Cache basemap layer IDs for single-pass viewport mode
     basemapLayerIds = (map.getStyle().layers || [])
         .map(l => l.id)
         .filter(id => id !== 'weather-gpu-shader' && id !== 'contour-gpu-layer' && id !== 'contour-master-label-layer');
@@ -1478,21 +1294,21 @@ map.on('style.load', () => {
 
 let liveRenderQueued = false;
 map.on('move', () => {
-    syncBasemapMapCamera();
-    if (!isDrawingEnsemble) return;
-    isBasemapCaptured = false;
+    if (!isDrawingEnsemble) {
+        syncBasemapMapCamera();
+        return;
+    }
     if (!liveRenderQueued) {
         liveRenderQueued = true;
-        requestAnimationFrame(() => { liveRenderQueued = false; renderAllEnsembleMembers(); });
+        requestAnimationFrame(() => { 
+            liveRenderQueued = false; 
+            renderAllEnsembleMembers(); 
+        });
     }
 });
 
 map.on('render', () => {
-    if (!isDrawingEnensemble || isRenderingEnsemble) return;
-
-    if (map.isMoving()) {
-        isBasemapCaptured = false; // 🌟 Force a fresh clean snapshot next time we stop
-    }
+    if (!isDrawingEnsemble || isRenderingEnsemble) return;
 });
 
 map.on('moveend', () => {
