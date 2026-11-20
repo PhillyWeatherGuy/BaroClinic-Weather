@@ -7,6 +7,12 @@ const BASEMAP_PRESETS = [
         name: 'Default',
         previewLight: './assets/preset-default-light.png.JPEG',
         previewDark: './assets/preset-default-dark.png.JPEG'
+    },
+    {
+        id: 'satellite',
+        name: 'Satellite',
+        previewLight: './assets/preset-satellite.png.JPEG',
+        previewDark: './assets/preset-satellite.png.JPEG'
     }
 ];
 
