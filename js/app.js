@@ -1446,7 +1446,9 @@ initViewerUI(
     (direction, x, y) => { handleKeyboardZoom(direction, x, y); },
     map,
     () => {
-        updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
+        if (!isEnsembleRangeModel()) {
+            updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
+        }
         updateRadarUnitLabels();
         const currentStep = stateManager.globalSteps[stateManager.currentStepIndex]?.step;
         if (currentStep !== undefined) updateVectorContours(currentStep);
