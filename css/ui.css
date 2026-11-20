@@ -1566,7 +1566,6 @@ body.light-mode .map-card {
     transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
 }
 
-/* Optional: square off the close button inside the header too */
 .basemap-editor-panel .close-btn {
     border-radius: 0;
 }
@@ -1601,6 +1600,81 @@ body.light-mode .map-card {
     padding: 14px;
 }
 
+.basemap-editor-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.basemap-section-header {
+    margin: 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #232b3c;
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #94a3b8;
+}
+
+.basemap-presets-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+    gap: 12px;
+}
+
+.basemap-preset-card {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    background: #181d28;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    cursor: pointer;
+    overflow: hidden;
+    text-align: left;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.basemap-preset-card:hover {
+    background: #1e2533;
+    border-color: #64748b;
+}
+
+.basemap-preset-card.active {
+    border-color: #3b82f6;
+    box-shadow: inset 0 0 0 1px #3b82f6;
+}
+
+.basemap-preset-thumb {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    background: #0b0f19;
+    overflow: hidden;
+    border-bottom: 1px solid #232b3c;
+}
+
+.basemap-preset-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.basemap-preset-name {
+    padding: 8px 10px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+    letter-spacing: 0.2px;
+}
+
+.basemap-preset-card.active .basemap-preset-name {
+    color: #ffffff;
+}
+
 @media (max-width: 1023px) {
     .unit-toggle-pill {
         right: 58px;
@@ -1610,5 +1684,9 @@ body.light-mode .map-card {
     .basemap-editor-panel {
         width: calc(100vw - 32px);
         bottom: 96px;
+    }
+
+    .basemap-presets-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     }
 }
