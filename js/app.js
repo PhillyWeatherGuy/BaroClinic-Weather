@@ -803,7 +803,8 @@ function hideComingSoonScreen() {
 /**
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
-export function updateBasemapStyle(styleUrl) {
+export function updateBasemapStyle(styleUrl, force = false) {
+    if (!force && stateManager.activeBasemapPreset && stateManager.activeBasemapPreset !== 'default') return;
     if (!map || !styleUrl || stateManager.currentMapStyle === styleUrl) return;
 
     console.log(`[Map] Switching basemap style to: ${styleUrl}`);
@@ -820,7 +821,9 @@ export function updateBasemapStyle(styleUrl) {
         }
 
         if (stateManager.activeMode === 'radar') {
-            applyRadarTheme(stateManager.currentTheme);
+            if (!stateManager.activeBasemapPreset || stateManager.activeBasemapPreset === 'default') {
+                applyRadarTheme(stateManager.currentTheme);
+            }
             setBasemapLabelsVisibility(map, true);
             initRadarMode(map);
         } else {
@@ -1091,10 +1094,15 @@ export function initLayer(shaderType = null) {
 
     let firstContentLayerId = null;
     const layers = map.getStyle().layers || [];
-    for (const layer of layers) {
-        if (layer.id !== 'background') {
-            firstContentLayerId = layer.id;
-            break;
+    const satIndex = layers.findIndex(layer => layer.id === 'satellite');
+    if (satIndex !== -1) {
+        firstContentLayerId = layers[satIndex + 1]?.id || null;
+    } else {
+        for (const layer of layers) {
+            if (layer.id !== 'background') {
+                firstContentLayerId = layer.id;
+                break;
+            }
         }
     }
 
@@ -1465,8 +1473,18 @@ initViewerUI(
 );
 
 setBasemapPresetCallback(async (presetId) => {
-    if (presetId === 'default') {
-        await applyTheme(stateManager.currentTheme || 'dark');
+    if (presetId === 'satellite') {
+        updateBasemapStyle('./config/map_style_satellite.json', true);
+    } else if (presetId === 'default') {
+        if (stateManager.activeMode === 'radar') {
+            if (stateManager.currentMapStyle !== './config/style_radar.json') {
+                updateBasemapStyle('./config/style_radar.json', true);
+            } else {
+                applyRadarTheme(stateManager.currentTheme);
+            }
+        } else {
+            await applyTheme(stateManager.currentTheme || 'dark');
+        }
     }
 });
 
