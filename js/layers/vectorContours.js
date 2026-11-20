@@ -1242,13 +1242,16 @@ async function loadMasterContourFile() {
     const urlsToTry = [];
     const cycleWithZ = runCycle ? (runCycle.endsWith('z') ? runCycle : `${runCycle}z`) : '';
     const cycleNoZ = runCycle ? runCycle.replace(/z$/, '') : '';
+    const contourParam = (param === 'pva' || param === 'z500_anom')
+        ? 'z500'
+        : (param.startsWith('w') ? param.replace('w', 'z') : param);
 
     if (memberRange && memberRange !== 'm01-m10') {
         if (targetDate && runCycle) {
-            if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleWithZ}_contours_${memberRange}.json?v=${Date.now()}`);
-            if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_${targetDate}_${cycleNoZ}_contours_${memberRange}.json?v=${Date.now()}`);
+            if (cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_${targetDate}_${cycleWithZ}_contours_${memberRange}.json?v=${Date.now()}`);
+            if (cycleNoZ && cycleNoZ !== cycleWithZ) urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_${targetDate}_${cycleNoZ}_contours_${memberRange}.json?v=${Date.now()}`);
         }
-        urlsToTry.push(`${stateManager.BASE_URL}${model}_${param}_contours_${memberRange}.json?v=${Date.now()}`);
+        urlsToTry.push(`${stateManager.BASE_URL}${model}_${contourParam}_contours_${memberRange}.json?v=${Date.now()}`);
     }
 
     if (param === 'pva' || param === 'z500_anom') {
