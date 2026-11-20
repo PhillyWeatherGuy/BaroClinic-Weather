@@ -18,6 +18,7 @@ import {
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
+import { syncBasemapEditorTheme, setBasemapPresetCallback } from './components/basemapEditor.js';
 
 // 🌟 Universal overlays
 import { 
@@ -1001,6 +1002,7 @@ export function handleKeyboardZoom(direction, x, y) {
  */
 export async function applyTheme(theme) {
     document.body.classList.toggle('light-mode', theme === 'light');
+    syncBasemapEditorTheme(theme);
 
     if (stateManager.activeMode === 'radar') {
         applyRadarTheme(theme);
@@ -1461,6 +1463,12 @@ initViewerUI(
         }
     }
 );
+
+setBasemapPresetCallback(async (presetId) => {
+    if (presetId === 'default') {
+        await applyTheme(stateManager.currentTheme || 'dark');
+    }
+});
 
 map.on('error', (e) => {
     console.warn("MapLibre Basemap load warning:", e);
