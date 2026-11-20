@@ -234,28 +234,10 @@ export function createEnsembleShaderLayer(mapInstance) {
             this.chunkTextures = {};
             this.loadedChunkIndices = [];
             this.activeTex = null;
-            this.currentFrameState = null;
             for (const key of ['frzrPaletteTex', 'sleetPaletteTex', 'snowPaletteTex']) {
                 if (this[key]) this.gl.deleteTexture(this[key]);
                 this[key] = null;
             }
-        },
-
-        onRemove: function(map, gl) {
-            this.clearTextures();
-            if (this.paletteTex) {
-                gl.deleteTexture(this.paletteTex);
-                this.paletteTex = null;
-            }
-            if (this.vertexBuffer) {
-                gl.deleteBuffer(this.vertexBuffer);
-                this.vertexBuffer = null;
-            }
-            for (const key in this.programs) {
-                if (this.programs[key]) gl.deleteProgram(this.programs[key]);
-            }
-            this.programs = {};
-            this.gl = null;
         },
 
         updatePalette: function(paramIdOrHexArray) {
@@ -512,7 +494,6 @@ export function createEnsembleShaderLayer(mapInstance) {
         preloadChunkTexture: function(chunkIndex, source) {
             if (!this.gl || !source) return;
             const gl = this.gl;
-            chunkIndex = Number(chunkIndex);
 
             const w = source.width || 1440;
             const h = source.height || 721;
@@ -556,17 +537,15 @@ export function createEnsembleShaderLayer(mapInstance) {
                 return tex;
             };
 
-            // 🌟 Option 1: Texture Pool Management (Evict distant chunks so VRAM stays under ~100MB, never evicting active chunk)
+            // 🌟 Option 1: Texture Pool Management (Evict distant chunks so VRAM stays under ~100MB)
             if (!this.loadedChunkIndices) this.loadedChunkIndices = [];
             if (!this.loadedChunkIndices.includes(chunkIndex)) {
                 this.loadedChunkIndices.push(chunkIndex);
             }
 
-            const activeChunkIdx = this.currentFrameState ? Number(this.currentFrameState.chunkIndex) : null;
             while (this.loadedChunkIndices.length > 2) {
-                const evictPos = this.loadedChunkIndices.findIndex(idx => idx !== chunkIndex && idx !== activeChunkIdx);
-                if (evictPos === -1) break;
-                const oldChunkIdx = this.loadedChunkIndices.splice(evictPos, 1)[0];
+                const oldChunkIdx = this.loadedChunkIndices.shift();
+                if (oldChunkIdx === chunkIndex) continue;
 
                 for (const key in this.chunkTextures) {
                     if (key.startsWith(`${oldChunkIdx}_`) || key === String(oldChunkIdx)) {
@@ -575,9 +554,6 @@ export function createEnsembleShaderLayer(mapInstance) {
                         }
                         delete this.chunkTextures[key];
                     }
-                }
-                if (activeChunkIdx === oldChunkIdx) {
-                    this.activeTex = null;
                 }
             }
 
@@ -656,12 +632,8 @@ export function createEnsembleShaderLayer(mapInstance) {
 
         renderAllMembersGrid: function(gl, matrixOrArgs, boxRects) {
             if (!this.currentFrameState || !boxRects || boxRects.length === 0) return;
-            const cIdx = Number(this.currentFrameState.chunkIndex);
+            const cIdx = this.currentFrameState.chunkIndex;
             const fIdx = this.currentFrameState.frameIndex !== undefined ? this.currentFrameState.frameIndex : (this.currentFrameState.col || 0);
-
-            if (!this.chunkTextures[`${cIdx}_${fIdx}_m0`] && stateManager.loadedChunkBitmaps?.[cIdx]) {
-                this.preloadChunkTexture(cIdx, stateManager.loadedChunkBitmaps[cIdx]);
-            }
 
             const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
             const shaderData = isV5 ? matrixOrArgs.shaderData : null;
@@ -774,8 +746,8 @@ export function createEnsembleShaderLayer(mapInstance) {
                 gl.scissor(rect.x, rect.y, rect.w, rect.h);
 
                 const textureMemberIndex = this.gridMemberIndex === null ? memberIndex : 0;
-                const tex = this.chunkTextures[`${cIdx}_${fIdx}_m${textureMemberIndex}`];
-                if (!tex || !gl.isTexture(tex)) continue;
+                const tex = this.chunkTextures[`${cIdx}_${fIdx}_m${textureMemberIndex}`] || this.activeTex;
+                if (!tex) continue;
 
                 gl.activeTexture(gl.TEXTURE0);
                 gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -799,7 +771,7 @@ export function createEnsembleShaderLayer(mapInstance) {
             }
 
             if (this.gridOnly) return;
-            if (!this.activeTex || !gl.isTexture(this.activeTex)) return;
+            if (!this.activeTex) return;
 
             const isV5 = Boolean(matrixOrArgs && (matrixOrArgs.defaultProjectionData || matrixOrArgs.shaderData));
             const shaderData = isV5 ? matrixOrArgs.shaderData : null;
