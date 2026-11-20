@@ -13,6 +13,12 @@ const BASEMAP_PRESETS = [
         name: 'Satellite',
         previewLight: './assets/preset-satellite.png.JPEG',
         previewDark: './assets/preset-satellite.png.JPEG'
+    },
+    {
+        id: 'street',
+        name: 'Street Map',
+        previewLight: './assets/preset-street.png.JPEG',
+        previewDark: './assets/preset-street.png.JPEG'
     }
 ];
 
