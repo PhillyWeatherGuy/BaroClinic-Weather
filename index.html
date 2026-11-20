@@ -112,6 +112,23 @@
         </span>
     </button>
 
+    <!-- 🌟 Floating Basemap Editor Button & Expandable Right-Half Panel -->
+    <button id="btn-basemap-editor" class="basemap-toggle-btn" type="button" title="Basemap Editor" aria-label="Open Basemap Editor" aria-expanded="false">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+            <line x1="8" y1="2" x2="8" y2="18"></line>
+            <line x1="16" y1="6" x2="16" y2="22"></line>
+        </svg>
+    </button>
+
+    <aside id="basemap-editor-panel" class="basemap-editor-panel" aria-hidden="true">
+        <div class="basemap-editor-header">
+            <span class="basemap-editor-title">Basemap Editor</span>
+            <button id="btn-close-basemap-editor" class="ctrl-btn close-btn" type="button" title="Close Basemap Editor" aria-label="Close Basemap Editor">✕</button>
+        </div>
+        <div id="basemap-editor-body" class="basemap-editor-body"></div>
+    </aside>
+
     <!-- 🌟 Floating Radar Volumetric & Multi-Tilt Toolbar -->
     <div id="radar-tools-container" style="display: none;">
         <button id="btn-box-select" class="radar-tool-btn" title="Drag a Bounding Box for 3D View">
