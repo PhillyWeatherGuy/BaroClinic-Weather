@@ -805,7 +805,13 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-let currentStyleBaseColors = { land: '#ededed', water: '#f5fdff' };
+let currentStyleBaseColors = { land: '#ededed', water: '#f5fdff', borders: {} };
+let currentStyleLineDefaults = {};
+
+function cloneStyleValue(val) {
+    if (val === undefined || val === null || typeof val !== 'object') return val;
+    return JSON.parse(JSON.stringify(val));
+}
 
 function cssColorToHex(colorStr, fallback = '#000000') {
     if (!colorStr || typeof colorStr !== 'string') return fallback;
@@ -822,8 +828,75 @@ function cssColorToHex(colorStr, fallback = '#000000') {
     return fallback;
 }
 
-function readMapBaseColors() {
+function isTransparentCssColor(val) {
+    return typeof val === 'string' && /rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*0(?:\.0+)?\s*\)/i.test(val.trim());
+}
+
+function extractColorFromStyleValue(val, fallback = null) {
+    if (typeof val === 'string') {
+        if (isTransparentCssColor(val)) return fallback;
+        return cssColorToHex(val, fallback || '#000000');
+    }
+    if (val && typeof val === 'object') {
+        if (Array.isArray(val.stops) && val.stops.length > 0) {
+            const lastStop = val.stops[val.stops.length - 1];
+            if (lastStop && typeof lastStop[1] === 'string' && !isTransparentCssColor(lastStop[1])) {
+                return cssColorToHex(lastStop[1], fallback || '#000000');
+            }
+        }
+        if (Array.isArray(val)) {
+            for (let i = val.length - 1; i >= 0; i--) {
+                if (typeof val[i] === 'string' && /^(#|rgb)/i.test(val[i].trim()) && !isTransparentCssColor(val[i])) {
+                    return cssColorToHex(val[i], fallback || '#000000');
+                }
+            }
+        }
+    }
+    return fallback;
+}
+
+function scaleLineWidth(widthDef, multiplier) {
+    if (Math.abs(multiplier - 1) < 0.001) {
+        return widthDef === undefined ? 1 : cloneStyleValue(widthDef);
+    }
+    if (widthDef === undefined || widthDef === null) {
+        return 1 * multiplier;
+    }
+    if (typeof widthDef === 'number') {
+        return widthDef * multiplier;
+    }
+    if (Array.isArray(widthDef) && widthDef[0] === 'interpolate') {
+        return widthDef.map((item, idx) => (idx >= 4 && idx % 2 === 0 && typeof item === 'number')
+            ? item * multiplier
+            : cloneStyleValue(item));
+    }
+    if (widthDef && typeof widthDef === 'object' && Array.isArray(widthDef.stops)) {
+        return {
+            ...widthDef,
+            stops: widthDef.stops.map(([z, w]) => [z, typeof w === 'number' ? w * multiplier : w])
+        };
+    }
+    return widthDef;
+}
+
+function getBorderCategoryForLayer(layer) {
+    if (!layer || layer.type !== 'line' || !layer.id) return null;
+    const id = layer.id;
+
+    if (/rail|transit/i.test(id)) return null;
+    if (/county/i.test(id)) return 'county';
+    if (/boundary_state|boundary_3/i.test(id)) return 'state';
+    if (/country|boundary_2/i.test(id)) return 'national';
+    if (/coastline|water_outline/i.test(id)) return 'oceanLand';
+    if (/^(road|highway|tunnel|bridge)_/i.test(id)) return 'roads';
+
+    return null;
+}
+
+function readMapBaseColors(keepLineGeometry = false) {
     if (!map || !map.getStyle()) return currentStyleBaseColors;
+
+    const style = map.getStyle();
     let land = currentStyleBaseColors.land;
     let water = currentStyleBaseColors.water;
 
@@ -840,29 +913,89 @@ function readMapBaseColors() {
             }
         }
     }
-    return { land, water };
+
+    if (!keepLineGeometry) {
+        currentStyleLineDefaults = {};
+    }
+
+    const borderColors = {};
+    for (const layer of (style.layers || [])) {
+        const category = getBorderCategoryForLayer(layer);
+        if (!category) continue;
+
+        const paintColor = map.getPaintProperty(layer.id, 'line-color');
+        const currentColorDef = paintColor !== undefined ? paintColor : layer.paint?.['line-color'];
+
+        if (!keepLineGeometry || !currentStyleLineDefaults[layer.id]) {
+            const paintWidth = map.getPaintProperty(layer.id, 'line-width');
+            const currentWidthDef = paintWidth !== undefined ? paintWidth : layer.paint?.['line-width'];
+            const layoutVis = map.getLayoutProperty(layer.id, 'visibility') || layer.layout?.visibility || 'visible';
+
+            currentStyleLineDefaults[layer.id] = {
+                category,
+                color: cloneStyleValue(currentColorDef),
+                isTransparentDefault: isTransparentCssColor(currentColorDef),
+                width: currentWidthDef === undefined ? 1 : cloneStyleValue(currentWidthDef),
+                visibility: layoutVis
+            };
+        } else {
+            currentStyleLineDefaults[layer.id].color = cloneStyleValue(currentColorDef);
+            currentStyleLineDefaults[layer.id].isTransparentDefault = isTransparentCssColor(currentColorDef);
+        }
+
+        if (!borderColors[category]) {
+            const hex = extractColorFromStyleValue(currentStyleLineDefaults[layer.id].color, null);
+            if (hex) borderColors[category] = hex;
+        }
+    }
+
+    borderColors.all = borderColors.national || borderColors.state || borderColors.oceanLand || '#000000';
+    return { land, water, borders: borderColors };
 }
 
 function applyBasemapOverrides() {
     if (!map || !map.getStyle()) return;
 
-    if (stateManager.activeBasemapPreset === 'satellite') {
-        syncBasemapColorInputs(currentStyleBaseColors);
-        return;
-    }
-
     const overrides = stateManager.basemapOverrides || {};
-    const targetLand = overrides.landColor || currentStyleBaseColors.land;
-    const targetWater = overrides.waterColor || currentStyleBaseColors.water;
 
-    if (map.getLayer('background')) {
-        map.setPaintProperty('background', 'background-color', targetLand);
-    }
-    ['water', 'WaterColor', 'ocean_far'].forEach((id) => {
-        if (map.getLayer(id)) {
-            map.setPaintProperty(id, 'fill-color', targetWater);
+    if (stateManager.activeBasemapPreset !== 'satellite') {
+        const targetLand = overrides.landColor || currentStyleBaseColors.land;
+        const targetWater = overrides.waterColor || currentStyleBaseColors.water;
+
+        if (map.getLayer('background')) {
+            map.setPaintProperty('background', 'background-color', targetLand);
         }
-    });
+        ['water', 'WaterColor', 'ocean_far'].forEach((id) => {
+            if (map.getLayer(id)) {
+                map.setPaintProperty(id, 'fill-color', targetWater);
+            }
+        });
+    }
+
+    const borders = overrides.borders;
+    if (borders) {
+        const allOverride = borders.all || { visible: true, thickness: 1, color: null };
+        const allVisible = allOverride.visible !== false;
+        const allThickness = Number.isFinite(allOverride.thickness) ? allOverride.thickness : 1;
+
+        for (const [layerId, defaults] of Object.entries(currentStyleLineDefaults)) {
+            if (!map.getLayer(layerId)) continue;
+
+            const catOverride = borders[defaults.category] || { visible: true, thickness: 1, color: null };
+            const shouldShow = allVisible && catOverride.visible !== false;
+            map.setLayoutProperty(layerId, 'visibility', shouldShow ? defaults.visibility : 'none');
+
+            const catThickness = Number.isFinite(catOverride.thickness) ? catOverride.thickness : 1;
+            map.setPaintProperty(layerId, 'line-width', scaleLineWidth(defaults.width, allThickness * catThickness));
+
+            if (!defaults.isTransparentDefault) {
+                const targetColor = catOverride.color || allOverride.color || cloneStyleValue(defaults.color);
+                if (targetColor !== undefined) {
+                    map.setPaintProperty(layerId, 'line-color', targetColor);
+                }
+            }
+        }
+    }
 
     syncBasemapColorInputs(currentStyleBaseColors);
 }
@@ -981,7 +1114,7 @@ function applyRadarTheme(theme) {
         }
     });
 
-    currentStyleBaseColors = readMapBaseColors();
+    currentStyleBaseColors = readMapBaseColors(true);
     applyBasemapOverrides();
 }
 
@@ -1510,7 +1643,7 @@ export async function switchAppMode(targetMode) {
             try { initCityOverlay(map); } catch (e) {}
             try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
             await loadInitialModelData();
-            currentStyleBaseColors = readMapBaseColors();
+            currentStyleBaseColors = readMapBaseColors(true);
             applyBasemapOverrides();
             hideToast();
         }
