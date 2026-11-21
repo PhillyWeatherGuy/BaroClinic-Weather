@@ -823,7 +823,7 @@ function cssColorToHex(colorStr, fallback = '#000000') {
 }
 
 function readMapBaseColors() {
-    if (!map || !map.isStyleLoaded()) return currentStyleBaseColors;
+    if (!map || !map.getStyle()) return currentStyleBaseColors;
     let land = currentStyleBaseColors.land;
     let water = currentStyleBaseColors.water;
 
@@ -844,7 +844,7 @@ function readMapBaseColors() {
 }
 
 function applyBasemapOverrides() {
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map || !map.getStyle()) return;
 
     if (stateManager.activeBasemapPreset === 'satellite') {
         syncBasemapColorInputs(currentStyleBaseColors);
@@ -903,9 +903,6 @@ export function updateBasemapStyle(styleUrl, force = false) {
                 renderFrame(stateManager.currentStepIndex);
             }
         }
-
-        currentStyleBaseColors = readMapBaseColors();
-        applyBasemapOverrides();
     };
 
     map.once('style.load', onStyleReady);
@@ -1499,8 +1496,6 @@ export async function switchAppMode(targetMode) {
                 try { initCityOverlay(map); } catch (e) {}
                 try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
                 await loadInitialModelData();
-                currentStyleBaseColors = readMapBaseColors();
-                applyBasemapOverrides();
                 hideToast();
             };
 
