@@ -22,7 +22,8 @@ import {
     syncBasemapEditorTheme, 
     setBasemapPresetCallback,
     setBasemapEditorChangeCallback,
-    syncBasemapColorInputs
+    syncBasemapColorInputs,
+    updateBasemapZoomReadout
 } from './components/basemapEditor.js';
 
 // 🌟 Universal overlays
@@ -805,7 +806,7 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
-let currentStyleBaseColors = { land: '#ededed', water: '#f5fdff', borders: {} };
+let currentStyleBaseColors = { land: '#ededed', water: '#f5fdff', borders: {}, borderMinZooms: {} };
 let currentStyleLineDefaults = {};
 
 function cloneStyleValue(val) {
@@ -919,6 +920,8 @@ function readMapBaseColors(keepLineGeometry = false) {
     }
 
     const borderColors = {};
+    const borderMinZooms = {};
+
     for (const layer of (style.layers || [])) {
         const category = getBorderCategoryForLayer(layer);
         if (!category) continue;
@@ -930,27 +933,46 @@ function readMapBaseColors(keepLineGeometry = false) {
             const paintWidth = map.getPaintProperty(layer.id, 'line-width');
             const currentWidthDef = paintWidth !== undefined ? paintWidth : layer.paint?.['line-width'];
             const layoutVis = map.getLayoutProperty(layer.id, 'visibility') || layer.layout?.visibility || 'visible';
+            const minzoom = Number.isFinite(layer.minzoom) ? layer.minzoom : 0;
+            const maxzoom = Number.isFinite(layer.maxzoom) ? layer.maxzoom : 24;
 
             currentStyleLineDefaults[layer.id] = {
                 category,
                 color: cloneStyleValue(currentColorDef),
                 isTransparentDefault: isTransparentCssColor(currentColorDef),
                 width: currentWidthDef === undefined ? 1 : cloneStyleValue(currentWidthDef),
-                visibility: layoutVis
+                visibility: layoutVis,
+                minzoom,
+                maxzoom
             };
         } else {
             currentStyleLineDefaults[layer.id].color = cloneStyleValue(currentColorDef);
             currentStyleLineDefaults[layer.id].isTransparentDefault = isTransparentCssColor(currentColorDef);
         }
 
+        const defaults = currentStyleLineDefaults[layer.id];
         if (!borderColors[category]) {
-            const hex = extractColorFromStyleValue(currentStyleLineDefaults[layer.id].color, null);
+            const hex = extractColorFromStyleValue(defaults.color, null);
             if (hex) borderColors[category] = hex;
+        }
+
+        if (!defaults.isTransparentDefault) {
+            if (category === 'roads') {
+                if (!/pier/i.test(layer.id) && defaults.minzoom > 0) {
+                    borderMinZooms[category] = borderMinZooms[category] === undefined
+                        ? defaults.minzoom
+                        : Math.min(borderMinZooms[category], defaults.minzoom);
+                }
+            } else {
+                borderMinZooms[category] = borderMinZooms[category] === undefined
+                    ? defaults.minzoom
+                    : Math.min(borderMinZooms[category], defaults.minzoom);
+            }
         }
     }
 
     borderColors.all = borderColors.national || borderColors.state || borderColors.oceanLand || '#000000';
-    return { land, water, borders: borderColors };
+    return { land, water, borders: borderColors, borderMinZooms };
 }
 
 function applyBasemapOverrides() {
@@ -976,16 +998,32 @@ function applyBasemapOverrides() {
     if (borders) {
         const allOverride = borders.all || { visible: true, thickness: 1, color: null };
         const allThickness = Number.isFinite(allOverride.thickness) ? allOverride.thickness : 1;
+        const baseMinZooms = currentStyleBaseColors.borderMinZooms || {};
 
         for (const [layerId, defaults] of Object.entries(currentStyleLineDefaults)) {
             if (!map.getLayer(layerId)) continue;
 
-            const catOverride = borders[defaults.category] || { visible: true, thickness: 1, color: null };
+            const catOverride = borders[defaults.category] || { visible: true, thickness: 1, color: null, minZoom: null };
             const shouldShow = catOverride.visible !== false;
             map.setLayoutProperty(layerId, 'visibility', shouldShow ? defaults.visibility : 'none');
 
             const catThickness = Number.isFinite(catOverride.thickness) ? catOverride.thickness : 1;
             map.setPaintProperty(layerId, 'line-width', scaleLineWidth(defaults.width, allThickness * catThickness));
+
+            if (catOverride.minZoom !== null && catOverride.minZoom !== undefined && Number.isFinite(catOverride.minZoom)) {
+                let targetMin;
+                if (defaults.category === 'roads') {
+                    const baseMin = Number.isFinite(baseMinZooms.roads) ? baseMinZooms.roads : 0;
+                    const delta = catOverride.minZoom - baseMin;
+                    const shifted = (defaults.minzoom === 0 && delta > 0) ? catOverride.minZoom : (defaults.minzoom + delta);
+                    targetMin = Math.max(0, Math.min(defaults.maxzoom, shifted));
+                } else {
+                    targetMin = Math.max(0, Math.min(defaults.maxzoom, catOverride.minZoom));
+                }
+                map.setLayerZoomRange(layerId, targetMin, defaults.maxzoom);
+            } else {
+                map.setLayerZoomRange(layerId, defaults.minzoom, defaults.maxzoom);
+            }
 
             if (!defaults.isTransparentDefault) {
                 const targetColor = catOverride.color || allOverride.color || cloneStyleValue(defaults.color);
@@ -1715,6 +1753,7 @@ map.on('load', async () => {
     setBasemapLabelsVisibility(map, false);
     currentStyleBaseColors = readMapBaseColors();
     applyBasemapOverrides();
+    updateBasemapZoomReadout(map.getZoom());
     initBasemapMap();
     initWeatherMap();
     initAtmosphereHaloCanvas();
@@ -1743,6 +1782,10 @@ map.on('move', () => {
     }
     isBasemapCaptured = false;
     queueEnsembleRender();
+});
+
+map.on('zoom', () => {
+    updateBasemapZoomReadout(map.getZoom());
 });
 
 map.on('render', () => {
