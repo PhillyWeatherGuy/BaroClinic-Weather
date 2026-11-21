@@ -18,7 +18,12 @@ import {
     showToast, 
     hideToast 
 } from './components/viewerUI.js';
-import { syncBasemapEditorTheme, setBasemapPresetCallback } from './components/basemapEditor.js';
+import { 
+    syncBasemapEditorTheme, 
+    setBasemapPresetCallback,
+    setBasemapEditorChangeCallback,
+    syncBasemapColorInputs
+} from './components/basemapEditor.js';
 
 // 🌟 Universal overlays
 import { 
@@ -800,6 +805,68 @@ function hideComingSoonScreen() {
     if (mapContainer) mapContainer.style.display = 'block';
 }
 
+let currentStyleBaseColors = { land: '#ededed', water: '#f5fdff' };
+
+function cssColorToHex(colorStr, fallback = '#000000') {
+    if (!colorStr || typeof colorStr !== 'string') return fallback;
+    const trimmed = colorStr.trim();
+    if (/^#[0-9a-f]{6}$/i.test(trimmed)) return trimmed.toLowerCase();
+    if (/^#[0-9a-f]{3}$/i.test(trimmed)) {
+        return '#' + trimmed.slice(1).split('').map(c => c + c).join('').toLowerCase();
+    }
+    const match = trimmed.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (match) {
+        const toHex = (n) => Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, '0');
+        return `#${toHex(match[1])}${toHex(match[2])}${toHex(match[3])}`;
+    }
+    return fallback;
+}
+
+function readMapBaseColors() {
+    if (!map || !map.isStyleLoaded()) return currentStyleBaseColors;
+    let land = currentStyleBaseColors.land;
+    let water = currentStyleBaseColors.water;
+
+    if (map.getLayer('background')) {
+        const bg = map.getPaintProperty('background', 'background-color');
+        if (typeof bg === 'string') land = cssColorToHex(bg, land);
+    }
+    for (const id of ['water', 'WaterColor', 'ocean_far']) {
+        if (map.getLayer(id)) {
+            const wc = map.getPaintProperty(id, 'fill-color');
+            if (typeof wc === 'string') {
+                water = cssColorToHex(wc, water);
+                break;
+            }
+        }
+    }
+    return { land, water };
+}
+
+function applyBasemapOverrides() {
+    if (!map || !map.isStyleLoaded()) return;
+
+    if (stateManager.activeBasemapPreset === 'satellite') {
+        syncBasemapColorInputs(currentStyleBaseColors);
+        return;
+    }
+
+    const overrides = stateManager.basemapOverrides || {};
+    const targetLand = overrides.landColor || currentStyleBaseColors.land;
+    const targetWater = overrides.waterColor || currentStyleBaseColors.water;
+
+    if (map.getLayer('background')) {
+        map.setPaintProperty('background', 'background-color', targetLand);
+    }
+    ['water', 'WaterColor', 'ocean_far'].forEach((id) => {
+        if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'fill-color', targetWater);
+        }
+    });
+
+    syncBasemapColorInputs(currentStyleBaseColors);
+}
+
 /**
  * 🌟 DYNAMIC BASEMAP STYLE SWITCHER
  */
@@ -836,6 +903,9 @@ export function updateBasemapStyle(styleUrl, force = false) {
                 renderFrame(stateManager.currentStepIndex);
             }
         }
+
+        currentStyleBaseColors = readMapBaseColors();
+        applyBasemapOverrides();
     };
 
     map.once('style.load', onStyleReady);
@@ -913,6 +983,9 @@ function applyRadarTheme(theme) {
             map.setPaintProperty(id, 'text-halo-color', haloColor);
         }
     });
+
+    currentStyleBaseColors = readMapBaseColors();
+    applyBasemapOverrides();
 }
 
 /**
@@ -1422,6 +1495,8 @@ export async function switchAppMode(targetMode) {
                 try { initCityOverlay(map); } catch (e) {}
                 try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
                 await loadInitialModelData();
+                currentStyleBaseColors = readMapBaseColors();
+                applyBasemapOverrides();
                 hideToast();
             };
 
@@ -1436,6 +1511,8 @@ export async function switchAppMode(targetMode) {
             try { initCityOverlay(map); } catch (e) {}
             try { initVectorContours(getContourTargetMap(), () => renderAllEnsembleMembers()); } catch (e) {}
             await loadInitialModelData();
+            currentStyleBaseColors = readMapBaseColors();
+            applyBasemapOverrides();
             hideToast();
         }
     }
@@ -1489,8 +1566,13 @@ setBasemapPresetCallback(async (presetId) => {
             }
         } else {
             await applyTheme(stateManager.currentTheme || 'dark');
+            applyBasemapOverrides();
         }
     }
+});
+
+setBasemapEditorChangeCallback(() => {
+    applyBasemapOverrides();
 });
 
 map.on('error', (e) => {
@@ -1500,6 +1582,8 @@ map.on('error', (e) => {
 map.on('load', async () => {
     stateManager.currentMapStyle = './config/style_default.json';
     setBasemapLabelsVisibility(map, false);
+    currentStyleBaseColors = readMapBaseColors();
+    applyBasemapOverrides();
     initBasemapMap();
     initWeatherMap();
     initAtmosphereHaloCanvas();
