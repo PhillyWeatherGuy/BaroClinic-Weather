@@ -1594,6 +1594,24 @@ body.light-mode .map-card {
     color: #f8fafc;
 }
 
+.basemap-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.basemap-zoom-readout {
+    padding: 3px 8px;
+    background: #181d28;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: #93c5fd;
+    white-space: nowrap;
+}
+
 .basemap-editor-body {
     flex: 1;
     overflow-y: auto;
@@ -1894,6 +1912,7 @@ body.light-mode .map-card {
 .basemap-editor-footer {
     margin-top: auto;
     padding-top: 8px;
+    padding-bottom: 2px;
     border-top: 1px solid #232b3c;
 }
 
