@@ -850,7 +850,30 @@
       }
     },
     {
-      "id": "motorway",
+      "id": "road_interstate_low",
+      "type": "line",
+      "source": "ne_roads",
+      "minzoom": 3,
+      "maxzoom": 6,
+      "filter": ["==", ["get", "level"], "Interstate"],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "visible"
+      },
+      "paint": {
+        "line-color": "rgba(2, 64, 243, 1)",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          3, 0.75,
+          6, 1.5
+        ]
+      }
+    },
+    {
+      "id": "road_motorway",
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
