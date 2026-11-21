@@ -1476,9 +1476,13 @@ export async function switchAppMode(targetMode) {
             });
         }
 
-        const targetStyle = stateManager.currentTheme === 'dark'
-            ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
-            : (stateManager.paramConfig?.map_style_light || './config/style_default.json');
+        const targetStyle = stateManager.activeBasemapPreset === 'satellite'
+            ? './config/map_style_satellite.json'
+            : stateManager.activeBasemapPreset === 'street'
+                ? './config/map_style_street.json'
+                : (stateManager.currentTheme === 'dark'
+                    ? (stateManager.paramConfig?.map_style_dark || './config/style_dark.json')
+                    : (stateManager.paramConfig?.map_style_light || './config/style_default.json'));
 
         if (stateManager.currentMapStyle !== targetStyle) {
             stateManager.currentMapStyle = targetStyle;
@@ -1596,6 +1600,10 @@ map.on('load', async () => {
 });
 
 map.on('style.load', () => {
+    if (stateManager.activeMode !== 'radar' || (stateManager.activeBasemapPreset && stateManager.activeBasemapPreset !== 'default')) {
+        currentStyleBaseColors = readMapBaseColors();
+        applyBasemapOverrides();
+    }
     if (basemapMap && stateManager.currentMapStyle) {
         updateBasemapMapStyle(stateManager.currentMapStyle);
     }
