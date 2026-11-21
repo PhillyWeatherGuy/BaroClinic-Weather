@@ -981,7 +981,7 @@ function applyBasemapOverrides() {
             if (!map.getLayer(layerId)) continue;
 
             const catOverride = borders[defaults.category] || { visible: true, thickness: 1, color: null };
-            const shouldShow = allVisible && catOverride.visible !== false;
+            const shouldShow = catOverride.visible !== false;
             map.setLayoutProperty(layerId, 'visibility', shouldShow ? defaults.visibility : 'none');
 
             const catThickness = Number.isFinite(catOverride.thickness) ? catOverride.thickness : 1;
