@@ -40,11 +40,11 @@ let bordersExpanded = false;
 function createDefaultBordersState() {
     return {
         all: { visible: true, thickness: 1, color: null },
-        oceanLand: { visible: true, thickness: 1, color: null },
-        national: { visible: true, thickness: 1, color: null },
-        state: { visible: true, thickness: 1, color: null },
-        county: { visible: true, thickness: 1, color: null },
-        roads: { visible: true, thickness: 1, color: null }
+        oceanLand: { visible: true, thickness: 1, color: null, minZoom: null },
+        national: { visible: true, thickness: 1, color: null, minZoom: null },
+        state: { visible: true, thickness: 1, color: null, minZoom: null },
+        county: { visible: true, thickness: 1, color: null, minZoom: null },
+        roads: { visible: true, thickness: 1, color: null, minZoom: null }
     };
 }
 
@@ -65,7 +65,12 @@ function ensureOverridesState() {
     }
     BORDER_CATEGORIES.forEach(({ id }) => {
         if (!stateManager.basemapOverrides.borders[id]) {
-            stateManager.basemapOverrides.borders[id] = { visible: true, thickness: 1, color: null };
+            stateManager.basemapOverrides.borders[id] = id === 'all'
+                ? { visible: true, thickness: 1, color: null }
+                : { visible: true, thickness: 1, color: null, minZoom: null };
+        }
+        if (id !== 'all' && stateManager.basemapOverrides.borders[id].minZoom === undefined) {
+            stateManager.basemapOverrides.borders[id].minZoom = null;
         }
     });
     return stateManager.basemapOverrides;
@@ -82,7 +87,8 @@ function hasAnyCustomizations() {
 
     return BORDER_CATEGORIES.some(({ id }) => {
         const b = overrides.borders[id];
-        return !b.visible || Math.abs((b.thickness ?? 1) - 1) > 0.01 || Boolean(b.color);
+        const hasZoom = id !== 'all' && b.minZoom !== null && b.minZoom !== undefined;
+        return !b.visible || Math.abs((b.thickness ?? 1) - 1) > 0.01 || Boolean(b.color) || hasZoom;
     });
 }
 
@@ -92,6 +98,13 @@ export function setBasemapPresetCallback(callback) {
 
 export function setBasemapEditorChangeCallback(callback) {
     editorChangeCallback = callback;
+}
+
+export function updateBasemapZoomReadout(zoom) {
+    const el = document.getElementById('basemap-zoom-readout');
+    if (el && Number.isFinite(zoom)) {
+        el.textContent = `Zoom: ${zoom.toFixed(2)}`;
+    }
 }
 
 export function syncBasemapEditorTheme(theme = stateManager.currentTheme || 'dark') {
@@ -106,7 +119,7 @@ export function syncBasemapEditorTheme(theme = stateManager.currentTheme || 'dar
     });
 }
 
-export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#f5fdff', borders: {} }) {
+export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#f5fdff', borders: {}, borderMinZooms: {} }) {
     const isSatellite = stateManager.activeBasemapPreset === 'satellite';
     const overrides = ensureOverridesState();
 
@@ -142,6 +155,7 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
     // Sync Borders rows
     const borders = overrides.borders;
     const baseBorders = baseColors.borders || {};
+    const baseMinZooms = baseColors.borderMinZooms || {};
     const allColorOverride = borders.all.color;
 
     BORDER_CATEGORIES.forEach(({ id }) => {
@@ -149,6 +163,8 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
         const visibleEl = document.getElementById(`border-visible-${id}`);
         const thickEl = document.getElementById(`border-thickness-${id}`);
         const thickValEl = document.getElementById(`border-thickness-val-${id}`);
+        const zoomEl = document.getElementById(`border-minzoom-${id}`);
+        const zoomValEl = document.getElementById(`border-minzoom-val-${id}`);
         const colorEl = document.getElementById(`border-color-${id}`);
         const resetEl = document.getElementById(`btn-reset-border-${id}`);
 
@@ -166,6 +182,13 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
         if (thickEl) thickEl.value = String(thickness);
         if (thickValEl) thickValEl.textContent = `${thickness.toFixed(1)}x`;
 
+        if (id !== 'all') {
+            const baseMinZoom = Number.isFinite(baseMinZooms[id]) ? baseMinZooms[id] : 0;
+            const activeMinZoom = (b.minZoom !== null && b.minZoom !== undefined) ? b.minZoom : baseMinZoom;
+            if (zoomEl) zoomEl.value = String(activeMinZoom);
+            if (zoomValEl) zoomValEl.textContent = `${activeMinZoom.toFixed(1)}`;
+        }
+
         const displayColor = id === 'all'
             ? (b.color || baseBorders.all || '#000000')
             : (b.color || allColorOverride || baseBorders[id] || '#000000');
@@ -175,9 +198,10 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
             const isModified = id === 'all'
                 ? BORDER_CATEGORIES.some(({ id: checkId }) => {
                     const item = borders[checkId];
-                    return !item.visible || Math.abs((item.thickness ?? 1) - 1) > 0.01 || Boolean(item.color);
+                    const itemHasZoom = checkId !== 'all' && item.minZoom !== null && item.minZoom !== undefined;
+                    return !item.visible || Math.abs((item.thickness ?? 1) - 1) > 0.01 || Boolean(item.color) || itemHasZoom;
                 })
-                : (!b.visible || Math.abs(thickness - 1) > 0.01 || Boolean(b.color));
+                : (!b.visible || Math.abs(thickness - 1) > 0.01 || Boolean(b.color) || (b.minZoom !== null && b.minZoom !== undefined));
             resetEl.disabled = !isModified;
         }
     });
@@ -277,6 +301,22 @@ function renderEditorSections(bodyEl) {
                                 />
                                 <span id="border-thickness-val-${id}" class="basemap-slider-value">1.0x</span>
                             </div>
+                            ${id !== 'all' ? `
+                                <div class="basemap-border-slider-row">
+                                    <span class="basemap-slider-label">Min Zoom</span>
+                                    <input
+                                        id="border-minzoom-${id}"
+                                        class="basemap-range-slider"
+                                        type="range"
+                                        min="0"
+                                        max="18"
+                                        step="0.1"
+                                        value="0"
+                                        aria-label="${label} minimum zoom"
+                                    />
+                                    <span id="border-minzoom-val-${id}" class="basemap-slider-value">0.0</span>
+                                </div>
+                            ` : ''}
                         </div>
                     `).join('')}
                 </div>
@@ -363,6 +403,7 @@ function renderEditorSections(bodyEl) {
     BORDER_CATEGORIES.forEach(({ id }) => {
         const visibleEl = document.getElementById(`border-visible-${id}`);
         const thickEl = document.getElementById(`border-thickness-${id}`);
+        const zoomEl = document.getElementById(`border-minzoom-${id}`);
         const colorEl = document.getElementById(`border-color-${id}`);
         const resetEl = document.getElementById(`btn-reset-border-${id}`);
 
@@ -392,6 +433,14 @@ function renderEditorSections(bodyEl) {
             });
         }
 
+        if (zoomEl) {
+            zoomEl.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                ensureOverridesState().borders[id].minZoom = Number.isFinite(val) ? val : null;
+                if (typeof editorChangeCallback === 'function') editorChangeCallback();
+            });
+        }
+
         if (colorEl) {
             colorEl.addEventListener('input', (e) => {
                 const borders = ensureOverridesState().borders;
@@ -411,7 +460,7 @@ function renderEditorSections(bodyEl) {
                 if (id === 'all') {
                     ensureOverridesState().borders = createDefaultBordersState();
                 } else {
-                    borders[id] = { visible: true, thickness: 1, color: null };
+                    borders[id] = { visible: true, thickness: 1, color: null, minZoom: null };
                     borders.all.visible = SUB_BORDER_IDS.every((subId) => borders[subId].visible);
                 }
                 if (typeof editorChangeCallback === 'function') editorChangeCallback();
@@ -447,6 +496,21 @@ export function initBasemapEditor() {
     const bodyEl = document.getElementById('basemap-editor-body');
 
     if (!toggleBtn || !panel) return;
+
+    const header = panel.querySelector('.basemap-editor-header');
+    if (header && !document.getElementById('basemap-zoom-readout')) {
+        const actions = document.createElement('div');
+        actions.className = 'basemap-header-actions';
+        const zoomEl = document.createElement('span');
+        zoomEl.id = 'basemap-zoom-readout';
+        zoomEl.className = 'basemap-zoom-readout';
+        zoomEl.textContent = 'Zoom: --';
+        actions.appendChild(zoomEl);
+        if (closeBtn) {
+            actions.appendChild(closeBtn);
+        }
+        header.appendChild(actions);
+    }
 
     if (!stateManager.activeBasemapPreset) {
         stateManager.activeBasemapPreset = 'default';
