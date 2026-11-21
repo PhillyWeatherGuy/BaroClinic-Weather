@@ -975,7 +975,6 @@ function applyBasemapOverrides() {
     const borders = overrides.borders;
     if (borders) {
         const allOverride = borders.all || { visible: true, thickness: 1, color: null };
-        const allVisible = allOverride.visible !== false;
         const allThickness = Number.isFinite(allOverride.thickness) ? allOverride.thickness : 1;
 
         for (const [layerId, defaults] of Object.entries(currentStyleLineDefaults)) {
