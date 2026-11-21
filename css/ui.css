@@ -1769,6 +1769,163 @@ body.light-mode .map-card {
     cursor: default;
 }
 
+.basemap-dropdown-block {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #2a3446;
+    background: #181d28;
+    border-radius: 0;
+}
+
+.basemap-dropdown-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 10px 12px;
+    background: #181d28;
+    border: none;
+    border-radius: 0;
+    color: #e2e8f0;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.basemap-dropdown-toggle:hover {
+    background: #1e2533;
+    color: #ffffff;
+}
+
+.basemap-dropdown-toggle.open {
+    border-bottom: 1px solid #232b3c;
+    color: #ffffff;
+}
+
+.basemap-dropdown-arrow {
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.basemap-dropdown-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background: #131722;
+}
+
+.basemap-border-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #181d28;
+    border: 1px solid #232b3c;
+    border-radius: 0;
+}
+
+.basemap-border-row.is-all-row {
+    border-color: #344158;
+    background: #1b2230;
+}
+
+.basemap-border-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.basemap-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.basemap-checkbox {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: #3b82f6;
+    cursor: pointer;
+}
+
+.basemap-border-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.basemap-slider-label {
+    min-width: 64px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.basemap-range-slider {
+    flex: 1;
+    height: 4px;
+    accent-color: #3b82f6;
+    cursor: pointer;
+}
+
+.basemap-slider-value {
+    min-width: 36px;
+    text-align: right;
+    font-family: monospace;
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+.basemap-editor-footer {
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px solid #232b3c;
+}
+
+.basemap-reset-all-btn {
+    width: 100%;
+    padding: 10px 14px;
+    background: #181d28;
+    border: 1px solid #ffffff;
+    outline: 1px solid #000000;
+    border-radius: 0;
+    color: #ffffff;
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.basemap-reset-all-btn:hover:not(:disabled) {
+    background: #2563eb;
+}
+
+.basemap-reset-all-btn:disabled {
+    border-color: #2a3446;
+    outline: none;
+    color: #64748b;
+    opacity: 0.5;
+    cursor: default;
+}
+
 @media (max-width: 1023px) {
     .unit-toggle-pill {
         right: 58px;
