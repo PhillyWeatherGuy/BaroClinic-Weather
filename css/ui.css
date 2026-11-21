@@ -1598,6 +1598,9 @@ body.light-mode .map-card {
     flex: 1;
     overflow-y: auto;
     padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
 }
 
 .basemap-editor-section {
@@ -1673,6 +1676,97 @@ body.light-mode .map-card {
 
 .basemap-preset-card.active .basemap-preset-name {
     color: #ffffff;
+}
+
+.basemap-editor-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.basemap-editor-controls.is-disabled {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+.basemap-disabled-note {
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    color: #94a3b8;
+    font-style: italic;
+}
+
+.basemap-control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #181d28;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+}
+
+.basemap-control-label {
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+.basemap-color-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.basemap-color-input {
+    width: 34px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid #ffffff;
+    outline: 1px solid #000000;
+    border-radius: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+.basemap-color-input::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.basemap-color-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 0;
+}
+
+.basemap-color-hex {
+    min-width: 64px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+.basemap-reset-btn {
+    padding: 4px 10px;
+    background: #11151e;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    color: #cbd5e1;
+    font-family: 'Roboto', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.basemap-reset-btn:hover:not(:disabled) {
+    background: #232c3d;
+    color: #ffffff;
+}
+
+.basemap-reset-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
 }
 
 @media (max-width: 1023px) {
