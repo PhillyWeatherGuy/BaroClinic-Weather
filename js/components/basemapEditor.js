@@ -140,6 +140,7 @@ function renderEditorSections(bodyEl) {
     bodyEl.querySelectorAll('.basemap-preset-card').forEach((card) => {
         card.addEventListener('click', () => {
             const presetId = card.dataset.presetId;
+            if (stateManager.activeBasemapPreset === presetId) return;
             stateManager.activeBasemapPreset = presetId;
             stateManager.basemapOverrides = { landColor: null, waterColor: null };
 
