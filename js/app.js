@@ -33,8 +33,10 @@ import {
     sampleBilinearValue, 
     formatParameterValue,
     destroyCityOverlay,
-    setBasemapLabelsVisibility 
-} from './layers/cityOverlay.js'; 
+    setBasemapLabelsVisibility,
+    refreshCityOverlayStyles,
+    updateCityPositions 
+} from './layers/cityOverlay.js';
 import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures, setContourGridMode, ensureEnsembleContourLayer } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setPolarContourFeatures } from './layers/polarMap.js';
 
@@ -1033,7 +1035,10 @@ function applyBasemapOverrides() {
             }
         }
     }
-
+    try {
+            refreshCityOverlayStyles();
+            updateCityPositions();
+        } catch (e) {}
     syncBasemapColorInputs(currentStyleBaseColors);
 }
 
