@@ -391,6 +391,7 @@ export async function initCityOverlay(map) {
         };
         map.on('move', throttledUpdate);
         map.on('zoom', throttledUpdate);
+        map.on('moveend', throttledUpdate);
         listenersAttached = true;
     }
 
@@ -409,9 +410,10 @@ export async function initCityOverlay(map) {
             const pop = f.properties.POP_MAX || f.properties.pop_max || 0;
             let minZoom = 6;
             if (pop >= 2000000) minZoom = 2;
-            else if (pop >= 500000) minZoom = 4;
-            else if (pop >= 100000) minZoom = 5;
-            else minZoom = 6;
+            else if (pop >= 500000) minZoom = 3.5;
+            else if (pop >= 100000) minZoom = 4.5;
+            else if (pop >= 50000) minZoom = 5.5;
+            else minZoom = 6.2;
 
             return {
                 id: i,
@@ -439,15 +441,12 @@ export function updateCityPositions() {
     if (!mapInstance || !isLoaded || isUpdating) return;
     isUpdating = true;
 
-    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay 
-                      || stateManager.manifest?.suppress_city_overlay;
-
     const labels = stateManager.basemapOverrides?.labels || {};
     const showCities = labels.showCities !== false;
     const showCallouts = labels.showCallouts !== false;
 
-    // If both are turned off, or parameter suppresses it, hide all markers
-    if (isSuppressed || (!showCities && !showCallouts)) {
+    // 🌟 If both are unchecked in the editor, clean up and exit
+    if (!showCities && !showCallouts) {
         destroyCityOverlay();
         return;
     }
@@ -464,9 +463,56 @@ export function updateCityPositions() {
 
     // 🌟 Density multiplier (0.5x to 2.5x, default 1.0x)
     const density = Number.isFinite(labels.density) ? labels.density : 1.0;
-    const zoomOffset = (density - 1.0) * 1.5; // High density shows towns at lower zooms
+    const zoomOffset = (density - 1.0) * 1.5;
 
-    let visible = allGlobalCities.filter(c => {
+    // 1. Start with global Natural Earth places
+    let candidateCities = [...allGlobalCities];
+
+    // 🌟 2. When zoomed in (zoom >= 5.8), dynamically pull local towns & villages from vector tiles in memory!
+    if (mapInstance && zoom >= 5.8 && mapInstance.getSource('openmaptiles')) {
+        try {
+            const tilePlaces = mapInstance.querySourceFeatures('openmaptiles', {
+                sourceLayer: 'place'
+            });
+
+            if (tilePlaces && tilePlaces.length > 0) {
+                const seenNames = new Set(candidateCities.map(c => (c.name || '').toLowerCase()));
+                for (let i = 0; i < tilePlaces.length; i++) {
+                    const f = tilePlaces[i];
+                    if (!f.geometry || f.geometry.type !== 'Point') continue;
+                    const p = f.properties || {};
+                    const name = p.name || p.name_en || p['name:latin'];
+                    if (!name) continue;
+
+                    const lowerName = name.toLowerCase();
+                    if (seenNames.has(lowerName)) continue;
+
+                    const pClass = p.class;
+                    if (!['city', 'town', 'village', 'hamlet', 'suburb'].includes(pClass)) continue;
+
+                    seenNames.add(lowerName);
+
+                    let minZ = 6.5;
+                    let popEst = 15000;
+                    if (pClass === 'city') { minZ = 5.0; popEst = 100000; }
+                    else if (pClass === 'town') { minZ = 6.2; popEst = 35000; }
+                    else if (pClass === 'village') { minZ = 7.5; popEst = 8000; }
+                    else { minZ = 8.8; popEst = 2000; }
+
+                    candidateCities.push({
+                        id: `tile_${lowerName}_${i}`,
+                        name: name,
+                        lng: f.geometry.coordinates[0],
+                        lat: f.geometry.coordinates[1],
+                        pop: p.population || popEst,
+                        minZoom: minZ
+                    });
+                }
+            }
+        } catch (err) {}
+    }
+
+    let visible = candidateCities.filter(c => {
         const thresholdZoom = Math.max(1, c.minZoom - zoomOffset);
         if (zoom < thresholdZoom) return false;
         if (c.lat < south || c.lat > north) return false;
@@ -482,7 +528,7 @@ export function updateCityPositions() {
     // Scale collision box padding inversely with density
     const padX = Math.max(3, Math.round(10 / density));
     const padY = Math.max(2, Math.round(6 / density));
-    const maxActiveCap = Math.round(60 * density);
+    const maxActiveCap = Math.round(75 * density);
 
     for (let i = 0; i < visible.length; i++) {
         const city = visible[i];
@@ -552,6 +598,12 @@ export function updateCityPositions() {
 function renderCityValues(activeFrameState, manifest) {
     if (!activeFrameState || stateManager.activeMode !== 'modelViewer') return;
 
+    const labels = stateManager.basemapOverrides?.labels || {};
+    const showCities = labels.showCities !== false;
+    const showCallouts = labels.showCallouts !== false;
+
+    if (!showCities && !showCallouts) return;
+
     const activeUnit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim().toLowerCase();
     const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch') || activeUnit === 'mm' || activeUnit.includes('millimeter');
 
@@ -560,11 +612,16 @@ function renderCityValues(activeFrameState, manifest) {
         const marker = cityMarkers[city.name];
         if (!marker) continue;
 
-        const decodedVal = sampleBilinearValue(city.lng, city.lat, activeFrameState, manifest);
-        const formattedText = formatParameterValue(decodedVal, manifest);
+        let formattedText = "--";
+        if (showCallouts) {
+            const decodedVal = sampleBilinearValue(city.lng, city.lat, activeFrameState, manifest);
+            formattedText = formatParameterValue(decodedVal, manifest);
+        }
 
         const el = marker.getElement();
-        if (formattedText === "--") {
+
+        // 🌟 If neither city name nor callout should show, hide marker; otherwise keep city visible
+        if (!showCities && (!showCallouts || formattedText === "--")) {
             el.style.display = 'none';
             continue;
         } else {
@@ -574,21 +631,15 @@ function renderCityValues(activeFrameState, manifest) {
         const valEl = el.querySelector('.city-callout-val');
         if (valEl) {
             valEl.className = isPrecipType ? 'city-callout-val precip-val' : 'city-callout-val';
-            valEl.textContent = formattedText;
+            const hasValidValue = showCallouts && formattedText !== "--";
+            valEl.textContent = hasValidValue ? formattedText : "";
+            valEl.style.display = hasValidValue ? 'block' : 'none';
         }
     }
 }
 
 export function updateCityCallouts(map, activeFrameState, manifest) {
     if (!isLoaded || stateManager.activeMode !== 'modelViewer') return;
-
-    const isSuppressed = stateManager.paramConfig?.suppress_city_overlay 
-                      || manifest?.suppress_city_overlay;
-
-    if (isSuppressed) {
-        destroyCityOverlay();
-        return;
-    }
 
     window.lastActiveFrameState = activeFrameState;
     window.lastManifest = manifest || stateManager.manifest;
