@@ -1,729 +1,882 @@
-// js/layers/cityOverlay.js
+// js/components/basemapEditor.js
 import { stateManager } from '../core/stateManager.js';
+import { getContextualLabelDefaults } from '../layers/cityOverlay.js';
 
-const GLOBAL_CITIES_URL = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_populated_places_simple.geojson';
-
-let allGlobalCities = [];
-let activeCities = [];
-let cityMarkers = {};
-let isLoaded = false;
-let mapInstance = null;
-let listenersAttached = false;
-let isUpdating = false;
-
-// 🌟 Dynamic style element so fonts, colors, sizes, and visibility update instantly without rebuilding markers
-let dynamicStyleEl = document.getElementById('city-overlay-dynamic-style');
-if (!dynamicStyleEl) {
-    dynamicStyleEl = document.createElement('style');
-    dynamicStyleEl.id = 'city-overlay-dynamic-style';
-    document.head.appendChild(dynamicStyleEl);
-}
-
-/**
- * 🌟 Parameter-aware suppression detection
- */
-export function isCurrentParamSuppressed() {
-    const paramConfig = stateManager.paramConfig;
-    const manifest = stateManager.manifest;
-
-    if (paramConfig?.suppress_city_overlay || manifest?.suppress_city_overlay) {
-        return true;
+const BASEMAP_PRESETS = [
+    {
+        id: 'default',
+        name: 'Default',
+        previewLight: './assets/preset-default-light.png.JPEG',
+        previewDark: './assets/preset-default-dark.png.JPEG'
+    },
+    {
+        id: 'satellite',
+        name: 'Satellite',
+        previewLight: './assets/preset-satellite.png.JPEG',
+        previewDark: './assets/preset-satellite.png.JPEG'
+    },
+    {
+        id: 'street',
+        name: 'Street Map',
+        previewLight: './assets/preset-street.png.JPEG',
+        previewDark: './assets/preset-street.png.JPEG'
     }
+];
 
-    const paramId = (paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    return paramId === 'prate' ||
-           paramId === 'precip' ||
-           paramId === 'preciptype' ||
-           paramId.startsWith('tp') ||
-           paramId.startsWith('asnow') ||
-           paramId === 'refc';
-}
+const BORDER_CATEGORIES = [
+    { id: 'all', label: 'All' },
+    { id: 'oceanLand', label: 'Ocean / Land' },
+    { id: 'national', label: 'National' },
+    { id: 'state', label: 'State / Province' },
+    { id: 'county', label: 'County' },
+    { id: 'roads', label: 'Roads' }
+];
 
-/**
- * 🌟 Contextual Defaults: Resolves whether labels and which colors/sizes should be default for active parameter
- */
-export function getContextualLabelDefaults() {
-    const isSuppressed = isCurrentParamSuppressed();
-    const paramConfig = stateManager.paramConfig;
-    const manifest = stateManager.manifest;
+const SUB_BORDER_IDS = ['oceanLand', 'national', 'state', 'county', 'roads'];
 
-    const activeUnit = (manifest?.unit || paramConfig?.unit || '').trim().toLowerCase();
-    const paramId = (paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch') || activeUnit === 'mm' || activeUnit.includes('millimeter');
-    const isPrecipColor = isPrecipType || paramId === 'prate' || paramId.startsWith('tp') || paramId.startsWith('asnow');
+const FONT_OPTIONS = [
+    { label: 'Roboto (Default)', value: "'Roboto', -apple-system, sans-serif" },
+    { label: 'Inter', value: "'Inter', -apple-system, sans-serif" },
+    { label: 'Montserrat', value: "'Montserrat', sans-serif" },
+    { label: 'Poppins', value: "'Poppins', sans-serif" },
+    { label: 'Oswald (Condensed)', value: "'Oswald', 'Arial Narrow', sans-serif" },
+    { label: 'Bebas Neue (Broadcast)', value: "'Bebas Neue', Impact, sans-serif" },
+    { label: 'System Sans', value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+    { label: 'Arial', value: "Arial, Helvetica, sans-serif" },
+    { label: 'Trebuchet MS', value: "'Trebuchet MS', 'Lucida Sans Unicode', sans-serif" },
+    { label: 'Impact', value: "Impact, 'Arial Narrow', sans-serif" },
+    { label: 'JetBrains Mono', value: "'JetBrains Mono', Consolas, monospace" },
+    { label: 'Monospace', value: "SFMono-Regular, Menlo, Monaco, Consolas, monospace" },
+    { label: 'Merriweather (Serif)', value: "'Merriweather', Georgia, serif" },
+    { label: 'Georgia (Serif)', value: "Georgia, 'Times New Roman', serif" }
+];
 
-    // 🌟 Precipitation parameters default to light blue (#60a5fa), others default to crisp white (#ffffff)
-    const defaultCalloutColor = paramConfig?.callout_color ||
-                                manifest?.callout_color ||
-                                (isPrecipColor ? '#60a5fa' : '#ffffff');
+let presetCallback = null;
+let editorChangeCallback = null;
+let bordersExpanded = false;
+let labelsExpanded = false;
 
-    const defaultCityColor = paramConfig?.city_color ||
-                             manifest?.city_color ||
-                             '#f1f5f9';
-
+function createDefaultBordersState() {
     return {
-        showCities: !isSuppressed,
-        showCallouts: !isSuppressed,
-        density: 1.0,
-        cityColor: defaultCityColor,
-        calloutColor: defaultCalloutColor,
-        cityFont: "'Roboto', -apple-system, sans-serif",
-        calloutFont: "'Roboto', -apple-system, sans-serif",
-        cityFontSize: 11,
-        calloutFontSize: 15
+        all: { visible: true, thickness: 1, color: null },
+        oceanLand: { visible: true, thickness: 1, color: null, minZoom: null },
+        national: { visible: true, thickness: 1, color: null, minZoom: null },
+        state: { visible: true, thickness: 1, color: null, minZoom: null },
+        county: { visible: true, thickness: 1, color: null, minZoom: null },
+        roads: { visible: true, thickness: 1, color: null, minZoom: null }
     };
 }
 
-export function refreshCityOverlayStyles() {
-    const defaults = getContextualLabelDefaults();
-    const labels = stateManager.basemapOverrides?.labels || {};
-
-    const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
-    const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
-
-    const cityColor = labels.cityColor || defaults.cityColor;
-    const calloutColor = labels.calloutColor || defaults.calloutColor;
-    const cityFont = labels.cityFont || defaults.cityFont;
-    const calloutFont = labels.calloutFont || defaults.calloutFont;
-
-    const cityFontSize = Number.isFinite(labels.cityFontSize) ? labels.cityFontSize : defaults.cityFontSize;
-    const calloutFontSize = Number.isFinite(labels.calloutFontSize) ? labels.calloutFontSize : defaults.calloutFontSize;
-    const cityStrokeWidth = Math.max(0.8, +(cityFontSize * 0.09).toFixed(1));
-    const calloutStrokeWidth = Math.max(1, +(calloutFontSize * 0.1).toFixed(1));
-
-    dynamicStyleEl.textContent = `
-        .city-callout-node {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none;
-            user-select: none;
-            text-transform: uppercase;
-            white-space: nowrap;
-        }
-        .city-callout-val {
-            display: ${showCallouts ? 'block' : 'none'};
-            font-family: ${calloutFont};
-            font-size: ${calloutFontSize}px;
-            font-weight: 800;
-            line-height: 1.1;
-            letter-spacing: -0.2px;
-            color: ${calloutColor};
-            -webkit-text-stroke: ${calloutStrokeWidth}px #000000;
-            paint-order: stroke fill;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-        }
-        .city-callout-val.precip-val {
-            color: ${calloutColor};
-        }
-        .city-callout-name {
-            display: ${showCities ? 'block' : 'none'};
-            font-family: ${cityFont};
-            font-size: ${cityFontSize}px;
-            font-weight: 700;
-            line-height: 1.1;
-            letter-spacing: 0.3px;
-            color: ${cityColor};
-            -webkit-text-stroke: ${cityStrokeWidth}px #000000;
-            paint-order: stroke fill;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-            margin-top: 1px;
-        }
-    `;
+function createDefaultLabelsState() {
+    return {
+        showCities: null,
+        showCallouts: null,
+        density: null,
+        cityColor: null,
+        calloutColor: null,
+        cityFont: null,
+        calloutFont: null,
+        cityFontSize: null,
+        calloutFontSize: null
+    };
 }
 
-refreshCityOverlayStyles();
-
-/**
- * 🌟 Forward-projects (lon, lat) to native HRRR Lambert Conformal Conic grid cell index
- */
-function projectHRRRLCC(lon, lat, grid) {
-    const DEG = Math.PI / 180;
-    const R = grid.earth_radius || 6371229.0;
-    const p1 = (grid.lat_1 ?? 38.5) * DEG;
-    const p0 = (grid.lat_0 ?? 38.5) * DEG;
-    const lon0 = (grid.lon_0 ?? -97.5) * DEG;
-
-    const n = Math.sin(p1);
-    const F = (Math.cos(p1) * Math.pow(Math.tan(Math.PI / 4 + p1 / 2), n)) / n;
-    const RF = R * F;
-    const rho0 = RF / Math.pow(Math.tan(Math.PI / 4 + p0 / 2), n);
-
-    const lonRad = lon * DEG;
-    const latRad = lat * DEG;
-
-    const rho = RF / Math.pow(Math.tan(Math.PI / 4 + latRad / 2), n);
-    
-    let dLon = ((lonRad - lon0 + Math.PI) % (2 * Math.PI));
-    if (dLon < 0) dLon += 2 * Math.PI;
-    dLon -= Math.PI;
-
-    const theta = n * dLon;
-    const x = rho * Math.sin(theta);
-    const y = rho0 - rho * Math.cos(theta);
-
-    const gridX = (x - grid.x0) / grid.dx;
-    const gridY = (y - grid.y0) / grid.dy;
-
-    return { x: gridX, y: gridY };
+function createDefaultBasemapOverrides() {
+    return {
+        landColor: null,
+        waterColor: null,
+        borders: createDefaultBordersState(),
+        labels: createDefaultLabelsState()
+    };
 }
 
-/**
- * 🌟 DYNAMIC PIXEL DECODER
- */
-export function decodePixelValue(rawVal, manifest) {
-    if (rawVal === undefined) return 0.0;
-    const val = Number(rawVal);
-    if (isNaN(val)) return 0.0;
+function ensureOverridesState() {
+    if (!stateManager.basemapOverrides) {
+        stateManager.basemapOverrides = createDefaultBasemapOverrides();
+    }
+    if (!stateManager.basemapOverrides.borders) {
+        stateManager.basemapOverrides.borders = createDefaultBordersState();
+    }
+    if (!stateManager.basemapOverrides.labels) {
+        stateManager.basemapOverrides.labels = createDefaultLabelsState();
+    }
 
-    const scaling = manifest?.scaling || stateManager.paramConfig?.scaling || stateManager.manifest?.scaling;
-
-    if (scaling && scaling.mode === 'piecewise' && scaling.val_points && scaling.byte_points) {
-        const vp = scaling.val_points.map(Number);
-        const bp = scaling.byte_points.map(Number);
-
-        for (let i = 0; i < bp.length - 1; i++) {
-            if (val >= bp[i] && val <= bp[i + 1]) {
-                const span = bp[i + 1] - bp[i];
-                const t = span > 0 ? (val - bp[i]) / span : 0;
-                return vp[i] + t * (vp[i + 1] - vp[i]);
-            }
+    BORDER_CATEGORIES.forEach(({ id }) => {
+        if (!stateManager.basemapOverrides.borders[id]) {
+            stateManager.basemapOverrides.borders[id] = id === 'all'
+                ? { visible: true, thickness: 1, color: null }
+                : { visible: true, thickness: 1, color: null, minZoom: null };
         }
-        return vp[vp.length - 1];
-    }
-
-    const minVal = Number(scaling?.min_val ?? manifest?.min_val ?? manifest?.temp_min_k ?? 0.0);
-    const maxVal = Number(scaling?.max_val ?? manifest?.max_val ?? manifest?.temp_max_k ?? 255.0);
-    return minVal + (val / 255.0) * (maxVal - minVal);
-}
-
-/**
- * 🌟 GENERIC POINT SAMPLER
- */
-export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
-    const frameState = activeFrameState || stateManager.activeFrameState;
-    if (!frameState) return 0.0;
-
-    const chunkIdx = frameState.chunkIndex ?? 0;
-    const pixelData = stateManager.chunkPixelData[chunkIdx];
-    if (!pixelData) return 0.0;
-
-    const activeManifest = manifest || stateManager.manifest;
-    const grid = activeManifest?.grid;
-
-    const paramId = (activeManifest?.id || activeManifest?.parameter || stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    const isPrecipOrAccum = paramId.startsWith('asnow') ||
-                            paramId.startsWith('tp') ||
-                            paramId === 'prate' ||
-                            paramId === 'refc';
-
-    // PATH A: HRRR Lambert Conformal
-    if (grid && (grid.projection === 'lambert_conformal' || grid.nx)) {
-        const pt = projectHRRRLCC(lng, lat, grid);
-        if (pt.x < 0 || pt.x > grid.nx - 1 || pt.y < 0 || pt.y > grid.ny - 1) {
-            return NaN;
-        }
-
-        const frameW = grid.nx;
-        const frameH = grid.ny;
-        const frameSize = frameW * frameH;
-        const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
-        const frameOffset = frameIdx * frameSize;
-
-        if (isPrecipOrAccum) {
-            const nearX = Math.min(Math.max(Math.round(pt.x), 0), grid.nx - 1);
-            const nearY = Math.min(Math.max(Math.round(pt.y), 0), grid.ny - 1);
-            const v = pixelData[frameOffset + nearY * frameW + nearX];
-            return v !== undefined ? decodePixelValue(v, activeManifest) : NaN;
-        }
-
-        const x0 = Math.floor(pt.x);
-        const x1 = Math.min(x0 + 1, grid.nx - 1);
-        const y0 = Math.floor(pt.y);
-        const y1 = Math.min(y0 + 1, grid.ny - 1);
-
-        const fracX = pt.x - x0;
-        const fracY = pt.y - y0;
-
-        const idx00 = frameOffset + y0 * frameW + x0;
-        const idx10 = frameOffset + y0 * frameW + x1;
-        const idx01 = frameOffset + y1 * frameW + x0;
-        const idx11 = frameOffset + y1 * frameW + x1;
-
-        const v00 = pixelData[idx00];
-        const v10 = pixelData[idx10];
-        const v01 = pixelData[idx01];
-        const v11 = pixelData[idx11];
-
-        if (v00 === undefined) return NaN;
-
-        const d00 = decodePixelValue(v00, activeManifest);
-        const d10 = decodePixelValue(v10 ?? v00, activeManifest);
-        const d01 = decodePixelValue(v01 ?? v00, activeManifest);
-        const d11 = decodePixelValue(v11 ?? v00, activeManifest);
-
-        const bottom = d00 * (1.0 - fracX) + d10 * fracX;
-        const top = d01 * (1.0 - fracX) + d11 * fracX;
-        return bottom * (1.0 - fracY) + top * fracY;
-    }
-
-    // PATH B: Global Equirectangular Grid
-    let normLng = ((lng % 360) + 360) % 360;
-    if (normLng > 180) normLng -= 360;
-
-    const normX = (normLng + 180.0) / 360.0;
-    const normY = (90.0 - lat) / 180.0;
-
-    if (normY < 0 || normY > 1) return 0.0;
-
-    const frameW = activeManifest?.frame_width || 1440;
-    const frameH = activeManifest?.frame_height || 721;
-    const frameSize = frameW * frameH;
-    const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
-
-    let frameOffset = frameIdx * frameSize;
-    if (activeManifest?.type === 'ensemble_chunked') {
-        const activeMember = stateManager.activeMember || 0;
-        const numFrames = (activeManifest.chunks?.[chunkIdx]?.forecast_steps || []).length || 10;
-        const memberSizeBytes = activeManifest.chunks?.[chunkIdx]?.member_size_bytes || (numFrames * frameSize);
-        frameOffset = (activeMember * memberSizeBytes) + (frameIdx * frameSize);
-    }
-
-    const contX = (((normX % 1) + 1) % 1) * frameW;
-    const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
-
-    if (isPrecipOrAccum) {
-        const nearX = Math.round(contX) % frameW;
-        const nearY = Math.min(Math.max(Math.round(contY), 0), frameH - 1);
-        const v = pixelData[frameOffset + nearY * frameW + nearX];
-        return v !== undefined ? decodePixelValue(v, activeManifest) : 0.0;
-    }
-
-    const x0 = Math.floor(contX) % frameW;
-    const x1 = (x0 + 1) % frameW;
-    const y0 = Math.floor(contY);
-    const y1 = Math.min(y0 + 1, frameH - 1);
-
-    const fracX = contX - Math.floor(contX);
-    const fracY = contY - y0;
-
-    const idx00 = frameOffset + y0 * frameW + x0;
-    const idx10 = frameOffset + y0 * frameW + x1;
-    const idx01 = frameOffset + y1 * frameW + x0;
-    const idx11 = frameOffset + y1 * frameW + x1;
-
-    const v00 = pixelData[idx00];
-    const v10 = pixelData[idx10];
-    const v01 = pixelData[idx01];
-    const v11 = pixelData[idx11];
-
-    if (v00 === undefined) return 0.0;
-
-    const d00 = decodePixelValue(v00, activeManifest);
-    const d10 = decodePixelValue(v10 ?? v00, activeManifest);
-    const d01 = decodePixelValue(v01 ?? v00, activeManifest);
-    const d11 = decodePixelValue(v11 ?? v00, activeManifest);
-
-    const top = d00 * (1.0 - fracX) + d10 * fracX;
-    const bottom = d01 * (1.0 - fracX) + d11 * fracX;
-    return top * (1.0 - fracY) + bottom * fracY;
-}
-
-/**
- * 🌟 DYNAMIC UNIT FORMATTER
- */
-export function formatParameterValue(decodedVal, manifest) {
-    if (decodedVal === undefined || isNaN(decodedVal)) return "--";
-
-    const unit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim();
-    const normalizedUnit = unit.toLowerCase();
-    const paramId = (manifest?.id || manifest?.parameter || stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
-    const isMetric = stateManager.currentUnits === 'metric';
-
-    if (paramId === 'refc' || normalizedUnit.includes('dbz')) {
-        if (decodedVal < 9.0) return "--";
-        return `${Math.round(decodedVal)} dBZ`;
-    }
-
-    if (paramId === 'prate' || normalizedUnit.includes('in/hr') || normalizedUnit.includes('mm/hr')) {
-        if (isMetric) {
-            const mmhr = normalizedUnit.includes('in') ? decodedVal * 25.4 : decodedVal;
-            return `${mmhr.toFixed(1)} mm/hr`;
-        }
-        const inhr = normalizedUnit.includes('mm') ? decodedVal / 25.4 : decodedVal;
-        return `${inhr.toFixed(2)} in/hr`;
-    }
-
-    const isTempParam = unit.includes('°') ||
-        normalizedUnit.includes('fahrenheit') ||
-        normalizedUnit.includes('celsius') ||
-        normalizedUnit.includes('kelvin') ||
-        normalizedUnit === 'k' ||
-        normalizedUnit === 'c' ||
-        normalizedUnit === 'f' ||
-        (paramId.startsWith('t') && !paramId.startsWith('tp')) ||
-        paramId === '2t' ||
-        paramId === 'd2m';
-
-    if (isTempParam) {
-        let celsius = decodedVal;
-        if (decodedVal > 150) {
-            celsius = decodedVal - 273.15;
-        } else if (normalizedUnit.includes('f')) {
-            celsius = (decodedVal - 32) * (5 / 9);
-        }
-        const temperature = isMetric ? celsius : (celsius * (9 / 5)) + 32;
-        return `${Math.round(temperature)}°${isMetric ? 'C' : 'F'}`;
-    }
-
-    if (normalizedUnit === 'in' || normalizedUnit.includes('inch')) {
-        return isMetric ? `${(decodedVal * 25.4).toFixed(1)} mm` : `${decodedVal.toFixed(2)} in`;
-    }
-
-    if (normalizedUnit === 'mm' || normalizedUnit.includes('millimeter')) {
-        return isMetric ? `${decodedVal.toFixed(1)} mm` : `${(decodedVal / 25.4).toFixed(2)} in`;
-    }
-
-    if (unit === '%') return `${Math.round(decodedVal)}%`;
-    if (unit.length > 0) return `${Math.round(decodedVal)} ${unit}`;
-    return `${Math.round(decodedVal)}`;
-}
-
-/**
- * 🌟 Toggle Basemap Native City Labels
- */
-export function setBasemapLabelsVisibility(map, isVisible) {
-    if (!map) return;
-    const style = map.getStyle();
-    if (!style || !style.layers) return;
-
-    const visibilityVal = isVisible ? 'visible' : 'none';
-
-    style.layers.forEach(layer => {
-        const id = layer.id.toLowerCase();
-        const sourceLayer = (layer['source-layer'] || '').toLowerCase();
-        if (layer.type === 'symbol' && (
-            id.includes('place_label_city') ||
-            id.includes('place_label_town') ||
-            id.includes('place_label_village') ||
-            id.includes('settlement') ||
-            sourceLayer.includes('place')
-        )) {
-            try {
-                map.setLayoutProperty(layer.id, 'visibility', visibilityVal);
-            } catch (e) {}
+        if (id !== 'all' && stateManager.basemapOverrides.borders[id].minZoom === undefined) {
+            stateManager.basemapOverrides.borders[id].minZoom = null;
         }
     });
+
+    if (stateManager.basemapOverrides.labels.cityFontSize === undefined) {
+        stateManager.basemapOverrides.labels.cityFontSize = null;
+    }
+    if (stateManager.basemapOverrides.labels.calloutFontSize === undefined) {
+        stateManager.basemapOverrides.labels.calloutFontSize = null;
+    }
+
+    return stateManager.basemapOverrides;
 }
 
-/**
- * 🌟 Shut down and completely remove all city callouts
- */
-export function destroyCityOverlay() {
-    for (const name in cityMarkers) {
-        if (cityMarkers[name]) {
-            cityMarkers[name].remove();
+function getPreviewUrl(preset, theme) {
+    return theme === 'light' ? preset.previewLight : preset.previewDark;
+}
+
+function hasAnyCustomizations() {
+    if ((stateManager.activeBasemapPreset || 'default') !== 'default') return true;
+    const overrides = ensureOverridesState();
+    if (overrides.landColor || overrides.waterColor) return true;
+
+    const hasBorderCustomizations = BORDER_CATEGORIES.some(({ id }) => {
+        const b = overrides.borders[id];
+        const hasZoom = id !== 'all' && b.minZoom !== null && b.minZoom !== undefined;
+        return !b.visible || Math.abs((b.thickness ?? 1) - 1) > 0.01 || Boolean(b.color) || hasZoom;
+    });
+    if (hasBorderCustomizations) return true;
+
+    const lbl = overrides.labels;
+    if (lbl) {
+        if (lbl.showCities !== null && lbl.showCities !== undefined) return true;
+        if (lbl.showCallouts !== null && lbl.showCallouts !== undefined) return true;
+        if (lbl.density !== null && lbl.density !== undefined) return true;
+        if (Number.isFinite(lbl.cityFontSize) || Number.isFinite(lbl.calloutFontSize)) return true;
+        if (lbl.cityColor || lbl.calloutColor || lbl.cityFont || lbl.calloutFont) return true;
+    }
+
+    return false;
+}
+
+export function setBasemapPresetCallback(callback) {
+    presetCallback = callback;
+}
+
+export function setBasemapEditorChangeCallback(callback) {
+    editorChangeCallback = callback;
+}
+
+export function updateBasemapZoomReadout(zoom) {
+    const el = document.getElementById('basemap-zoom-readout');
+    if (el && Number.isFinite(zoom)) {
+        el.textContent = `Zoom: ${zoom.toFixed(2)}`;
+    }
+}
+
+export function syncBasemapEditorTheme(theme = stateManager.currentTheme || 'dark') {
+    const bodyEl = document.getElementById('basemap-editor-body');
+    if (!bodyEl) return;
+
+    BASEMAP_PRESETS.forEach((preset) => {
+        const img = bodyEl.querySelector(`.basemap-preset-card[data-preset-id="${preset.id}"] .basemap-preset-img`);
+        if (img) {
+            img.src = getPreviewUrl(preset, theme);
         }
-    }
-    cityMarkers = {};
-    activeCities = [];
-    isUpdating = false;
+    });
+
+    syncBasemapColorInputs();
 }
 
-export async function initCityOverlay(map) {
-    mapInstance = map;
+export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#f5fdff', borders: {}, borderMinZooms: {} }) {
+    const isSatellite = stateManager.activeBasemapPreset === 'satellite';
+    const overrides = ensureOverridesState();
 
-    if (stateManager.activeMode !== 'modelViewer') {
-        destroyCityOverlay();
-        setBasemapLabelsVisibility(map, true);
-        return;
+    const landColor = overrides.landColor || baseColors.land || '#ededed';
+    const waterColor = overrides.waterColor || baseColors.water || '#f5fdff';
+
+    const controls = document.getElementById('basemap-land-water-controls');
+    const note = document.getElementById('basemap-satellite-note');
+    const landInput = document.getElementById('basemap-land-color');
+    const landHex = document.getElementById('basemap-land-hex');
+    const resetLandBtn = document.getElementById('btn-reset-land-color');
+    const waterInput = document.getElementById('basemap-water-color');
+    const waterHex = document.getElementById('basemap-water-hex');
+    const resetWaterBtn = document.getElementById('btn-reset-water-color');
+
+    if (controls) controls.classList.toggle('is-disabled', isSatellite);
+    if (note) note.style.display = isSatellite ? 'block' : 'none';
+
+    if (landInput) {
+        landInput.value = landColor;
+        landInput.disabled = isSatellite;
+    }
+    if (landHex) landHex.textContent = isSatellite ? 'N/A' : landColor.toUpperCase();
+    if (resetLandBtn) resetLandBtn.disabled = isSatellite || !overrides.landColor;
+
+    if (waterInput) {
+        waterInput.value = waterColor;
+        waterInput.disabled = isSatellite;
+    }
+    if (waterHex) waterHex.textContent = isSatellite ? 'N/A' : waterColor.toUpperCase();
+    if (resetWaterBtn) resetWaterBtn.disabled = isSatellite || !overrides.waterColor;
+
+    // Sync Borders rows
+    const borders = overrides.borders;
+    const baseBorders = baseColors.borders || {};
+    const baseMinZooms = baseColors.borderMinZooms || {};
+    const allColorOverride = borders.all.color;
+
+    BORDER_CATEGORIES.forEach(({ id }) => {
+        const b = borders[id];
+        const visibleEl = document.getElementById(`border-visible-${id}`);
+        const thickEl = document.getElementById(`border-thickness-${id}`);
+        const thickValEl = document.getElementById(`border-thickness-val-${id}`);
+        const zoomEl = document.getElementById(`border-minzoom-${id}`);
+        const zoomValEl = document.getElementById(`border-minzoom-val-${id}`);
+        const colorEl = document.getElementById(`border-color-${id}`);
+        const resetEl = document.getElementById(`btn-reset-border-${id}`);
+
+        if (visibleEl) {
+            visibleEl.checked = b.visible;
+            if (id === 'all') {
+                const subVisibles = SUB_BORDER_IDS.map((subId) => borders[subId].visible);
+                const allTrue = subVisibles.every(Boolean);
+                const anyTrue = subVisibles.some(Boolean);
+                visibleEl.indeterminate = anyTrue && !allTrue;
+            }
+        }
+
+        const thickness = b.thickness ?? 1;
+        if (thickEl) thickEl.value = String(thickness);
+        if (thickValEl) thickValEl.textContent = `${thickness.toFixed(1)}x`;
+
+        if (id !== 'all') {
+            const baseMinZoom = Number.isFinite(baseMinZooms[id]) ? baseMinZooms[id] : 0;
+            const activeMinZoom = (b.minZoom !== null && b.minZoom !== undefined) ? b.minZoom : baseMinZoom;
+            if (zoomEl) zoomEl.value = String(activeMinZoom);
+            if (zoomValEl) zoomValEl.textContent = `${activeMinZoom.toFixed(1)}`;
+        }
+
+        const displayColor = id === 'all'
+            ? (b.color || baseBorders.all || '#000000')
+            : (b.color || allColorOverride || baseBorders[id] || '#000000');
+        if (colorEl) colorEl.value = displayColor;
+
+        if (resetEl) {
+            const isModified = id === 'all'
+                ? BORDER_CATEGORIES.some(({ id: checkId }) => {
+                    const item = borders[checkId];
+                    const itemHasZoom = checkId !== 'all' && item.minZoom !== null && item.minZoom !== undefined;
+                    return !item.visible || Math.abs((item.thickness ?? 1) - 1) > 0.01 || Boolean(item.color) || itemHasZoom;
+                })
+                : (!b.visible || Math.abs(thickness - 1) > 0.01 || Boolean(b.color) || (b.minZoom !== null && b.minZoom !== undefined));
+            resetEl.disabled = !isModified;
+        }
+    });
+
+    // 🌟 Sync Labels controls with contextual defaults
+    const lbl = overrides.labels;
+    const labelDefaults = getContextualLabelDefaults();
+
+    const showCitiesEl = document.getElementById('labels-show-cities');
+    const showCalloutsEl = document.getElementById('labels-show-callouts');
+    const densityEl = document.getElementById('labels-density-slider');
+    const densityValEl = document.getElementById('labels-density-val');
+    const cityColorEl = document.getElementById('labels-city-color');
+    const calloutColorEl = document.getElementById('labels-callout-color');
+    const cityFontEl = document.getElementById('labels-city-font');
+    const calloutFontEl = document.getElementById('labels-callout-font');
+    const citySizeEl = document.getElementById('labels-city-size');
+    const calloutSizeEl = document.getElementById('labels-callout-size');
+    const resetLabelsBtn = document.getElementById('btn-reset-labels');
+
+    const activeShowCities = (lbl.showCities !== null && lbl.showCities !== undefined) ? lbl.showCities : labelDefaults.showCities;
+    const activeShowCallouts = (lbl.showCallouts !== null && lbl.showCallouts !== undefined) ? lbl.showCallouts : labelDefaults.showCallouts;
+    const activeDensity = (lbl.density !== null && lbl.density !== undefined) ? lbl.density : labelDefaults.density;
+    const activeCityColor = lbl.cityColor || labelDefaults.cityColor;
+    const activeCalloutColor = lbl.calloutColor || labelDefaults.calloutColor;
+    const activeCityFont = lbl.cityFont || labelDefaults.cityFont;
+    const activeCalloutFont = lbl.calloutFont || labelDefaults.calloutFont;
+    const activeCitySize = Number.isFinite(lbl.cityFontSize) ? lbl.cityFontSize : labelDefaults.cityFontSize;
+    const activeCalloutSize = Number.isFinite(lbl.calloutFontSize) ? lbl.calloutFontSize : labelDefaults.calloutFontSize;
+
+    if (showCitiesEl) showCitiesEl.checked = activeShowCities;
+    if (showCalloutsEl) showCalloutsEl.checked = activeShowCallouts;
+
+    if (densityEl) densityEl.value = String(activeDensity);
+    if (densityValEl) densityValEl.textContent = `${activeDensity.toFixed(1)}x`;
+
+    if (cityColorEl) cityColorEl.value = activeCityColor;
+    if (calloutColorEl) calloutColorEl.value = activeCalloutColor;
+
+    if (cityFontEl) cityFontEl.value = activeCityFont;
+    if (calloutFontEl) calloutFontEl.value = activeCalloutFont;
+
+    if (citySizeEl && document.activeElement !== citySizeEl) {
+        citySizeEl.value = String(activeCitySize);
+    }
+    if (calloutSizeEl && document.activeElement !== calloutSizeEl) {
+        calloutSizeEl.value = String(activeCalloutSize);
     }
 
-    destroyCityOverlay();
-    setBasemapLabelsVisibility(map, false);
+    if (resetLabelsBtn) {
+        const isModified = (lbl.showCities !== null && lbl.showCities !== undefined) ||
+            (lbl.showCallouts !== null && lbl.showCallouts !== undefined) ||
+            (lbl.density !== null && lbl.density !== undefined) ||
+            Number.isFinite(lbl.cityFontSize) ||
+            Number.isFinite(lbl.calloutFontSize) ||
+            Boolean(lbl.cityColor) ||
+            Boolean(lbl.calloutColor) ||
+            Boolean(lbl.cityFont) ||
+            Boolean(lbl.calloutFont);
+        resetLabelsBtn.disabled = !isModified;
+    }
 
-    if (!listenersAttached) {
-        let timer = null;
-        const throttledUpdate = () => {
-            if (stateManager.activeMode !== 'modelViewer') return;
-            if (timer) cancelAnimationFrame(timer);
-            timer = requestAnimationFrame(() => {
-                updateCityPositions();
+    const resetAllBtn = document.getElementById('btn-reset-all-basemap');
+    if (resetAllBtn) {
+        resetAllBtn.disabled = !hasAnyCustomizations();
+    }
+}
+
+function renderEditorSections(bodyEl) {
+    const currentTheme = stateManager.currentTheme || 'dark';
+    const activePreset = stateManager.activeBasemapPreset || 'default';
+    const labelDefaults = getContextualLabelDefaults();
+
+    bodyEl.innerHTML = `
+        <section class="basemap-editor-section">
+            <h3 class="basemap-section-header">Presets</h3>
+            <div class="basemap-presets-grid">
+                ${BASEMAP_PRESETS.map((preset) => `
+                    <button
+                        type="button"
+                        class="basemap-preset-card ${activePreset === preset.id ? 'active' : ''}"
+                        data-preset-id="${preset.id}"
+                    >
+                        <div class="basemap-preset-thumb">
+                            <img
+                                class="basemap-preset-img"
+                                src="${getPreviewUrl(preset, currentTheme)}"
+                                alt="${preset.name} basemap preview"
+                                loading="lazy"
+                            />
+                        </div>
+                        <span class="basemap-preset-name">${preset.name}</span>
+                    </button>
+                `).join('')}
+            </div>
+        </section>
+
+        <section class="basemap-editor-section">
+            <h3 class="basemap-section-header">Map Editor</h3>
+            <div id="basemap-satellite-note" class="basemap-disabled-note" style="display: none;">
+                Land and water colors are disabled on Satellite imagery.
+            </div>
+            <div id="basemap-land-water-controls" class="basemap-editor-controls">
+                <div class="basemap-control-row">
+                    <span class="basemap-control-label">Land</span>
+                    <div class="basemap-color-group">
+                        <input id="basemap-land-color" class="basemap-color-input" type="color" value="#ededed" aria-label="Land color" />
+                        <span id="basemap-land-hex" class="basemap-color-hex">#EDEDED</span>
+                        <button id="btn-reset-land-color" class="basemap-reset-btn" type="button" disabled>Reset</button>
+                    </div>
+                </div>
+                <div class="basemap-control-row">
+                    <span class="basemap-control-label">Water</span>
+                    <div class="basemap-color-group">
+                        <input id="basemap-water-color" class="basemap-color-input" type="color" value="#f5fdff" aria-label="Water color" />
+                        <span id="basemap-water-hex" class="basemap-color-hex">#F5FDFF</span>
+                        <button id="btn-reset-water-color" class="basemap-reset-btn" type="button" disabled>Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Borders Dropdown -->
+            <div class="basemap-dropdown-block">
+                <button
+                    id="btn-borders-dropdown"
+                    class="basemap-dropdown-toggle ${bordersExpanded ? 'open' : ''}"
+                    type="button"
+                    aria-expanded="${String(bordersExpanded)}"
+                >
+                    <span>Borders</span>
+                    <span class="basemap-dropdown-arrow">${bordersExpanded ? '▾' : '▸'}</span>
+                </button>
+                <div id="borders-dropdown-body" class="basemap-dropdown-body" style="display: ${bordersExpanded ? 'flex' : 'none'};">
+                    ${BORDER_CATEGORIES.map(({ id, label }) => `
+                        <div class="basemap-border-row ${id === 'all' ? 'is-all-row' : ''}" data-border-id="${id}">
+                            <div class="basemap-border-top">
+                                <label class="basemap-checkbox-label">
+                                    <input id="border-visible-${id}" class="basemap-checkbox" type="checkbox" checked />
+                                    <span>${label}</span>
+                                </label>
+                                <div class="basemap-color-group">
+                                    <input id="border-color-${id}" class="basemap-color-input" type="color" value="#000000" aria-label="${label} color" />
+                                    <button id="btn-reset-border-${id}" class="basemap-reset-btn" type="button" disabled>Reset</button>
+                                </div>
+                            </div>
+                            <div class="basemap-border-slider-row">
+                                <span class="basemap-slider-label">${id === 'all' ? 'Multiplier' : 'Thickness'}</span>
+                                <input
+                                    id="border-thickness-${id}"
+                                    class="basemap-range-slider"
+                                    type="range"
+                                    min="0.2"
+                                    max="4"
+                                    step="0.1"
+                                    value="1"
+                                    aria-label="${label} thickness"
+                                />
+                                <span id="border-thickness-val-${id}" class="basemap-slider-value">1.0x</span>
+                            </div>
+                            ${id !== 'all' ? `
+                                <div class="basemap-border-slider-row">
+                                    <span class="basemap-slider-label">Min Zoom</span>
+                                    <input
+                                        id="border-minzoom-${id}"
+                                        class="basemap-range-slider"
+                                        type="range"
+                                        min="0"
+                                        max="18"
+                                        step="0.1"
+                                        value="0"
+                                        aria-label="${label} minimum zoom"
+                                    />
+                                    <span id="border-minzoom-val-${id}" class="basemap-slider-value">0.0</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <!-- Labels Dropdown -->
+            <div class="basemap-dropdown-block">
+                <button
+                    id="btn-labels-dropdown"
+                    class="basemap-dropdown-toggle ${labelsExpanded ? 'open' : ''}"
+                    type="button"
+                    aria-expanded="${String(labelsExpanded)}"
+                >
+                    <span>Labels & Callouts</span>
+                    <span class="basemap-dropdown-arrow">${labelsExpanded ? '▾' : '▸'}</span>
+                </button>
+                <div id="labels-dropdown-body" class="basemap-dropdown-body" style="display: ${labelsExpanded ? 'flex' : 'none'};">
+                    <div class="basemap-label-switches-row">
+                        <label class="basemap-checkbox-label">
+                            <input id="labels-show-cities" class="basemap-checkbox" type="checkbox" ${labelDefaults.showCities ? 'checked' : ''} />
+                            <span>City Names</span>
+                        </label>
+                        <label class="basemap-checkbox-label">
+                            <input id="labels-show-callouts" class="basemap-checkbox" type="checkbox" ${labelDefaults.showCallouts ? 'checked' : ''} />
+                            <span>Weather Callouts</span>
+                        </label>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-slider-row">
+                            <span class="basemap-slider-label">Density</span>
+                            <input
+                                id="labels-density-slider"
+                                class="basemap-range-slider"
+                                type="range"
+                                min="0.5"
+                                max="2.5"
+                                step="0.1"
+                                value="1"
+                                aria-label="Label density"
+                            />
+                            <span id="labels-density-val" class="basemap-slider-value">1.0x</span>
+                        </div>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-top">
+                            <span class="basemap-control-label">City Names</span>
+                            <input id="labels-city-color" class="basemap-color-input" type="color" value="${labelDefaults.cityColor}" aria-label="City name color" />
+                        </div>
+                        <div class="basemap-font-select-row">
+                            <span class="basemap-slider-label">Font</span>
+                            <select id="labels-city-font" class="basemap-font-select" aria-label="City name font">
+                                ${FONT_OPTIONS.map((f) => `<option value="${f.value}">${f.label}</option>`).join('')}
+                            </select>
+                            <div class="basemap-font-size-wrap">
+                                <input
+                                    id="labels-city-size"
+                                    class="basemap-font-size-input"
+                                    type="number"
+                                    min="8"
+                                    max="36"
+                                    step="1"
+                                    value="${labelDefaults.cityFontSize}"
+                                    aria-label="City name font size"
+                                />
+                                <span class="basemap-font-size-unit">px</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-top">
+                            <span class="basemap-control-label">Weather Callouts</span>
+                            <input id="labels-callout-color" class="basemap-color-input" type="color" value="${labelDefaults.calloutColor}" aria-label="Weather callout color" />
+                        </div>
+                        <div class="basemap-font-select-row">
+                            <span class="basemap-slider-label">Font</span>
+                            <select id="labels-callout-font" class="basemap-font-select" aria-label="Weather callout font">
+                                ${FONT_OPTIONS.map((f) => `<option value="${f.value}">${f.label}</option>`).join('')}
+                            </select>
+                            <div class="basemap-font-size-wrap">
+                                <input
+                                    id="labels-callout-size"
+                                    class="basemap-font-size-input"
+                                    type="number"
+                                    min="8"
+                                    max="36"
+                                    step="1"
+                                    value="${labelDefaults.calloutFontSize}"
+                                    aria-label="Weather callout font size"
+                                />
+                                <span class="basemap-font-size-unit">px</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="basemap-row-right-align">
+                        <button id="btn-reset-labels" class="basemap-reset-btn" type="button" disabled>Reset Labels</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="basemap-editor-footer">
+            <button id="btn-reset-all-basemap" class="basemap-reset-all-btn" type="button" disabled>
+                Reset Everything to Default
+            </button>
+        </div>
+    `;
+
+    // Preset cards
+    bodyEl.querySelectorAll('.basemap-preset-card').forEach((card) => {
+        card.addEventListener('click', () => {
+            const presetId = card.dataset.presetId;
+            if (stateManager.activeBasemapPreset === presetId) return;
+
+            stateManager.activeBasemapPreset = presetId;
+            stateManager.basemapOverrides = createDefaultBasemapOverrides();
+
+            bodyEl.querySelectorAll('.basemap-preset-card').forEach((c) => {
+                c.classList.toggle('active', c.dataset.presetId === presetId);
             });
-        };
-        map.on('move', throttledUpdate);
-        map.on('zoom', throttledUpdate);
-        map.on('moveend', throttledUpdate);
-        listenersAttached = true;
-    }
 
-    if (allGlobalCities.length > 0) {
-        isLoaded = true;
-        updateCityPositions();
-        return;
-    }
-
-    try {
-        const resp = await fetch(GLOBAL_CITIES_URL);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-
-        allGlobalCities = data.features.map((f, i) => {
-            const pop = f.properties.POP_MAX || f.properties.pop_max || 0;
-            let minZoom = 6;
-            if (pop >= 2000000) minZoom = 2;
-            else if (pop >= 500000) minZoom = 3.5;
-            else if (pop >= 100000) minZoom = 4.5;
-            else if (pop >= 50000) minZoom = 5.5;
-            else minZoom = 6.2;
-
-            return {
-                id: i,
-                name: f.properties.NAME || f.properties.name || f.properties.NAMEASCII,
-                lng: f.geometry.coordinates[0],
-                lat: f.geometry.coordinates[1],
-                pop: pop,
-                minZoom: minZoom
-            };
+            if (typeof presetCallback === 'function') {
+                presetCallback(presetId);
+            }
         });
+    });
 
-        isLoaded = true;
-        updateCityPositions();
-    } catch (err) {
-        console.error("Failed to load global cities dataset:", err);
-    }
-}
+    // Land & Water
+    const landInput = document.getElementById('basemap-land-color');
+    const waterInput = document.getElementById('basemap-water-color');
+    const resetLandBtn = document.getElementById('btn-reset-land-color');
+    const resetWaterBtn = document.getElementById('btn-reset-water-color');
 
-export function updateCityPositions() {
-    if (stateManager.activeMode !== 'modelViewer') {
-        destroyCityOverlay();
-        return;
-    }
-
-    if (!mapInstance || !isLoaded || isUpdating) return;
-    isUpdating = true;
-
-    const defaults = getContextualLabelDefaults();
-    const labels = stateManager.basemapOverrides?.labels || {};
-
-    const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
-    const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
-
-    // 🌟 If both are off (by parameter default or by user choice), remove all markers
-    if (!showCities && !showCallouts) {
-        destroyCityOverlay();
-        return;
+    if (landInput) {
+        landInput.addEventListener('input', (e) => {
+            if (stateManager.activeBasemapPreset === 'satellite') return;
+            ensureOverridesState().landColor = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
     }
 
-    refreshCityOverlayStyles();
+    if (waterInput) {
+        waterInput.addEventListener('input', (e) => {
+            if (stateManager.activeBasemapPreset === 'satellite') return;
+            ensureOverridesState().waterColor = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
 
-    const bounds = mapInstance.getBounds();
-    const zoom = mapInstance.getZoom();
+    if (resetLandBtn) {
+        resetLandBtn.addEventListener('click', () => {
+            ensureOverridesState().landColor = null;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
 
-    const west = bounds.getWest();
-    const east = bounds.getEast();
-    const south = Math.max(-85.0, bounds.getSouth());
-    const north = Math.min(85.0, bounds.getNorth());
+    if (resetWaterBtn) {
+        resetWaterBtn.addEventListener('click', () => {
+            ensureOverridesState().waterColor = null;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
 
-    const density = Number.isFinite(labels.density) ? labels.density : defaults.density;
-    const zoomOffset = (density - 1.0) * 1.5;
+    // Borders dropdown toggle
+    const bordersToggle = document.getElementById('btn-borders-dropdown');
+    const bordersBody = document.getElementById('borders-dropdown-body');
+    if (bordersToggle && bordersBody) {
+        bordersToggle.addEventListener('click', () => {
+            bordersExpanded = !bordersExpanded;
+            bordersToggle.classList.toggle('open', bordersExpanded);
+            bordersToggle.setAttribute('aria-expanded', String(bordersExpanded));
+            bordersBody.style.display = bordersExpanded ? 'flex' : 'none';
+            const arrow = bordersToggle.querySelector('.basemap-dropdown-arrow');
+            if (arrow) arrow.textContent = bordersExpanded ? '▾' : '▸';
+        });
+    }
 
-    const cityFontSize = Number.isFinite(labels.cityFontSize) ? labels.cityFontSize : defaults.cityFontSize;
-    const calloutFontSize = Number.isFinite(labels.calloutFontSize) ? labels.calloutFontSize : defaults.calloutFontSize;
-    const nameScale = cityFontSize / 11;
-    const valScale = calloutFontSize / 15;
+    // Labels dropdown toggle
+    const labelsToggle = document.getElementById('btn-labels-dropdown');
+    const labelsBody = document.getElementById('labels-dropdown-body');
+    if (labelsToggle && labelsBody) {
+        labelsToggle.addEventListener('click', () => {
+            labelsExpanded = !labelsExpanded;
+            labelsToggle.classList.toggle('open', labelsExpanded);
+            labelsToggle.setAttribute('aria-expanded', String(labelsExpanded));
+            labelsBody.style.display = labelsExpanded ? 'flex' : 'none';
+            const arrow = labelsToggle.querySelector('.basemap-dropdown-arrow');
+            if (arrow) arrow.textContent = labelsExpanded ? '▾' : '▸';
+        });
+    }
 
-    // 1. Start with global Natural Earth places
-    let candidateCities = [...allGlobalCities];
+    // Borders row controls
+    BORDER_CATEGORIES.forEach(({ id }) => {
+        const visibleEl = document.getElementById(`border-visible-${id}`);
+        const thickEl = document.getElementById(`border-thickness-${id}`);
+        const zoomEl = document.getElementById(`border-minzoom-${id}`);
+        const colorEl = document.getElementById(`border-color-${id}`);
+        const resetEl = document.getElementById(`btn-reset-border-${id}`);
 
-    // 🌟 2. When zoomed in (zoom >= 5.8), dynamically pull local towns & villages from vector tiles in memory!
-    if (mapInstance && zoom >= 5.8 && mapInstance.getSource('openmaptiles')) {
-        try {
-            const tilePlaces = mapInstance.querySourceFeatures('openmaptiles', {
-                sourceLayer: 'place'
+        if (visibleEl) {
+            visibleEl.addEventListener('change', (e) => {
+                const borders = ensureOverridesState().borders;
+                const checked = e.target.checked;
+                borders[id].visible = checked;
+
+                if (id === 'all') {
+                    SUB_BORDER_IDS.forEach((subId) => {
+                        borders[subId].visible = checked;
+                    });
+                } else {
+                    borders.all.visible = SUB_BORDER_IDS.every((subId) => borders[subId].visible);
+                }
+
+                if (typeof editorChangeCallback === 'function') editorChangeCallback();
             });
+        }
 
-            if (tilePlaces && tilePlaces.length > 0) {
-                const seenNames = new Set(candidateCities.map(c => (c.name || '').toLowerCase()));
-                for (let i = 0; i < tilePlaces.length; i++) {
-                    const f = tilePlaces[i];
-                    if (!f.geometry || f.geometry.type !== 'Point') continue;
-                    const p = f.properties || {};
-                    const name = p.name || p.name_en || p['name:latin'];
-                    if (!name) continue;
+        if (thickEl) {
+            thickEl.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                ensureOverridesState().borders[id].thickness = Number.isFinite(val) ? val : 1;
+                if (typeof editorChangeCallback === 'function') editorChangeCallback();
+            });
+        }
 
-                    const lowerName = name.toLowerCase();
-                    if (seenNames.has(lowerName)) continue;
+        if (zoomEl) {
+            zoomEl.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                ensureOverridesState().borders[id].minZoom = Number.isFinite(val) ? val : null;
+                if (typeof editorChangeCallback === 'function') editorChangeCallback();
+            });
+        }
 
-                    const pClass = p.class;
-                    if (!['city', 'town', 'village', 'hamlet', 'suburb'].includes(pClass)) continue;
-
-                    seenNames.add(lowerName);
-
-                    let minZ = 6.5;
-                    let popEst = 15000;
-                    if (pClass === 'city') { minZ = 5.0; popEst = 100000; }
-                    else if (pClass === 'town') { minZ = 6.2; popEst = 35000; }
-                    else if (pClass === 'village') { minZ = 7.5; popEst = 8000; }
-                    else { minZ = 8.8; popEst = 2000; }
-
-                    candidateCities.push({
-                        id: `tile_${lowerName}_${i}`,
-                        name: name,
-                        lng: f.geometry.coordinates[0],
-                        lat: f.geometry.coordinates[1],
-                        pop: p.population || popEst,
-                        minZoom: minZ
+        if (colorEl) {
+            colorEl.addEventListener('input', (e) => {
+                const borders = ensureOverridesState().borders;
+                borders[id].color = e.target.value;
+                if (id === 'all') {
+                    SUB_BORDER_IDS.forEach((subId) => {
+                        borders[subId].color = null;
                     });
                 }
+                if (typeof editorChangeCallback === 'function') editorChangeCallback();
+            });
+        }
+
+        if (resetEl) {
+            resetEl.addEventListener('click', () => {
+                const borders = ensureOverridesState().borders;
+                if (id === 'all') {
+                    ensureOverridesState().borders = createDefaultBordersState();
+                } else {
+                    borders[id] = { visible: true, thickness: 1, color: null, minZoom: null };
+                    borders.all.visible = SUB_BORDER_IDS.every((subId) => borders[subId].visible);
+                }
+                if (typeof editorChangeCallback === 'function') editorChangeCallback();
+            });
+        }
+    });
+
+    // Labels row controls
+    const showCitiesEl = document.getElementById('labels-show-cities');
+    const showCalloutsEl = document.getElementById('labels-show-callouts');
+    const densityEl = document.getElementById('labels-density-slider');
+    const cityColorEl = document.getElementById('labels-city-color');
+    const calloutColorEl = document.getElementById('labels-callout-color');
+    const cityFontEl = document.getElementById('labels-city-font');
+    const calloutFontEl = document.getElementById('labels-callout-font');
+    const citySizeEl = document.getElementById('labels-city-size');
+    const calloutSizeEl = document.getElementById('labels-callout-size');
+    const resetLabelsBtn = document.getElementById('btn-reset-labels');
+
+    if (showCitiesEl) {
+        showCitiesEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.showCities = e.target.checked;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (showCalloutsEl) {
+        showCalloutsEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.showCallouts = e.target.checked;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (densityEl) {
+        densityEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            ensureOverridesState().labels.density = Number.isFinite(val) ? val : 1.0;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (cityColorEl) {
+        cityColorEl.addEventListener('input', (e) => {
+            ensureOverridesState().labels.cityColor = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (calloutColorEl) {
+        calloutColorEl.addEventListener('input', (e) => {
+            ensureOverridesState().labels.calloutColor = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (cityFontEl) {
+        cityFontEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.cityFont = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (calloutFontEl) {
+        calloutFontEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.calloutFont = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (citySizeEl) {
+        citySizeEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!Number.isFinite(val) || val < 8 || val > 36) return;
+            ensureOverridesState().labels.cityFontSize = Math.round(val);
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+        citySizeEl.addEventListener('change', (e) => {
+            const raw = parseFloat(e.target.value);
+            const clamped = Number.isFinite(raw) ? Math.min(36, Math.max(8, Math.round(raw))) : getContextualLabelDefaults().cityFontSize;
+            e.target.value = String(clamped);
+            ensureOverridesState().labels.cityFontSize = clamped;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (calloutSizeEl) {
+        calloutSizeEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!Number.isFinite(val) || val < 8 || val > 36) return;
+            ensureOverridesState().labels.calloutFontSize = Math.round(val);
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+        calloutSizeEl.addEventListener('change', (e) => {
+            const raw = parseFloat(e.target.value);
+            const clamped = Number.isFinite(raw) ? Math.min(36, Math.max(8, Math.round(raw))) : getContextualLabelDefaults().calloutFontSize;
+            e.target.value = String(clamped);
+            ensureOverridesState().labels.calloutFontSize = clamped;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (resetLabelsBtn) {
+        resetLabelsBtn.addEventListener('click', () => {
+            ensureOverridesState().labels = createDefaultLabelsState();
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    // Bottom Reset Everything button
+    const resetAllBtn = document.getElementById('btn-reset-all-basemap');
+    if (resetAllBtn) {
+        resetAllBtn.addEventListener('click', () => {
+            const wasDefaultPreset = (stateManager.activeBasemapPreset || 'default') === 'default';
+            stateManager.activeBasemapPreset = 'default';
+            stateManager.basemapOverrides = createDefaultBasemapOverrides();
+
+            bodyEl.querySelectorAll('.basemap-preset-card').forEach((c) => {
+                c.classList.toggle('active', c.dataset.presetId === 'default');
+            });
+
+            if (!wasDefaultPreset && typeof presetCallback === 'function') {
+                presetCallback('default');
+            } else if (typeof editorChangeCallback === 'function') {
+                editorChangeCallback();
             }
-        } catch (err) {}
-    }
-
-    let visible = candidateCities.filter(c => {
-        const thresholdZoom = Math.max(1, c.minZoom - zoomOffset);
-        if (zoom < thresholdZoom) return false;
-        if (c.lat < south || c.lat > north) return false;
-        if (west <= east) return c.lng >= west && c.lng <= east;
-        return c.lng >= west || c.lng <= east;
-    });
-
-    visible.sort((a, b) => b.pop - a.pop);
-
-    const placedBoxes = [];
-    activeCities = [];
-
-    const padX = Math.max(3, Math.round(10 / density));
-    const padY = Math.max(2, Math.round(6 / density));
-    const maxActiveCap = Math.round(75 * density);
-
-    for (let i = 0; i < visible.length; i++) {
-        const city = visible[i];
-        const pos = mapInstance.project([city.lng, city.lat]);
-
-        const nameLen = (city.name || '').length;
-        const boxW = Math.max(52 * Math.max(nameScale, valScale), nameLen * (6.8 * nameScale)) + 12;
-        const boxH = (showCallouts && showCities)
-            ? Math.round(calloutFontSize + cityFontSize + 2)
-            : Math.round((showCallouts ? calloutFontSize : cityFontSize) + 2);
-
-        const candidateBox = {
-            left: pos.x - (boxW / 2) - padX,
-            right: pos.x + (boxW / 2) + padX,
-            top: pos.y - (boxH / 2) - padY,
-            bottom: pos.y + (boxH / 2) + padY
-        };
-
-        const collides = placedBoxes.some(b => !(
-            candidateBox.left >= b.right ||
-            candidateBox.right <= b.left ||
-            candidateBox.top >= b.bottom ||
-            candidateBox.bottom <= b.top
-        ));
-
-        if (!collides) {
-            placedBoxes.push(candidateBox);
-            activeCities.push(city);
-            if (activeCities.length >= maxActiveCap) break;
-        }
-    }
-
-    const activeSet = new Set(activeCities.map(c => c.name));
-
-    activeCities.forEach(city => {
-        let marker = cityMarkers[city.name];
-        if (!marker) {
-            const node = document.createElement('div');
-            node.className = 'city-callout-node';
-            node.innerHTML = `
-                <div class="city-callout-val">--</div>
-                <div class="city-callout-name">${city.name}</div>
-            `;
-
-            marker = new maplibregl.Marker({
-                element: node,
-                anchor: 'center'
-            }).setLngLat([city.lng, city.lat]).addTo(mapInstance);
-
-            cityMarkers[city.name] = marker;
-        }
-
-        marker.getElement().style.display = 'flex';
-    });
-
-    for (const name in cityMarkers) {
-        if (!activeSet.has(name)) {
-            cityMarkers[name].getElement().style.display = 'none';
-        }
-    }
-
-    if (window.lastActiveFrameState && window.lastManifest) {
-        renderCityValues(window.lastActiveFrameState, window.lastManifest);
-    }
-
-    isUpdating = false;
-}
-
-function renderCityValues(activeFrameState, manifest) {
-    if (!activeFrameState || stateManager.activeMode !== 'modelViewer') return;
-
-    const defaults = getContextualLabelDefaults();
-    const labels = stateManager.basemapOverrides?.labels || {};
-
-    const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
-    const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
-
-    if (!showCities && !showCallouts) return;
-
-    const activeUnit = (manifest?.unit || stateManager.paramConfig?.unit || '').trim().toLowerCase();
-    const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch') || activeUnit === 'mm' || activeUnit.includes('millimeter');
-
-    for (let i = 0; i < activeCities.length; i++) {
-        const city = activeCities[i];
-        const marker = cityMarkers[city.name];
-        if (!marker) continue;
-
-        let formattedText = "--";
-        if (showCallouts) {
-            const decodedVal = sampleBilinearValue(city.lng, city.lat, activeFrameState, manifest);
-            formattedText = formatParameterValue(decodedVal, manifest);
-        }
-
-        const el = marker.getElement();
-
-        if (!showCities && (!showCallouts || formattedText === "--")) {
-            el.style.display = 'none';
-            continue;
-        } else {
-            el.style.display = 'flex';
-        }
-
-        const valEl = el.querySelector('.city-callout-val');
-        if (valEl) {
-            valEl.className = isPrecipType ? 'city-callout-val precip-val' : 'city-callout-val';
-            const hasValidValue = showCallouts && formattedText !== "--";
-            valEl.textContent = hasValidValue ? formattedText : "";
-            valEl.style.display = hasValidValue ? 'block' : 'none';
-        }
+        });
     }
 }
 
-export function updateCityCallouts(map, activeFrameState, manifest) {
-    if (!isLoaded || stateManager.activeMode !== 'modelViewer') return;
+export function initBasemapEditor() {
+    const toggleBtn = document.getElementById('btn-basemap-editor');
+    const closeBtn = document.getElementById('btn-close-basemap-editor');
+    const panel = document.getElementById('basemap-editor-panel');
+    const bodyEl = document.getElementById('basemap-editor-body');
 
-    window.lastActiveFrameState = activeFrameState;
-    window.lastManifest = manifest || stateManager.manifest;
+    if (!toggleBtn || !panel) return;
 
-    const defaults = getContextualLabelDefaults();
-    const labels = stateManager.basemapOverrides?.labels || {};
-    const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
-    const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
-
-    if (!showCities && !showCallouts) {
-        destroyCityOverlay();
-        return;
+    const header = panel.querySelector('.basemap-editor-header');
+    if (header && !document.getElementById('basemap-zoom-readout')) {
+        const actions = document.createElement('div');
+        actions.className = 'basemap-header-actions';
+        const zoomEl = document.createElement('span');
+        zoomEl.id = 'basemap-zoom-readout';
+        zoomEl.className = 'basemap-zoom-readout';
+        zoomEl.textContent = 'Zoom: --';
+        actions.appendChild(zoomEl);
+        if (closeBtn) {
+            actions.appendChild(closeBtn);
+        }
+        header.appendChild(actions);
     }
 
-    updateCityPositions();
+    if (!stateManager.activeBasemapPreset) {
+        stateManager.activeBasemapPreset = 'default';
+    }
+    ensureOverridesState();
+
+    if (bodyEl) {
+        renderEditorSections(bodyEl);
+        syncBasemapColorInputs();
+    }
+
+    const setOpen = (isOpen) => {
+        panel.classList.toggle('open', isOpen);
+        panel.setAttribute('aria-hidden', String(!isOpen));
+        toggleBtn.classList.toggle('active', isOpen);
+        toggleBtn.setAttribute('aria-expanded', String(isOpen));
+    };
+
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setOpen(!panel.classList.contains('open'));
+    });
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setOpen(false);
+        });
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && panel.classList.contains('open')) {
+            setOpen(false);
+        }
+    });
 }
