@@ -19,14 +19,64 @@ if (!dynamicStyleEl) {
     document.head.appendChild(dynamicStyleEl);
 }
 
+/**
+ * 🌟 Contextual Defaults: Adapts defaults based on theme (Light vs Dark) and active Parameter
+ */
+export function getContextualLabelDefaults() {
+    const isLight = (stateManager.currentTheme === 'light');
+
+    const paramId = (stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+    const isPrecipOrRadar = paramId === 'prate' ||
+                            paramId === 'precip' ||
+                            paramId === 'preciptype' ||
+                            paramId.startsWith('tp') ||
+                            paramId.startsWith('asnow') ||
+                            paramId === 'refc';
+    const isSuppressedByParam = Boolean(
+        isPrecipOrRadar ||
+        stateManager.paramConfig?.suppress_city_overlay ||
+        stateManager.manifest?.suppress_city_overlay
+    );
+
+    return {
+        showCities: !isSuppressedByParam,
+        showCallouts: !isSuppressedByParam,
+        density: 1.0,
+        cityColor: isLight ? '#0f172a' : '#f1f5f9',
+        calloutColor: isLight ? '#020617' : '#ffffff',
+        cityStroke: isLight ? '#ffffff' : '#000000',
+        calloutStroke: isLight ? '#ffffff' : '#000000',
+        cityFont: "'Roboto', -apple-system, sans-serif",
+        calloutFont: "'Roboto', -apple-system, sans-serif"
+    };
+}
+
+function isColorBright(hexStr) {
+    if (!hexStr || typeof hexStr !== 'string') return true;
+    const clean = hexStr.replace('#', '');
+    if (clean.length !== 6) return true;
+    const r = parseInt(clean.substring(0, 2), 16);
+    const g = parseInt(clean.substring(2, 4), 16);
+    const b = parseInt(clean.substring(4, 6), 16);
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness > 128;
+}
+
 export function refreshCityOverlayStyles() {
+    const defaults = getContextualLabelDefaults();
     const labels = stateManager.basemapOverrides?.labels || {};
-    const showCities = labels.showCities !== false;
-    const showCallouts = labels.showCallouts !== false;
-    const cityColor = labels.cityColor || '#f1f5f9';
-    const calloutColor = labels.calloutColor || '#ffffff';
-    const cityFont = labels.cityFont || "'Roboto', -apple-system, sans-serif";
-    const calloutFont = labels.calloutFont || "'Roboto', -apple-system, sans-serif";
+
+    const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
+    const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
+
+    const cityColor = labels.cityColor || defaults.cityColor;
+    const calloutColor = labels.calloutColor || defaults.calloutColor;
+
+    const cityStroke = labels.cityColor ? (isColorBright(labels.cityColor) ? '#000000' : '#ffffff') : defaults.cityStroke;
+    const calloutStroke = labels.calloutColor ? (isColorBright(labels.calloutColor) ? '#000000' : '#ffffff') : defaults.calloutStroke;
+
+    const cityFont = labels.cityFont || defaults.cityFont;
+    const calloutFont = labels.calloutFont || defaults.calloutFont;
 
     dynamicStyleEl.textContent = `
         .city-callout-node {
@@ -47,7 +97,7 @@ export function refreshCityOverlayStyles() {
             line-height: 1.1;
             letter-spacing: -0.2px;
             color: ${calloutColor};
-            -webkit-text-stroke: 1.5px #000000;
+            -webkit-text-stroke: 1.5px ${calloutStroke};
             paint-order: stroke fill;
             text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
         }
@@ -62,7 +112,7 @@ export function refreshCityOverlayStyles() {
             line-height: 1.1;
             letter-spacing: 0.3px;
             color: ${cityColor};
-            -webkit-text-stroke: 1px #000000;
+            -webkit-text-stroke: 1px ${cityStroke};
             paint-order: stroke fill;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
             margin-top: 1px;
@@ -441,11 +491,13 @@ export function updateCityPositions() {
     if (!mapInstance || !isLoaded || isUpdating) return;
     isUpdating = true;
 
+    const defaults = getContextualLabelDefaults();
     const labels = stateManager.basemapOverrides?.labels || {};
-    const showCities = labels.showCities !== false;
-    const showCallouts = labels.showCallouts !== false;
 
-    // 🌟 If both are unchecked in the editor, clean up and exit
+    const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
+    const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
+
+    // 🌟 If both are off (by parameter default or by user choice), remove all markers
     if (!showCities && !showCallouts) {
         destroyCityOverlay();
         return;
@@ -461,8 +513,7 @@ export function updateCityPositions() {
     const south = Math.max(-85.0, bounds.getSouth());
     const north = Math.min(85.0, bounds.getNorth());
 
-    // 🌟 Density multiplier (0.5x to 2.5x, default 1.0x)
-    const density = Number.isFinite(labels.density) ? labels.density : 1.0;
+    const density = Number.isFinite(labels.density) ? labels.density : defaults.density;
     const zoomOffset = (density - 1.0) * 1.5;
 
     // 1. Start with global Natural Earth places
@@ -525,7 +576,6 @@ export function updateCityPositions() {
     const placedBoxes = [];
     activeCities = [];
 
-    // Scale collision box padding inversely with density
     const padX = Math.max(3, Math.round(10 / density));
     const padY = Math.max(2, Math.round(6 / density));
     const maxActiveCap = Math.round(75 * density);
@@ -598,9 +648,11 @@ export function updateCityPositions() {
 function renderCityValues(activeFrameState, manifest) {
     if (!activeFrameState || stateManager.activeMode !== 'modelViewer') return;
 
+    const defaults = getContextualLabelDefaults();
     const labels = stateManager.basemapOverrides?.labels || {};
-    const showCities = labels.showCities !== false;
-    const showCallouts = labels.showCallouts !== false;
+
+    const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
+    const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
 
     if (!showCities && !showCallouts) return;
 
@@ -620,7 +672,6 @@ function renderCityValues(activeFrameState, manifest) {
 
         const el = marker.getElement();
 
-        // 🌟 If neither city name nor callout should show, hide marker; otherwise keep city visible
         if (!showCities && (!showCallouts || formattedText === "--")) {
             el.style.display = 'none';
             continue;
