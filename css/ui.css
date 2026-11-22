@@ -1929,6 +1929,7 @@ body.light-mode .map-card {
 
 .basemap-font-select {
     flex: 1;
+    min-width: 0;
     padding: 4px 8px;
     background: #11151e;
     border: 1px solid #2a3446;
@@ -1942,6 +1943,39 @@ body.light-mode .map-card {
 
 .basemap-font-select:focus {
     border-color: #3b82f6;
+}
+
+.basemap-font-size-wrap {
+    display: flex;
+    align-items: center;
+    background: #11151e;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    padding-right: 6px;
+    flex-shrink: 0;
+}
+
+.basemap-font-size-wrap:focus-within {
+    border-color: #3b82f6;
+}
+
+.basemap-font-size-input {
+    width: 40px;
+    padding: 4px 4px 4px 6px;
+    background: transparent;
+    border: none;
+    color: #e2e8f0;
+    font-family: monospace;
+    font-size: 12px;
+    text-align: right;
+    outline: none;
+}
+
+.basemap-font-size-unit {
+    font-family: 'Roboto', sans-serif;
+    font-size: 11px;
+    color: #94a3b8;
+    user-select: none;
 }
 
 .basemap-row-right-align {
