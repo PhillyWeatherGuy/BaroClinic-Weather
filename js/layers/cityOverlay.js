@@ -40,17 +40,33 @@ export function isCurrentParamSuppressed() {
 }
 
 /**
- * 🌟 Contextual Defaults: Resolves whether labels should be on/off for current parameter
+ * 🌟 Contextual Defaults: Resolves whether labels and which colors should be default for active parameter
  */
 export function getContextualLabelDefaults() {
     const isSuppressed = isCurrentParamSuppressed();
+    const paramConfig = stateManager.paramConfig;
+    const manifest = stateManager.manifest;
+
+    const activeUnit = (manifest?.unit || paramConfig?.unit || '').trim().toLowerCase();
+    const paramId = (paramConfig?.id || stateManager.activeParam || '').toLowerCase();
+    const isPrecipType = activeUnit === 'in' || activeUnit.includes('inch') || activeUnit === 'mm' || activeUnit.includes('millimeter');
+    const isPrecipColor = isPrecipType || paramId === 'prate' || paramId.startsWith('tp') || paramId.startsWith('asnow');
+
+    // 🌟 Precipitation parameters default to light blue (#60a5fa), others default to crisp white (#ffffff)
+    const defaultCalloutColor = paramConfig?.callout_color ||
+                                manifest?.callout_color ||
+                                (isPrecipColor ? '#60a5fa' : '#ffffff');
+
+    const defaultCityColor = paramConfig?.city_color ||
+                             manifest?.city_color ||
+                             '#f1f5f9';
 
     return {
         showCities: !isSuppressed,
         showCallouts: !isSuppressed,
         density: 1.0,
-        cityColor: '#f1f5f9',
-        calloutColor: '#ffffff',
+        cityColor: defaultCityColor,
+        calloutColor: defaultCalloutColor,
         cityFont: "'Roboto', -apple-system, sans-serif",
         calloutFont: "'Roboto', -apple-system, sans-serif"
     };
@@ -92,7 +108,7 @@ export function refreshCityOverlayStyles() {
             text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
         }
         .city-callout-val.precip-val {
-            color: ${labels.calloutColor ? calloutColor : '#60a5fa'};
+            color: ${calloutColor};
         }
         .city-callout-name {
             display: ${showCities ? 'block' : 'none'};
@@ -690,12 +706,10 @@ export function updateCityCallouts(map, activeFrameState, manifest) {
     const showCities = labels.showCities !== null && labels.showCities !== undefined ? labels.showCities : defaults.showCities;
     const showCallouts = labels.showCallouts !== null && labels.showCallouts !== undefined ? labels.showCallouts : defaults.showCallouts;
 
-    // 🌟 If parameter suppresses both by default (and user hasn't overridden them), clear markers immediately
     if (!showCities && !showCallouts) {
         destroyCityOverlay();
         return;
     }
 
-    // Otherwise update city positions and values
     updateCityPositions();
 }
