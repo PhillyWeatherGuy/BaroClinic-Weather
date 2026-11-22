@@ -1374,6 +1374,9 @@ export function initLayer(shaderType = null) {
     } else if (!map.getLayer('weather-gpu-shader')) {
         map.addLayer(customShaderLayer, firstContentLayerId);
     }
+
+    // 🌟 Sync Basemap Editor label checkboxes & color pickers for the new parameter
+    syncBasemapColorInputs(currentStyleBaseColors);
 }
 
 async function renderFrame(globalIdx) {
