@@ -11,45 +11,66 @@ let mapInstance = null;
 let listenersAttached = false;
 let isUpdating = false;
 
-const style = document.createElement('style');
-style.textContent = `
-    .city-callout-node {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        pointer-events: none;
-        user-select: none;
-        font-family: 'Roboto', -apple-system, sans-serif;
-        text-transform: uppercase;
-        white-space: nowrap;
-    }
-    .city-callout-val {
-        font-size: 15px;
-        font-weight: 800;
-        line-height: 1.1;
-        letter-spacing: -0.2px;
-        color: #ffffff;
-        -webkit-text-stroke: 1.5px #000000;
-        paint-order: stroke fill;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-    }
-    .city-callout-val.precip-val {
-        color: #60a5fa;
-    }
-    .city-callout-name {
-        font-size: 11px;
-        font-weight: 700;
-        line-height: 1.1;
-        letter-spacing: 0.3px;
-        color: #f1f5f9;
-        -webkit-text-stroke: 1px #000000;
-        paint-order: stroke fill;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-        margin-top: 1px;
-    }
-`;
-document.head.appendChild(style);
+// 🌟 Dynamic style element so fonts, colors, and visibility update instantly without rebuilding markers
+let dynamicStyleEl = document.getElementById('city-overlay-dynamic-style');
+if (!dynamicStyleEl) {
+    dynamicStyleEl = document.createElement('style');
+    dynamicStyleEl.id = 'city-overlay-dynamic-style';
+    document.head.appendChild(dynamicStyleEl);
+}
+
+export function refreshCityOverlayStyles() {
+    const labels = stateManager.basemapOverrides?.labels || {};
+    const showCities = labels.showCities !== false;
+    const showCallouts = labels.showCallouts !== false;
+    const cityColor = labels.cityColor || '#f1f5f9';
+    const calloutColor = labels.calloutColor || '#ffffff';
+    const cityFont = labels.cityFont || "'Roboto', -apple-system, sans-serif";
+    const calloutFont = labels.calloutFont || "'Roboto', -apple-system, sans-serif";
+
+    dynamicStyleEl.textContent = `
+        .city-callout-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            user-select: none;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .city-callout-val {
+            display: ${showCallouts ? 'block' : 'none'};
+            font-family: ${calloutFont};
+            font-size: 15px;
+            font-weight: 800;
+            line-height: 1.1;
+            letter-spacing: -0.2px;
+            color: ${calloutColor};
+            -webkit-text-stroke: 1.5px #000000;
+            paint-order: stroke fill;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+        }
+        .city-callout-val.precip-val {
+            color: ${labels.calloutColor ? calloutColor : '#60a5fa'};
+        }
+        .city-callout-name {
+            display: ${showCities ? 'block' : 'none'};
+            font-family: ${cityFont};
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1.1;
+            letter-spacing: 0.3px;
+            color: ${cityColor};
+            -webkit-text-stroke: 1px #000000;
+            paint-order: stroke fill;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+            margin-top: 1px;
+        }
+    `;
+}
+
+refreshCityOverlayStyles();
 
 /**
  * 🌟 Forward-projects (lon, lat) to native HRRR Lambert Conformal Conic grid cell index
@@ -116,9 +137,6 @@ export function decodePixelValue(rawVal, manifest) {
 
 /**
  * 🌟 GENERIC POINT SAMPLER
- * - Continuous fields (Temperature, Wind, Height): True Bilinear Interpolation
- * - Precipitation & Snowfall (asnow, tp, prate, refc): True Local Grid Cell Sampling
- *   Prevents artificial gradient bleed across rain/snow front boundaries (e.g. DC 5" error).
  */
 export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameState = activeFrameState || stateManager.activeFrameState;
@@ -131,20 +149,15 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const activeManifest = manifest || stateManager.manifest;
     const grid = activeManifest?.grid;
 
-    // Detect if field has sharp physical boundaries (snow, rain, radar)
     const paramId = (activeManifest?.id || activeManifest?.parameter || stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
     const isPrecipOrAccum = paramId.startsWith('asnow') ||
                             paramId.startsWith('tp') ||
                             paramId === 'prate' ||
                             paramId === 'refc';
 
-    // =========================================================================
-    // 🌟 PATH A: HRRR Native Lambert Conformal Conic Grid
-    // =========================================================================
+    // PATH A: HRRR Lambert Conformal
     if (grid && (grid.projection === 'lambert_conformal' || grid.nx)) {
         const pt = projectHRRRLCC(lng, lat, grid);
-
-        // Check if point is outside the HRRR domain
         if (pt.x < 0 || pt.x > grid.nx - 1 || pt.y < 0 || pt.y > grid.ny - 1) {
             return NaN;
         }
@@ -155,7 +168,6 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
         const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
         const frameOffset = frameIdx * frameSize;
 
-        // For precip/snow: sample the exact local grid cell to prevent gradient bleed
         if (isPrecipOrAccum) {
             const nearX = Math.min(Math.max(Math.round(pt.x), 0), grid.nx - 1);
             const nearY = Math.min(Math.max(Math.round(pt.y), 0), grid.ny - 1);
@@ -171,7 +183,6 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
         const fracX = pt.x - x0;
         const fracY = pt.y - y0;
 
-        // HRRR row order: 0 is south, ny - 1 is north
         const idx00 = frameOffset + y0 * frameW + x0;
         const idx10 = frameOffset + y0 * frameW + x1;
         const idx01 = frameOffset + y1 * frameW + x0;
@@ -194,9 +205,7 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
         return bottom * (1.0 - fracY) + top * fracY;
     }
 
-    // =========================================================================
-    // 🌟 PATH B: Global Equirectangular Grid (ECMWF, GFS, AIFS)
-    // =========================================================================
+    // PATH B: Global Equirectangular Grid
     let normLng = ((lng % 360) + 360) % 360;
     if (normLng > 180) normLng -= 360;
 
@@ -210,7 +219,6 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const frameSize = frameW * frameH;
     const frameIdx = frameState.frameIndex ?? frameState.col ?? 0;
 
-    // Account for active member slice in ensemble chunked arrays
     let frameOffset = frameIdx * frameSize;
     if (activeManifest?.type === 'ensemble_chunked') {
         const activeMember = stateManager.activeMember || 0;
@@ -222,7 +230,6 @@ export function sampleBilinearValue(lng, lat, activeFrameState, manifest) {
     const contX = (((normX % 1) + 1) % 1) * frameW;
     const contY = Math.min(Math.max(normY * (frameH - 1), 0), frameH - 1);
 
-    // For precip/snow: sample the exact local grid cell to prevent gradient bleed
     if (isPrecipOrAccum) {
         const nearX = Math.round(contX) % frameW;
         const nearY = Math.min(Math.max(Math.round(contY), 0), frameH - 1);
@@ -271,13 +278,11 @@ export function formatParameterValue(decodedVal, manifest) {
     const paramId = (manifest?.id || manifest?.parameter || stateManager.paramConfig?.id || stateManager.activeParam || '').toLowerCase();
     const isMetric = stateManager.currentUnits === 'metric';
 
-    // 1. Radar Reflectivity (dBZ)
     if (paramId === 'refc' || normalizedUnit.includes('dbz')) {
-        if (decodedVal < 9.0) return "--"; // Mute below radar detection floor
+        if (decodedVal < 9.0) return "--";
         return `${Math.round(decodedVal)} dBZ`;
     }
 
-    // 2. Surface Precipitation Rate (nearest hundredth)
     if (paramId === 'prate' || normalizedUnit.includes('in/hr') || normalizedUnit.includes('mm/hr')) {
         if (isMetric) {
             const mmhr = normalizedUnit.includes('in') ? decodedVal * 25.4 : decodedVal;
@@ -287,7 +292,6 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${inhr.toFixed(2)} in/hr`;
     }
 
-    // 3. Temperatures
     const isTempParam = unit.includes('°') ||
         normalizedUnit.includes('fahrenheit') ||
         normalizedUnit.includes('celsius') ||
@@ -310,7 +314,6 @@ export function formatParameterValue(decodedVal, manifest) {
         return `${Math.round(temperature)}°${isMetric ? 'C' : 'F'}`;
     }
 
-    // 4. Accumulated Precipitation
     if (normalizedUnit === 'in' || normalizedUnit.includes('inch')) {
         return isMetric ? `${(decodedVal * 25.4).toFixed(1)} mm` : `${decodedVal.toFixed(2)} in`;
     }
@@ -325,7 +328,7 @@ export function formatParameterValue(decodedVal, manifest) {
 }
 
 /**
- * 🌟 Toggle Basemap Native City Labels (Hidden for Models to prevent badge overlap)
+ * 🌟 Toggle Basemap Native City Labels
  */
 export function setBasemapLabelsVisibility(map, isVisible) {
     if (!map) return;
@@ -352,7 +355,7 @@ export function setBasemapLabelsVisibility(map, isVisible) {
 }
 
 /**
- * 🌟 Shut down and completely remove all city callouts (Radar Mode)
+ * 🌟 Shut down and completely remove all city callouts
  */
 export function destroyCityOverlay() {
     for (const name in cityMarkers) {
@@ -368,7 +371,6 @@ export function destroyCityOverlay() {
 export async function initCityOverlay(map) {
     mapInstance = map;
 
-    // 🛑 Hard shutdown if not in Model Viewer
     if (stateManager.activeMode !== 'modelViewer') {
         destroyCityOverlay();
         setBasemapLabelsVisibility(map, true);
@@ -440,10 +442,17 @@ export function updateCityPositions() {
     const isSuppressed = stateManager.paramConfig?.suppress_city_overlay 
                       || stateManager.manifest?.suppress_city_overlay;
 
-    if (isSuppressed) {
+    const labels = stateManager.basemapOverrides?.labels || {};
+    const showCities = labels.showCities !== false;
+    const showCallouts = labels.showCallouts !== false;
+
+    // If both are turned off, or parameter suppresses it, hide all markers
+    if (isSuppressed || (!showCities && !showCallouts)) {
         destroyCityOverlay();
         return;
     }
+
+    refreshCityOverlayStyles();
 
     const bounds = mapInstance.getBounds();
     const zoom = mapInstance.getZoom();
@@ -453,8 +462,13 @@ export function updateCityPositions() {
     const south = Math.max(-85.0, bounds.getSouth());
     const north = Math.min(85.0, bounds.getNorth());
 
+    // 🌟 Density multiplier (0.5x to 2.5x, default 1.0x)
+    const density = Number.isFinite(labels.density) ? labels.density : 1.0;
+    const zoomOffset = (density - 1.0) * 1.5; // High density shows towns at lower zooms
+
     let visible = allGlobalCities.filter(c => {
-        if (zoom < c.minZoom) return false;
+        const thresholdZoom = Math.max(1, c.minZoom - zoomOffset);
+        if (zoom < thresholdZoom) return false;
         if (c.lat < south || c.lat > north) return false;
         if (west <= east) return c.lng >= west && c.lng <= east;
         return c.lng >= west || c.lng <= east;
@@ -465,15 +479,18 @@ export function updateCityPositions() {
     const placedBoxes = [];
     activeCities = [];
 
+    // Scale collision box padding inversely with density
+    const padX = Math.max(3, Math.round(10 / density));
+    const padY = Math.max(2, Math.round(6 / density));
+    const maxActiveCap = Math.round(60 * density);
+
     for (let i = 0; i < visible.length; i++) {
         const city = visible[i];
         const pos = mapInstance.project([city.lng, city.lat]);
 
         const nameLen = (city.name || '').length;
         const boxW = Math.max(52, nameLen * 6.8) + 12;
-        const boxH = 28;
-        const padX = 10;
-        const padY = 6;
+        const boxH = showCallouts && showCities ? 28 : 16;
 
         const candidateBox = {
             left: pos.x - (boxW / 2) - padX,
@@ -492,7 +509,7 @@ export function updateCityPositions() {
         if (!collides) {
             placedBoxes.push(candidateBox);
             activeCities.push(city);
-            if (activeCities.length >= 60) break;
+            if (activeCities.length >= maxActiveCap) break;
         }
     }
 
@@ -547,7 +564,6 @@ function renderCityValues(activeFrameState, manifest) {
         const formattedText = formatParameterValue(decodedVal, manifest);
 
         const el = marker.getElement();
-        // Hide city marker completely if it falls outside model domain or below radar noise floor
         if (formattedText === "--") {
             el.style.display = 'none';
             continue;
