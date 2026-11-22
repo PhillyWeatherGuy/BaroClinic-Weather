@@ -1375,7 +1375,7 @@ export function initLayer(shaderType = null) {
         map.addLayer(customShaderLayer, firstContentLayerId);
     }
 
-    applyBasemapOverrides();
+    // 🌟 Sync Basemap Editor label checkboxes & color pickers for the new parameter
     syncBasemapColorInputs(currentStyleBaseColors);
 }
 
@@ -1774,7 +1774,7 @@ map.on('load', async () => {
 });
 
 map.on('style.load', () => {
-    if (stateManager.activeMode !== 'radar') {
+    if (stateManager.activeMode !== 'radar' || (stateManager.activeBasemapPreset && stateManager.activeBasemapPreset !== 'default')) {
         currentStyleBaseColors = readMapBaseColors();
         applyBasemapOverrides();
     }
