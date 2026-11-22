@@ -33,9 +33,20 @@ const BORDER_CATEGORIES = [
 
 const SUB_BORDER_IDS = ['oceanLand', 'national', 'state', 'county', 'roads'];
 
+const FONT_OPTIONS = [
+    { label: 'Roboto (Default)', value: "'Roboto', -apple-system, sans-serif" },
+    { label: 'System Sans', value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+    { label: 'Arial', value: "Arial, Helvetica, sans-serif" },
+    { label: 'Trebuchet MS', value: "'Trebuchet MS', 'Lucida Sans Unicode', sans-serif" },
+    { label: 'Impact / Condensed', value: "Impact, 'Arial Narrow', sans-serif" },
+    { label: 'Georgia (Serif)', value: "Georgia, 'Times New Roman', serif" },
+    { label: 'Monospace', value: "SFMono-Regular, Menlo, Monaco, Consolas, monospace" }
+];
+
 let presetCallback = null;
 let editorChangeCallback = null;
 let bordersExpanded = false;
+let labelsExpanded = false;
 
 function createDefaultBordersState() {
     return {
@@ -48,11 +59,24 @@ function createDefaultBordersState() {
     };
 }
 
+function createDefaultLabelsState() {
+    return {
+        showCities: true,
+        showCallouts: true,
+        density: 1.0,
+        cityColor: null,
+        calloutColor: null,
+        cityFont: null,
+        calloutFont: null
+    };
+}
+
 function createDefaultBasemapOverrides() {
     return {
         landColor: null,
         waterColor: null,
-        borders: createDefaultBordersState()
+        borders: createDefaultBordersState(),
+        labels: createDefaultLabelsState()
     };
 }
 
@@ -63,6 +87,10 @@ function ensureOverridesState() {
     if (!stateManager.basemapOverrides.borders) {
         stateManager.basemapOverrides.borders = createDefaultBordersState();
     }
+    if (!stateManager.basemapOverrides.labels) {
+        stateManager.basemapOverrides.labels = createDefaultLabelsState();
+    }
+
     BORDER_CATEGORIES.forEach(({ id }) => {
         if (!stateManager.basemapOverrides.borders[id]) {
             stateManager.basemapOverrides.borders[id] = id === 'all'
@@ -73,6 +101,7 @@ function ensureOverridesState() {
             stateManager.basemapOverrides.borders[id].minZoom = null;
         }
     });
+
     return stateManager.basemapOverrides;
 }
 
@@ -85,11 +114,21 @@ function hasAnyCustomizations() {
     const overrides = ensureOverridesState();
     if (overrides.landColor || overrides.waterColor) return true;
 
-    return BORDER_CATEGORIES.some(({ id }) => {
+    const hasBorderCustomizations = BORDER_CATEGORIES.some(({ id }) => {
         const b = overrides.borders[id];
         const hasZoom = id !== 'all' && b.minZoom !== null && b.minZoom !== undefined;
         return !b.visible || Math.abs((b.thickness ?? 1) - 1) > 0.01 || Boolean(b.color) || hasZoom;
     });
+    if (hasBorderCustomizations) return true;
+
+    const lbl = overrides.labels;
+    if (lbl) {
+        if (!lbl.showCities || !lbl.showCallouts) return true;
+        if (Math.abs((lbl.density ?? 1.0) - 1.0) > 0.05) return true;
+        if (lbl.cityColor || lbl.calloutColor || lbl.cityFont || lbl.calloutFont) return true;
+    }
+
+    return false;
 }
 
 export function setBasemapPresetCallback(callback) {
@@ -206,6 +245,42 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
         }
     });
 
+    // Sync Labels controls
+    const lbl = overrides.labels;
+    const showCitiesEl = document.getElementById('labels-show-cities');
+    const showCalloutsEl = document.getElementById('labels-show-callouts');
+    const densityEl = document.getElementById('labels-density-slider');
+    const densityValEl = document.getElementById('labels-density-val');
+    const cityColorEl = document.getElementById('labels-city-color');
+    const calloutColorEl = document.getElementById('labels-callout-color');
+    const cityFontEl = document.getElementById('labels-city-font');
+    const calloutFontEl = document.getElementById('labels-callout-font');
+    const resetLabelsBtn = document.getElementById('btn-reset-labels');
+
+    if (showCitiesEl) showCitiesEl.checked = lbl.showCities !== false;
+    if (showCalloutsEl) showCalloutsEl.checked = lbl.showCallouts !== false;
+
+    const density = lbl.density ?? 1.0;
+    if (densityEl) densityEl.value = String(density);
+    if (densityValEl) densityValEl.textContent = `${density.toFixed(1)}x`;
+
+    if (cityColorEl) cityColorEl.value = lbl.cityColor || '#f1f5f9';
+    if (calloutColorEl) calloutColorEl.value = lbl.calloutColor || '#ffffff';
+
+    if (cityFontEl) cityFontEl.value = lbl.cityFont || FONT_OPTIONS[0].value;
+    if (calloutFontEl) calloutFontEl.value = lbl.calloutFont || FONT_OPTIONS[0].value;
+
+    if (resetLabelsBtn) {
+        const isModified = !lbl.showCities ||
+            !lbl.showCallouts ||
+            Math.abs(density - 1.0) > 0.05 ||
+            Boolean(lbl.cityColor) ||
+            Boolean(lbl.calloutColor) ||
+            Boolean(lbl.cityFont) ||
+            Boolean(lbl.calloutFont);
+        resetLabelsBtn.disabled = !isModified;
+    }
+
     const resetAllBtn = document.getElementById('btn-reset-all-basemap');
     if (resetAllBtn) {
         resetAllBtn.disabled = !hasAnyCustomizations();
@@ -264,6 +339,7 @@ function renderEditorSections(bodyEl) {
                 </div>
             </div>
 
+            <!-- Borders Dropdown -->
             <div class="basemap-dropdown-block">
                 <button
                     id="btn-borders-dropdown"
@@ -319,6 +395,78 @@ function renderEditorSections(bodyEl) {
                             ` : ''}
                         </div>
                     `).join('')}
+                </div>
+            </div>
+
+            <!-- Labels Dropdown -->
+            <div class="basemap-dropdown-block">
+                <button
+                    id="btn-labels-dropdown"
+                    class="basemap-dropdown-toggle ${labelsExpanded ? 'open' : ''}"
+                    type="button"
+                    aria-expanded="${String(labelsExpanded)}"
+                >
+                    <span>Labels & Callouts</span>
+                    <span class="basemap-dropdown-arrow">${labelsExpanded ? '▾' : '▸'}</span>
+                </button>
+                <div id="labels-dropdown-body" class="basemap-dropdown-body" style="display: ${labelsExpanded ? 'flex' : 'none'};">
+                    <div class="basemap-label-switches-row">
+                        <label class="basemap-checkbox-label">
+                            <input id="labels-show-cities" class="basemap-checkbox" type="checkbox" checked />
+                            <span>City Names</span>
+                        </label>
+                        <label class="basemap-checkbox-label">
+                            <input id="labels-show-callouts" class="basemap-checkbox" type="checkbox" checked />
+                            <span>Weather Callouts</span>
+                        </label>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-slider-row">
+                            <span class="basemap-slider-label">Density</span>
+                            <input
+                                id="labels-density-slider"
+                                class="basemap-range-slider"
+                                type="range"
+                                min="0.5"
+                                max="2.5"
+                                step="0.1"
+                                value="1"
+                                aria-label="Label density"
+                            />
+                            <span id="labels-density-val" class="basemap-slider-value">1.0x</span>
+                        </div>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-top">
+                            <span class="basemap-control-label">City Names</span>
+                            <input id="labels-city-color" class="basemap-color-input" type="color" value="#f1f5f9" aria-label="City name color" />
+                        </div>
+                        <div class="basemap-font-select-row">
+                            <span class="basemap-slider-label">Font</span>
+                            <select id="labels-city-font" class="basemap-font-select" aria-label="City name font">
+                                ${FONT_OPTIONS.map((f) => `<option value="${f.value}">${f.label}</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-top">
+                            <span class="basemap-control-label">Weather Callouts</span>
+                            <input id="labels-callout-color" class="basemap-color-input" type="color" value="#ffffff" aria-label="Weather callout color" />
+                        </div>
+                        <div class="basemap-font-select-row">
+                            <span class="basemap-slider-label">Font</span>
+                            <select id="labels-callout-font" class="basemap-font-select" aria-label="Weather callout font">
+                                ${FONT_OPTIONS.map((f) => `<option value="${f.value}">${f.label}</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="basemap-row-right-align">
+                        <button id="btn-reset-labels" class="basemap-reset-btn" type="button" disabled>Reset Labels</button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -399,6 +547,20 @@ function renderEditorSections(bodyEl) {
         });
     }
 
+    // Labels dropdown toggle
+    const labelsToggle = document.getElementById('btn-labels-dropdown');
+    const labelsBody = document.getElementById('labels-dropdown-body');
+    if (labelsToggle && labelsBody) {
+        labelsToggle.addEventListener('click', () => {
+            labelsExpanded = !labelsExpanded;
+            labelsToggle.classList.toggle('open', labelsExpanded);
+            labelsToggle.setAttribute('aria-expanded', String(labelsExpanded));
+            labelsBody.style.display = labelsExpanded ? 'flex' : 'none';
+            const arrow = labelsToggle.querySelector('.basemap-dropdown-arrow');
+            if (arrow) arrow.textContent = labelsExpanded ? '▾' : '▸';
+        });
+    }
+
     // Borders row controls
     BORDER_CATEGORIES.forEach(({ id }) => {
         const visibleEl = document.getElementById(`border-visible-${id}`);
@@ -467,6 +629,73 @@ function renderEditorSections(bodyEl) {
             });
         }
     });
+
+    // Labels row controls
+    const showCitiesEl = document.getElementById('labels-show-cities');
+    const showCalloutsEl = document.getElementById('labels-show-callouts');
+    const densityEl = document.getElementById('labels-density-slider');
+    const cityColorEl = document.getElementById('labels-city-color');
+    const calloutColorEl = document.getElementById('labels-callout-color');
+    const cityFontEl = document.getElementById('labels-city-font');
+    const calloutFontEl = document.getElementById('labels-callout-font');
+    const resetLabelsBtn = document.getElementById('btn-reset-labels');
+
+    if (showCitiesEl) {
+        showCitiesEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.showCities = e.target.checked;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (showCalloutsEl) {
+        showCalloutsEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.showCallouts = e.target.checked;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (densityEl) {
+        densityEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            ensureOverridesState().labels.density = Number.isFinite(val) ? val : 1.0;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (cityColorEl) {
+        cityColorEl.addEventListener('input', (e) => {
+            ensureOverridesState().labels.cityColor = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (calloutColorEl) {
+        calloutColorEl.addEventListener('input', (e) => {
+            ensureOverridesState().labels.calloutColor = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (cityFontEl) {
+        cityFontEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.cityFont = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (calloutFontEl) {
+        calloutFontEl.addEventListener('change', (e) => {
+            ensureOverridesState().labels.calloutFont = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (resetLabelsBtn) {
+        resetLabelsBtn.addEventListener('click', () => {
+            ensureOverridesState().labels = createDefaultLabelsState();
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
 
     // Bottom Reset Everything button
     const resetAllBtn = document.getElementById('btn-reset-all-basemap');
