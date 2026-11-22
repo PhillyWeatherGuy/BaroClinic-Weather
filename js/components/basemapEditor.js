@@ -36,12 +36,19 @@ const SUB_BORDER_IDS = ['oceanLand', 'national', 'state', 'county', 'roads'];
 
 const FONT_OPTIONS = [
     { label: 'Roboto (Default)', value: "'Roboto', -apple-system, sans-serif" },
+    { label: 'Inter', value: "'Inter', -apple-system, sans-serif" },
+    { label: 'Montserrat', value: "'Montserrat', sans-serif" },
+    { label: 'Poppins', value: "'Poppins', sans-serif" },
+    { label: 'Oswald (Condensed)', value: "'Oswald', 'Arial Narrow', sans-serif" },
+    { label: 'Bebas Neue (Broadcast)', value: "'Bebas Neue', Impact, sans-serif" },
     { label: 'System Sans', value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
     { label: 'Arial', value: "Arial, Helvetica, sans-serif" },
     { label: 'Trebuchet MS', value: "'Trebuchet MS', 'Lucida Sans Unicode', sans-serif" },
-    { label: 'Impact / Condensed', value: "Impact, 'Arial Narrow', sans-serif" },
-    { label: 'Georgia (Serif)', value: "Georgia, 'Times New Roman', serif" },
-    { label: 'Monospace', value: "SFMono-Regular, Menlo, Monaco, Consolas, monospace" }
+    { label: 'Impact', value: "Impact, 'Arial Narrow', sans-serif" },
+    { label: 'JetBrains Mono', value: "'JetBrains Mono', Consolas, monospace" },
+    { label: 'Monospace', value: "SFMono-Regular, Menlo, Monaco, Consolas, monospace" },
+    { label: 'Merriweather (Serif)', value: "'Merriweather', Georgia, serif" },
+    { label: 'Georgia (Serif)', value: "Georgia, 'Times New Roman', serif" }
 ];
 
 let presetCallback = null;
@@ -68,7 +75,9 @@ function createDefaultLabelsState() {
         cityColor: null,
         calloutColor: null,
         cityFont: null,
-        calloutFont: null
+        calloutFont: null,
+        cityFontSize: null,
+        calloutFontSize: null
     };
 }
 
@@ -103,6 +112,13 @@ function ensureOverridesState() {
         }
     });
 
+    if (stateManager.basemapOverrides.labels.cityFontSize === undefined) {
+        stateManager.basemapOverrides.labels.cityFontSize = null;
+    }
+    if (stateManager.basemapOverrides.labels.calloutFontSize === undefined) {
+        stateManager.basemapOverrides.labels.calloutFontSize = null;
+    }
+
     return stateManager.basemapOverrides;
 }
 
@@ -127,6 +143,7 @@ function hasAnyCustomizations() {
         if (lbl.showCities !== null && lbl.showCities !== undefined) return true;
         if (lbl.showCallouts !== null && lbl.showCallouts !== undefined) return true;
         if (lbl.density !== null && lbl.density !== undefined) return true;
+        if (Number.isFinite(lbl.cityFontSize) || Number.isFinite(lbl.calloutFontSize)) return true;
         if (lbl.cityColor || lbl.calloutColor || lbl.cityFont || lbl.calloutFont) return true;
     }
 
@@ -261,6 +278,8 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
     const calloutColorEl = document.getElementById('labels-callout-color');
     const cityFontEl = document.getElementById('labels-city-font');
     const calloutFontEl = document.getElementById('labels-callout-font');
+    const citySizeEl = document.getElementById('labels-city-size');
+    const calloutSizeEl = document.getElementById('labels-callout-size');
     const resetLabelsBtn = document.getElementById('btn-reset-labels');
 
     const activeShowCities = (lbl.showCities !== null && lbl.showCities !== undefined) ? lbl.showCities : labelDefaults.showCities;
@@ -270,6 +289,8 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
     const activeCalloutColor = lbl.calloutColor || labelDefaults.calloutColor;
     const activeCityFont = lbl.cityFont || labelDefaults.cityFont;
     const activeCalloutFont = lbl.calloutFont || labelDefaults.calloutFont;
+    const activeCitySize = Number.isFinite(lbl.cityFontSize) ? lbl.cityFontSize : labelDefaults.cityFontSize;
+    const activeCalloutSize = Number.isFinite(lbl.calloutFontSize) ? lbl.calloutFontSize : labelDefaults.calloutFontSize;
 
     if (showCitiesEl) showCitiesEl.checked = activeShowCities;
     if (showCalloutsEl) showCalloutsEl.checked = activeShowCallouts;
@@ -283,10 +304,19 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
     if (cityFontEl) cityFontEl.value = activeCityFont;
     if (calloutFontEl) calloutFontEl.value = activeCalloutFont;
 
+    if (citySizeEl && document.activeElement !== citySizeEl) {
+        citySizeEl.value = String(activeCitySize);
+    }
+    if (calloutSizeEl && document.activeElement !== calloutSizeEl) {
+        calloutSizeEl.value = String(activeCalloutSize);
+    }
+
     if (resetLabelsBtn) {
         const isModified = (lbl.showCities !== null && lbl.showCities !== undefined) ||
             (lbl.showCallouts !== null && lbl.showCallouts !== undefined) ||
             (lbl.density !== null && lbl.density !== undefined) ||
+            Number.isFinite(lbl.cityFontSize) ||
+            Number.isFinite(lbl.calloutFontSize) ||
             Boolean(lbl.cityColor) ||
             Boolean(lbl.calloutColor) ||
             Boolean(lbl.cityFont) ||
@@ -462,6 +492,19 @@ function renderEditorSections(bodyEl) {
                             <select id="labels-city-font" class="basemap-font-select" aria-label="City name font">
                                 ${FONT_OPTIONS.map((f) => `<option value="${f.value}">${f.label}</option>`).join('')}
                             </select>
+                            <div class="basemap-font-size-wrap">
+                                <input
+                                    id="labels-city-size"
+                                    class="basemap-font-size-input"
+                                    type="number"
+                                    min="8"
+                                    max="36"
+                                    step="1"
+                                    value="${labelDefaults.cityFontSize}"
+                                    aria-label="City name font size"
+                                />
+                                <span class="basemap-font-size-unit">px</span>
+                            </div>
                         </div>
                     </div>
 
@@ -475,6 +518,19 @@ function renderEditorSections(bodyEl) {
                             <select id="labels-callout-font" class="basemap-font-select" aria-label="Weather callout font">
                                 ${FONT_OPTIONS.map((f) => `<option value="${f.value}">${f.label}</option>`).join('')}
                             </select>
+                            <div class="basemap-font-size-wrap">
+                                <input
+                                    id="labels-callout-size"
+                                    class="basemap-font-size-input"
+                                    type="number"
+                                    min="8"
+                                    max="36"
+                                    step="1"
+                                    value="${labelDefaults.calloutFontSize}"
+                                    aria-label="Weather callout font size"
+                                />
+                                <span class="basemap-font-size-unit">px</span>
+                            </div>
                         </div>
                     </div>
 
@@ -652,6 +708,8 @@ function renderEditorSections(bodyEl) {
     const calloutColorEl = document.getElementById('labels-callout-color');
     const cityFontEl = document.getElementById('labels-city-font');
     const calloutFontEl = document.getElementById('labels-callout-font');
+    const citySizeEl = document.getElementById('labels-city-size');
+    const calloutSizeEl = document.getElementById('labels-callout-size');
     const resetLabelsBtn = document.getElementById('btn-reset-labels');
 
     if (showCitiesEl) {
@@ -700,6 +758,38 @@ function renderEditorSections(bodyEl) {
     if (calloutFontEl) {
         calloutFontEl.addEventListener('change', (e) => {
             ensureOverridesState().labels.calloutFont = e.target.value;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (citySizeEl) {
+        citySizeEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!Number.isFinite(val) || val < 8 || val > 36) return;
+            ensureOverridesState().labels.cityFontSize = Math.round(val);
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+        citySizeEl.addEventListener('change', (e) => {
+            const raw = parseFloat(e.target.value);
+            const clamped = Number.isFinite(raw) ? Math.min(36, Math.max(8, Math.round(raw))) : getContextualLabelDefaults().cityFontSize;
+            e.target.value = String(clamped);
+            ensureOverridesState().labels.cityFontSize = clamped;
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+    }
+
+    if (calloutSizeEl) {
+        calloutSizeEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!Number.isFinite(val) || val < 8 || val > 36) return;
+            ensureOverridesState().labels.calloutFontSize = Math.round(val);
+            if (typeof editorChangeCallback === 'function') editorChangeCallback();
+        });
+        calloutSizeEl.addEventListener('change', (e) => {
+            const raw = parseFloat(e.target.value);
+            const clamped = Number.isFinite(raw) ? Math.min(36, Math.max(8, Math.round(raw))) : getContextualLabelDefaults().calloutFontSize;
+            e.target.value = String(clamped);
+            ensureOverridesState().labels.calloutFontSize = clamped;
             if (typeof editorChangeCallback === 'function') editorChangeCallback();
         });
     }
