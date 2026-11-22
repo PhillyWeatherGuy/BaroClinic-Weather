@@ -11,7 +11,7 @@ let mapInstance = null;
 let listenersAttached = false;
 let isUpdating = false;
 
-// 🌟 Dynamic style element so fonts, colors, and visibility update instantly without rebuilding markers
+// 🌟 Dynamic style element so fonts, colors, sizes, and visibility update instantly without rebuilding markers
 let dynamicStyleEl = document.getElementById('city-overlay-dynamic-style');
 if (!dynamicStyleEl) {
     dynamicStyleEl = document.createElement('style');
@@ -40,7 +40,7 @@ export function isCurrentParamSuppressed() {
 }
 
 /**
- * 🌟 Contextual Defaults: Resolves whether labels and which colors should be default for active parameter
+ * 🌟 Contextual Defaults: Resolves whether labels and which colors/sizes should be default for active parameter
  */
 export function getContextualLabelDefaults() {
     const isSuppressed = isCurrentParamSuppressed();
@@ -68,7 +68,9 @@ export function getContextualLabelDefaults() {
         cityColor: defaultCityColor,
         calloutColor: defaultCalloutColor,
         cityFont: "'Roboto', -apple-system, sans-serif",
-        calloutFont: "'Roboto', -apple-system, sans-serif"
+        calloutFont: "'Roboto', -apple-system, sans-serif",
+        cityFontSize: 11,
+        calloutFontSize: 15
     };
 }
 
@@ -84,6 +86,11 @@ export function refreshCityOverlayStyles() {
     const cityFont = labels.cityFont || defaults.cityFont;
     const calloutFont = labels.calloutFont || defaults.calloutFont;
 
+    const cityFontSize = Number.isFinite(labels.cityFontSize) ? labels.cityFontSize : defaults.cityFontSize;
+    const calloutFontSize = Number.isFinite(labels.calloutFontSize) ? labels.calloutFontSize : defaults.calloutFontSize;
+    const cityStrokeWidth = Math.max(0.8, +(cityFontSize * 0.09).toFixed(1));
+    const calloutStrokeWidth = Math.max(1, +(calloutFontSize * 0.1).toFixed(1));
+
     dynamicStyleEl.textContent = `
         .city-callout-node {
             display: flex;
@@ -98,12 +105,12 @@ export function refreshCityOverlayStyles() {
         .city-callout-val {
             display: ${showCallouts ? 'block' : 'none'};
             font-family: ${calloutFont};
-            font-size: 15px;
+            font-size: ${calloutFontSize}px;
             font-weight: 800;
             line-height: 1.1;
             letter-spacing: -0.2px;
             color: ${calloutColor};
-            -webkit-text-stroke: 1.5px #000000;
+            -webkit-text-stroke: ${calloutStrokeWidth}px #000000;
             paint-order: stroke fill;
             text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
         }
@@ -113,12 +120,12 @@ export function refreshCityOverlayStyles() {
         .city-callout-name {
             display: ${showCities ? 'block' : 'none'};
             font-family: ${cityFont};
-            font-size: 11px;
+            font-size: ${cityFontSize}px;
             font-weight: 700;
             line-height: 1.1;
             letter-spacing: 0.3px;
             color: ${cityColor};
-            -webkit-text-stroke: 1px #000000;
+            -webkit-text-stroke: ${cityStrokeWidth}px #000000;
             paint-order: stroke fill;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
             margin-top: 1px;
@@ -522,6 +529,11 @@ export function updateCityPositions() {
     const density = Number.isFinite(labels.density) ? labels.density : defaults.density;
     const zoomOffset = (density - 1.0) * 1.5;
 
+    const cityFontSize = Number.isFinite(labels.cityFontSize) ? labels.cityFontSize : defaults.cityFontSize;
+    const calloutFontSize = Number.isFinite(labels.calloutFontSize) ? labels.calloutFontSize : defaults.calloutFontSize;
+    const nameScale = cityFontSize / 11;
+    const valScale = calloutFontSize / 15;
+
     // 1. Start with global Natural Earth places
     let candidateCities = [...allGlobalCities];
 
@@ -591,8 +603,10 @@ export function updateCityPositions() {
         const pos = mapInstance.project([city.lng, city.lat]);
 
         const nameLen = (city.name || '').length;
-        const boxW = Math.max(52, nameLen * 6.8) + 12;
-        const boxH = showCallouts && showCities ? 28 : 16;
+        const boxW = Math.max(52 * Math.max(nameScale, valScale), nameLen * (6.8 * nameScale)) + 12;
+        const boxH = (showCallouts && showCities)
+            ? Math.round(calloutFontSize + cityFontSize + 2)
+            : Math.round((showCallouts ? calloutFontSize : cityFontSize) + 2);
 
         const candidateBox = {
             left: pos.x - (boxW / 2) - padX,
