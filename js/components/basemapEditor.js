@@ -1,5 +1,6 @@
 // js/components/basemapEditor.js
 import { stateManager } from '../core/stateManager.js';
+import { getContextualLabelDefaults } from '../layers/cityOverlay.js';
 
 const BASEMAP_PRESETS = [
     {
@@ -61,9 +62,9 @@ function createDefaultBordersState() {
 
 function createDefaultLabelsState() {
     return {
-        showCities: true,
-        showCallouts: true,
-        density: 1.0,
+        showCities: null,
+        showCallouts: null,
+        density: null,
         cityColor: null,
         calloutColor: null,
         cityFont: null,
@@ -123,8 +124,9 @@ function hasAnyCustomizations() {
 
     const lbl = overrides.labels;
     if (lbl) {
-        if (!lbl.showCities || !lbl.showCallouts) return true;
-        if (Math.abs((lbl.density ?? 1.0) - 1.0) > 0.05) return true;
+        if (lbl.showCities !== null && lbl.showCities !== undefined) return true;
+        if (lbl.showCallouts !== null && lbl.showCallouts !== undefined) return true;
+        if (lbl.density !== null && lbl.density !== undefined) return true;
         if (lbl.cityColor || lbl.calloutColor || lbl.cityFont || lbl.calloutFont) return true;
     }
 
@@ -156,6 +158,8 @@ export function syncBasemapEditorTheme(theme = stateManager.currentTheme || 'dar
             img.src = getPreviewUrl(preset, theme);
         }
     });
+
+    syncBasemapColorInputs();
 }
 
 export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#f5fdff', borders: {}, borderMinZooms: {} }) {
@@ -245,8 +249,10 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
         }
     });
 
-    // Sync Labels controls
+    // 🌟 Sync Labels controls with contextual defaults
     const lbl = overrides.labels;
+    const labelDefaults = getContextualLabelDefaults();
+
     const showCitiesEl = document.getElementById('labels-show-cities');
     const showCalloutsEl = document.getElementById('labels-show-callouts');
     const densityEl = document.getElementById('labels-density-slider');
@@ -257,23 +263,30 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
     const calloutFontEl = document.getElementById('labels-callout-font');
     const resetLabelsBtn = document.getElementById('btn-reset-labels');
 
-    if (showCitiesEl) showCitiesEl.checked = lbl.showCities !== false;
-    if (showCalloutsEl) showCalloutsEl.checked = lbl.showCallouts !== false;
+    const activeShowCities = (lbl.showCities !== null && lbl.showCities !== undefined) ? lbl.showCities : labelDefaults.showCities;
+    const activeShowCallouts = (lbl.showCallouts !== null && lbl.showCallouts !== undefined) ? lbl.showCallouts : labelDefaults.showCallouts;
+    const activeDensity = (lbl.density !== null && lbl.density !== undefined) ? lbl.density : labelDefaults.density;
+    const activeCityColor = lbl.cityColor || labelDefaults.cityColor;
+    const activeCalloutColor = lbl.calloutColor || labelDefaults.calloutColor;
+    const activeCityFont = lbl.cityFont || labelDefaults.cityFont;
+    const activeCalloutFont = lbl.calloutFont || labelDefaults.calloutFont;
 
-    const density = lbl.density ?? 1.0;
-    if (densityEl) densityEl.value = String(density);
-    if (densityValEl) densityValEl.textContent = `${density.toFixed(1)}x`;
+    if (showCitiesEl) showCitiesEl.checked = activeShowCities;
+    if (showCalloutsEl) showCalloutsEl.checked = activeShowCallouts;
 
-    if (cityColorEl) cityColorEl.value = lbl.cityColor || '#f1f5f9';
-    if (calloutColorEl) calloutColorEl.value = lbl.calloutColor || '#ffffff';
+    if (densityEl) densityEl.value = String(activeDensity);
+    if (densityValEl) densityValEl.textContent = `${activeDensity.toFixed(1)}x`;
 
-    if (cityFontEl) cityFontEl.value = lbl.cityFont || FONT_OPTIONS[0].value;
-    if (calloutFontEl) calloutFontEl.value = lbl.calloutFont || FONT_OPTIONS[0].value;
+    if (cityColorEl) cityColorEl.value = activeCityColor;
+    if (calloutColorEl) calloutColorEl.value = activeCalloutColor;
+
+    if (cityFontEl) cityFontEl.value = activeCityFont;
+    if (calloutFontEl) calloutFontEl.value = activeCalloutFont;
 
     if (resetLabelsBtn) {
-        const isModified = !lbl.showCities ||
-            !lbl.showCallouts ||
-            Math.abs(density - 1.0) > 0.05 ||
+        const isModified = (lbl.showCities !== null && lbl.showCities !== undefined) ||
+            (lbl.showCallouts !== null && lbl.showCallouts !== undefined) ||
+            (lbl.density !== null && lbl.density !== undefined) ||
             Boolean(lbl.cityColor) ||
             Boolean(lbl.calloutColor) ||
             Boolean(lbl.cityFont) ||
@@ -290,6 +303,7 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
 function renderEditorSections(bodyEl) {
     const currentTheme = stateManager.currentTheme || 'dark';
     const activePreset = stateManager.activeBasemapPreset || 'default';
+    const labelDefaults = getContextualLabelDefaults();
 
     bodyEl.innerHTML = `
         <section class="basemap-editor-section">
@@ -412,11 +426,11 @@ function renderEditorSections(bodyEl) {
                 <div id="labels-dropdown-body" class="basemap-dropdown-body" style="display: ${labelsExpanded ? 'flex' : 'none'};">
                     <div class="basemap-label-switches-row">
                         <label class="basemap-checkbox-label">
-                            <input id="labels-show-cities" class="basemap-checkbox" type="checkbox" checked />
+                            <input id="labels-show-cities" class="basemap-checkbox" type="checkbox" ${labelDefaults.showCities ? 'checked' : ''} />
                             <span>City Names</span>
                         </label>
                         <label class="basemap-checkbox-label">
-                            <input id="labels-show-callouts" class="basemap-checkbox" type="checkbox" checked />
+                            <input id="labels-show-callouts" class="basemap-checkbox" type="checkbox" ${labelDefaults.showCallouts ? 'checked' : ''} />
                             <span>Weather Callouts</span>
                         </label>
                     </div>
@@ -441,7 +455,7 @@ function renderEditorSections(bodyEl) {
                     <div class="basemap-border-row">
                         <div class="basemap-border-top">
                             <span class="basemap-control-label">City Names</span>
-                            <input id="labels-city-color" class="basemap-color-input" type="color" value="#f1f5f9" aria-label="City name color" />
+                            <input id="labels-city-color" class="basemap-color-input" type="color" value="${labelDefaults.cityColor}" aria-label="City name color" />
                         </div>
                         <div class="basemap-font-select-row">
                             <span class="basemap-slider-label">Font</span>
@@ -454,7 +468,7 @@ function renderEditorSections(bodyEl) {
                     <div class="basemap-border-row">
                         <div class="basemap-border-top">
                             <span class="basemap-control-label">Weather Callouts</span>
-                            <input id="labels-callout-color" class="basemap-color-input" type="color" value="#ffffff" aria-label="Weather callout color" />
+                            <input id="labels-callout-color" class="basemap-color-input" type="color" value="${labelDefaults.calloutColor}" aria-label="Weather callout color" />
                         </div>
                         <div class="basemap-font-select-row">
                             <span class="basemap-slider-label">Font</span>
