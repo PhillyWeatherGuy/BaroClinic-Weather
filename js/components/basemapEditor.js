@@ -1,6 +1,12 @@
 // js/components/basemapEditor.js
 import { stateManager } from '../core/stateManager.js';
 import { getContextualLabelDefaults } from '../layers/cityOverlay.js';
+import {
+    openHighlightTypeModal,
+    clearHighlightOverlay,
+    getHighlightStatus,
+    setHighlightStatusCallback
+} from '../layers/highlightOverlay.js';
 
 const BASEMAP_PRESETS = [
     {
@@ -55,6 +61,7 @@ let presetCallback = null;
 let editorChangeCallback = null;
 let bordersExpanded = false;
 let labelsExpanded = false;
+let lastBaseColors = { land: '#ededed', water: '#f5fdff', borders: {}, borderMinZooms: {} };
 
 function createDefaultBordersState() {
     return {
@@ -128,6 +135,8 @@ function getPreviewUrl(preset, theme) {
 
 function hasAnyCustomizations() {
     if ((stateManager.activeBasemapPreset || 'default') !== 'default') return true;
+    if (getHighlightStatus().isActive) return true;
+
     const overrides = ensureOverridesState();
     if (overrides.landColor || overrides.waterColor) return true;
 
@@ -179,12 +188,17 @@ export function syncBasemapEditorTheme(theme = stateManager.currentTheme || 'dar
     syncBasemapColorInputs();
 }
 
-export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#f5fdff', borders: {}, borderMinZooms: {} }) {
+export function syncBasemapColorInputs(baseColors = null) {
+    if (baseColors) {
+        lastBaseColors = baseColors;
+    }
+    const activeBase = baseColors || lastBaseColors;
+
     const isSatellite = stateManager.activeBasemapPreset === 'satellite';
     const overrides = ensureOverridesState();
 
-    const landColor = overrides.landColor || baseColors.land || '#ededed';
-    const waterColor = overrides.waterColor || baseColors.water || '#f5fdff';
+    const landColor = overrides.landColor || activeBase.land || '#ededed';
+    const waterColor = overrides.waterColor || activeBase.water || '#f5fdff';
 
     const controls = document.getElementById('basemap-land-water-controls');
     const note = document.getElementById('basemap-satellite-note');
@@ -214,8 +228,8 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
 
     // Sync Borders rows
     const borders = overrides.borders;
-    const baseBorders = baseColors.borders || {};
-    const baseMinZooms = baseColors.borderMinZooms || {};
+    const baseBorders = activeBase.borders || {};
+    const baseMinZooms = activeBase.borderMinZooms || {};
     const allColorOverride = borders.all.color;
 
     BORDER_CATEGORIES.forEach(({ id }) => {
@@ -266,7 +280,7 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
         }
     });
 
-    // 🌟 Sync Labels controls with contextual defaults
+    // Sync Labels controls with contextual defaults
     const lbl = overrides.labels;
     const labelDefaults = getContextualLabelDefaults();
 
@@ -322,6 +336,23 @@ export function syncBasemapColorInputs(baseColors = { land: '#ededed', water: '#
             Boolean(lbl.cityFont) ||
             Boolean(lbl.calloutFont);
         resetLabelsBtn.disabled = !isModified;
+    }
+
+    // Sync Highlight controls
+    const hlStatus = getHighlightStatus();
+    const hlBadge = document.getElementById('highlight-active-badge');
+    const hlClearBtn = document.getElementById('btn-clear-highlight');
+    const hlOpenBtn = document.getElementById('btn-open-highlight');
+
+    if (hlBadge) {
+        hlBadge.style.display = hlStatus.isActive ? 'inline-block' : 'none';
+        hlBadge.textContent = hlStatus.isActive ? `${hlStatus.count} active` : '';
+    }
+    if (hlClearBtn) {
+        hlClearBtn.style.display = hlStatus.isActive ? '' : 'none';
+    }
+    if (hlOpenBtn) {
+        hlOpenBtn.classList.toggle('active', hlStatus.isActive);
     }
 
     const resetAllBtn = document.getElementById('btn-reset-all-basemap');
@@ -538,6 +569,15 @@ function renderEditorSections(bodyEl) {
                         <button id="btn-reset-labels" class="basemap-reset-btn" type="button" disabled>Reset Labels</button>
                     </div>
                 </div>
+            </div>
+
+            <!-- Highlight Regions Button -->
+            <div class="basemap-highlight-row">
+                <button id="btn-open-highlight" class="basemap-highlight-btn" type="button">
+                    <span>Highlight</span>
+                    <span id="highlight-active-badge" class="highlight-active-badge" style="display: none;"></span>
+                </button>
+                <button id="btn-clear-highlight" class="basemap-reset-btn" type="button" style="display: none;">Clear</button>
             </div>
         </section>
 
@@ -801,6 +841,20 @@ function renderEditorSections(bodyEl) {
         });
     }
 
+    // Highlight controls
+    const openHighlightBtn = document.getElementById('btn-open-highlight');
+    const clearHighlightBtn = document.getElementById('btn-clear-highlight');
+    if (openHighlightBtn) {
+        openHighlightBtn.addEventListener('click', () => {
+            openHighlightTypeModal();
+        });
+    }
+    if (clearHighlightBtn) {
+        clearHighlightBtn.addEventListener('click', () => {
+            clearHighlightOverlay();
+        });
+    }
+
     // Bottom Reset Everything button
     const resetAllBtn = document.getElementById('btn-reset-all-basemap');
     if (resetAllBtn) {
@@ -808,6 +862,7 @@ function renderEditorSections(bodyEl) {
             const wasDefaultPreset = (stateManager.activeBasemapPreset || 'default') === 'default';
             stateManager.activeBasemapPreset = 'default';
             stateManager.basemapOverrides = createDefaultBasemapOverrides();
+            clearHighlightOverlay();
 
             bodyEl.querySelectorAll('.basemap-preset-card').forEach((c) => {
                 c.classList.toggle('active', c.dataset.presetId === 'default');
@@ -849,6 +904,10 @@ export function initBasemapEditor() {
         stateManager.activeBasemapPreset = 'default';
     }
     ensureOverridesState();
+
+    setHighlightStatusCallback(() => {
+        syncBasemapColorInputs();
+    });
 
     if (bodyEl) {
         renderEditorSections(bodyEl);
