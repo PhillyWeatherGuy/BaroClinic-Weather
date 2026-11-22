@@ -1909,6 +1909,47 @@ body.light-mode .map-card {
     color: #cbd5e1;
 }
 
+/* 🌟 Labels & Callouts styling */
+.basemap-label-switches-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: #181d28;
+    border: 1px solid #232b3c;
+    border-radius: 0;
+    gap: 12px;
+}
+
+.basemap-font-select-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.basemap-font-select {
+    flex: 1;
+    padding: 4px 8px;
+    background: #11151e;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    color: #e2e8f0;
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.basemap-font-select:focus {
+    border-color: #3b82f6;
+}
+
+.basemap-row-right-align {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 2px;
+}
+
 .basemap-editor-footer {
     margin-top: auto;
     padding-top: 8px;
