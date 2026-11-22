@@ -1400,7 +1400,12 @@ function initModelRunDropdown() {
                 stateManager.activeModelRun = isLatest ? null : run.id;
                 stateManager.activeRunObj = isLatest ? null : run;
                 
-                await fetchManifest(isLatest ? null : run); 
+                if (isLatest) {
+                    stateManager.currentDate = null;
+                    stateManager.currentCycle = null;
+                }
+                
+                await fetchManifest(isLatest ? null : run);
 
                 const bitmap0 = await loadChunkBitmap(0, thisGen);
                 if (shaderLayerRef && thisGen === stateManager.loadGeneration) {
