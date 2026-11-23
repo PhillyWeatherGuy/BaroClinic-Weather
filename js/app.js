@@ -40,6 +40,12 @@ import {
 import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures, setContourGridMode, ensureEnsembleContourLayer } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setPolarContourFeatures } from './layers/polarMap.js';
 
+import {
+    initHighlightOverlay,
+    applyHighlightLayers,
+    isHighlightPickingActive
+} from './layers/highlightOverlay.js';
+
 // 🛰️ Real-Time Radar Engine
 import { initRadarMode, destroyRadarMode, updateRadarUnitLabels } from './components/radarUI.js';
 import { hideStormVolume } from './layers/stormVolume3D.js';
@@ -1375,8 +1381,10 @@ export function initLayer(shaderType = null) {
         map.addLayer(customShaderLayer, firstContentLayerId);
     }
 
+    applyBasemapOverrides();
     // 🌟 Sync Basemap Editor label checkboxes & color pickers for the new parameter
     syncBasemapColorInputs(currentStyleBaseColors);
+    applyHighlightLayers(map);
 }
 
 async function renderFrame(globalIdx) {
@@ -1762,6 +1770,8 @@ map.on('load', async () => {
     currentStyleBaseColors = readMapBaseColors();
     applyBasemapOverrides();
     updateBasemapZoomReadout(map.getZoom());
+    initHighlightOverlay(map);
+    applyHighlightLayers(map);
     initBasemapMap();
     initWeatherMap();
     initAtmosphereHaloCanvas();
@@ -1774,10 +1784,11 @@ map.on('load', async () => {
 });
 
 map.on('style.load', () => {
-    if (stateManager.activeMode !== 'radar' || (stateManager.activeBasemapPreset && stateManager.activeBasemapPreset !== 'default')) {
+    if (stateManager.activeMode !== 'radar') {
         currentStyleBaseColors = readMapBaseColors();
         applyBasemapOverrides();
     }
+    applyHighlightLayers(map);
     if (basemapMap && stateManager.currentMapStyle) {
         updateBasemapMapStyle(stateManager.currentMapStyle);
     }
@@ -1812,6 +1823,7 @@ map.on('moveend', () => {
 });
 
 map.on('click', (e) => {
+    if (isHighlightPickingActive()) return;
     if (stateManager.activeMode === 'radar') return;
     if (!stateManager.manifest || !stateManager.activeFrameState) return;
 
