@@ -199,12 +199,15 @@ function getActivePickingFeatures() {
     return regionCache[currentPickTarget].fc;
 }
 
-function updatePickingSources() {
+function updatePickingSources(updateBase = false) {
     if (!mapRef || !isPicking) return;
 
-    const baseSrc = mapRef.getSource('highlight-pick-base-src');
-    if (baseSrc) {
-        baseSrc.setData(getActivePickingFeatures());
+    // 🌟 ONLY re-parse the giant world boundary dataset when switching categories, NEVER on clicks!
+    if (updateBase) {
+        const baseSrc = mapRef.getSource('highlight-pick-base-src');
+        if (baseSrc) {
+            baseSrc.setData(getActivePickingFeatures());
+        }
     }
 
     const selSrc = mapRef.getSource('highlight-pick-selected-src');
@@ -742,7 +745,7 @@ function updatePickingBarUI() {
                     currentPickTarget = nextCat;
                     hoveredKey = null;
                     updatePickingOutlineWidth();
-                    updatePickingSources();
+                    updatePickingSources(true);
                 });
             });
         } else if (currentPickTarget) {
