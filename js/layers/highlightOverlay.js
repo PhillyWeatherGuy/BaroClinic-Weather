@@ -48,8 +48,11 @@ const WORLD_FC = {
 
 // Drop shadow settings (shadow is built as geometry that can only exist OUTSIDE the highlight)
 const SHADOW_PX = [4, 5];          // direction/size of the shadow in screen pixels (right, down)
-const SHADOW_STEPS = 8;            // stacked slivers that make the soft falloff
-const SHADOW_STEP_OPACITY = 0.11;  // 8 stacked steps ≈ 0.6 at the edge
+const SHADOW_STEPS = 6;            // stacked slivers that make the soft falloff
+const SHADOW_STEP_OPACITY = 0.14;  // 6 stacked steps ≈ 0.6 at the edge
+const SHADOW_SIMPLIFY_PX = 0.4;    // shape is simplified to this many screen px (hidden under the white border line)
+const SHADOW_VIEW_PAD = 0.75;      // shadow is only built for the viewport + this much padding on each side
+const SHADOW_DEBOUNCE_MS = 250;    // wait for pan/zoom to settle before rebuilding
 
 const regionCache = {};
 const selectedFeaturesMap = new Map();
@@ -66,7 +69,9 @@ let activeDimMaskGeoJSON = null;
 let activeOutlineGeoJSON = null;
 let activeShadowBase = null;
 let activeShadowGeoJSON = EMPTY_FC;
-let shadowZoomTimer = null;
+let shadowTimer = null;
+let shadowJobId = 0;
+let shadowCoverage = null;
 
 let pickingListenersBound = false;
 
@@ -389,36 +394,165 @@ function unionFeatures(features) {
     }
 }
 
-function rebuildShadowGeometry() {
-    activeShadowGeoJSON = EMPTY_FC;
+const DEG = Math.PI / 180;
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function latToMercY(lat) {
+    const c = Math.max(-85.0511, Math.min(85.0511, lat));
+    return Math.log(Math.tan(Math.PI / 4 + (c * DEG) / 2)) / DEG;
+}
+
+function mercYToLat(y) {
+    return (2 * Math.atan(Math.exp(y * DEG)) - Math.PI / 2) / DEG;
+}
+
+// Shift a polygon by a fixed number of SCREEN pixels. Done in Mercator space so the shadow
+// looks the same size at every latitude. (dyMercDeg > 0 moves it down the screen)
+function translateFeature(feature, dxDeg, dyMercDeg) {
+    const mapRing = (ring) => ring.map(([lon, lat]) => [lon + dxDeg, mercYToLat(latToMercY(lat) - dyMercDeg)]);
+    const g = feature.geometry;
+    const coordinates = g.type === 'Polygon'
+        ? g.coordinates.map(mapRing)
+        : g.coordinates.map((poly) => poly.map(mapRing));
+    return { type: 'Feature', properties: {}, geometry: { type: g.type, coordinates } };
+}
+
+// Bundle non-overlapping polygons (land, or ocean + lakes) into one feature without a slow union
+function combineAsMultiPolygon(features) {
+    const polys = [];
+    features.forEach((f) => {
+        const g = f.geometry;
+        if (g.type === 'Polygon') polys.push(g.coordinates);
+        else if (g.type === 'MultiPolygon') g.coordinates.forEach((p) => polys.push(p));
+    });
+    return { type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: polys } };
+}
+
+// Keep only the parts of the shape near the viewport (cheap, no boolean ops)
+function clipToBBox(feature, bbox) {
+    const turf = window.turf;
+    const g = feature.geometry;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
+    const [minX, minY, maxX, maxY] = bbox;
+    const out = [];
+
+    for (const rings of polys) {
+        const outer = rings[0];
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let i = 0; i < outer.length; i++) {
+            const x = outer[i][0];
+            const y = outer[i][1];
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+        if (x1 < minX || x0 > maxX || y1 < minY || y0 > maxY) continue;                      // fully outside
+        if (x0 >= minX && x1 <= maxX && y0 >= minY && y1 <= maxY) { out.push(rings); continue; } // fully inside
+        try {
+            const clipped = turf.bboxClip(turf.polygon(rings), bbox);
+            const c = clipped.geometry.coordinates;
+            if (c.length > 0 && c[0].length >= 4) out.push(c);
+        } catch (e) {}
+    }
+
+    if (out.length === 0) return null;
+    return {
+        type: 'Feature',
+        properties: {},
+        geometry: out.length === 1
+            ? { type: 'Polygon', coordinates: out[0] }
+            : { type: 'MultiPolygon', coordinates: out }
+    };
+}
+
+// Builds the shadow in the background, one small step per task, so the UI never freezes
+async function rebuildShadowGeometry() {
+    const jobId = ++shadowJobId;
     const turf = window.turf;
     if (!turf || !activeShadowBase || !mapRef) return;
+    const map = mapRef;
 
-    // Convert the pixel offset to meters at the current zoom so the shadow stays a constant screen size
-    const lat = mapRef.getCenter().lat;
-    const metersPerPx = 78271.517 * Math.cos(lat * Math.PI / 180) / Math.pow(2, mapRef.getZoom());
-    const [dx, dy] = SHADOW_PX;
-    const totalMeters = Math.hypot(dx, dy) * metersPerPx;
-    const bearing = 90 + Math.atan2(dy, dx) * 180 / Math.PI; // right+down => ~141° (SE)
+    const commit = (features, coverage) => {
+        activeShadowGeoJSON = { type: 'FeatureCollection', features };
+        shadowCoverage = coverage;
+        const src = mapRef && mapRef.getSource('highlight-shadow-src');
+        if (src) src.setData(activeShadowGeoJSON);
+    };
+
+    // 1 screen pixel in degrees at this zoom (MapLibre/Mapbox world = 512 * 2^zoom px)
+    const zoom = map.getZoom();
+    const degPerPx = 360 / (512 * Math.pow(2, zoom));
+    const dxDeg = SHADOW_PX[0] * degPerPx;
+    const dyDeg = SHADOW_PX[1] * degPerPx;
+
+    // Only build the shadow for the viewport plus some padding
+    const b = map.getBounds();
+    const cosLat = Math.max(0.1, Math.cos(map.getCenter().lat * DEG));
+    const padX = (b.getEast() - b.getWest()) * SHADOW_VIEW_PAD + dxDeg * 4;
+    const padY = (b.getNorth() - b.getSouth()) * SHADOW_VIEW_PAD + dyDeg * cosLat * 4;
+    const bbox = [
+        Math.max(-180, b.getWest() - padX),
+        Math.max(-85.05, b.getSouth() - padY),
+        Math.min(180, b.getEast() + padX),
+        Math.min(85.05, b.getNorth() + padY)
+    ];
+    const coverage = { bbox, zoom };
+
+    let base = clipToBBox(activeShadowBase, bbox);
+    if (!base) {
+        commit([], coverage);
+        return;
+    }
+
+    await nextTask();
+    if (jobId !== shadowJobId) return;
+
+    // Simplify to ~half a pixel. Any tiny mismatch with the real border is hidden under the white border line.
+    try {
+        base = turf.simplify(base, { tolerance: degPerPx * SHADOW_SIMPLIFY_PX, highQuality: false });
+    } catch (e) {}
 
     const pieces = [];
     for (let i = 1; i <= SHADOW_STEPS; i++) {
+        await nextTask();
+        if (jobId !== shadowJobId) return;
         try {
-            const shifted = turf.transformTranslate(
-                activeShadowBase, totalMeters * i / SHADOW_STEPS, bearing, { units: 'meters' }
-            );
+            const shifted = translateFeature(base, dxDeg * i / SHADOW_STEPS, dyDeg * i / SHADOW_STEPS);
             // shifted minus the highlight => can only exist OUTSIDE the highlight
-            const piece = turf.difference(turf.featureCollection([shifted, activeShadowBase]));
+            const piece = turf.difference(turf.featureCollection([shifted, base]));
             if (piece) pieces.push(piece);
         } catch (e) {}
     }
-    activeShadowGeoJSON = { type: 'FeatureCollection', features: pieces };
+
+    if (jobId !== shadowJobId) return;
+    commit(pieces, coverage);
+}
+
+function scheduleShadowRebuild(delay = SHADOW_DEBOUNCE_MS) {
+    clearTimeout(shadowTimer);
+    if (!activeShadowBase) return;
+    shadowTimer = setTimeout(rebuildShadowGeometry, delay);
+}
+
+// True if the shadow we already built still covers what's on screen at the same zoom
+function viewStillCovered() {
+    if (!shadowCoverage || !mapRef) return false;
+    if (Math.abs(mapRef.getZoom() - shadowCoverage.zoom) > 0.01) return false;
+    const b = mapRef.getBounds();
+    const [w, s, e, n] = shadowCoverage.bbox;
+    return Math.max(-180, b.getWest()) >= w
+        && Math.min(180, b.getEast()) <= e
+        && Math.max(-85.05, b.getSouth()) >= s
+        && Math.min(85.05, b.getNorth()) <= n;
 }
 
 function buildSpotlightGeometry() {
     const selected = Array.from(selectedFeaturesMap.values());
     activeShadowBase = null;
     activeShadowGeoJSON = EMPTY_FC;
+    shadowCoverage = null;
+    shadowJobId++;
 
     if (selected.length === 0) {
         activeDimMaskGeoJSON = null;
@@ -447,11 +581,8 @@ function buildSpotlightGeometry() {
     if (allLand || allWater) {
         activeOutlineGeoJSON = allLand ? regionCache.land.fc : regionCache.water.fc;
         activeDimMaskGeoJSON = allLand ? regionCache.water.fc : regionCache.land.fc;
-        // Unioning a huge number of polygons is expensive, so cap it
-        if (selected.length <= 400) {
-            activeShadowBase = unionFeatures(selected);
-            rebuildShadowGeometry();
-        }
+        // These polygons don't overlap, so skip the slow union and just bundle them together
+        activeShadowBase = combineAsMultiPolygon(selected);
         return;
     }
 
@@ -468,7 +599,6 @@ function buildSpotlightGeometry() {
     activeDimMaskGeoJSON = dimMask ? { type: 'FeatureCollection', features: [dimMask] } : EMPTY_FC;
 
     activeShadowBase = merged;
-    rebuildShadowGeometry();
 }
 
 export function applyHighlightLayers(map = mapRef) {
@@ -555,6 +685,9 @@ export function clearHighlightOverlay() {
     activeOutlineGeoJSON = null;
     activeShadowBase = null;
     activeShadowGeoJSON = EMPTY_FC;
+    clearTimeout(shadowTimer);
+    shadowJobId++;
+    shadowCoverage = null;
     hoveredKey = null;
 
     if (isPicking) {
@@ -628,6 +761,7 @@ function finishPickingMode(applyChanges = true) {
 
     snapshotBeforePick = null;
     applyHighlightLayers(mapRef);
+    scheduleShadowRebuild(0);
     notifyStatusChange();
 }
 
@@ -835,14 +969,9 @@ export function initHighlightOverlay(map) {
     mapRef = map;
     ensureHighlightUI();
 
-    // Rebuild the shadow after zooming so it stays a constant size on screen
-    map.on('zoomend', () => {
-        if (isPicking || !activeShadowBase) return;
-        clearTimeout(shadowZoomTimer);
-        shadowZoomTimer = setTimeout(() => {
-            rebuildShadowGeometry();
-            const src = mapRef.getSource('highlight-shadow-src');
-            if (src) src.setData(activeShadowGeoJSON);
-        }, 150);
+    // Rebuild the shadow after panning/zooming (only if the view left the area it was built for)
+    map.on('moveend', () => {
+        if (isPicking || !activeShadowBase || viewStillCovered()) return;
+        scheduleShadowRebuild();
     });
 }
