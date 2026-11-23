@@ -439,8 +439,8 @@ function buildSpotlightGeometry() {
 /* =========================================================================
    DROP SHADOW (overlay canvas, clipped so it never touches the highlight)
 
-   Works on the flat map (fast Mercator math) and on the 3D globe (a perspective-sphere
-   model that is fitted to the map's own projection every time the camera changes).
+   Works on the flat map (fast Mercator math, with perspective 3D projection when tilted)
+   and on the 3D globe (perspective-sphere model, with fallback to camera projection).
    ========================================================================= */
 
 function lngToMercX(lng) {
@@ -450,6 +450,15 @@ function lngToMercX(lng) {
 function latToMercY(lat) {
     const c = Math.max(-85.0511, Math.min(85.0511, lat));
     return 0.5 - Math.log(Math.tan(Math.PI / 4 + (c * Math.PI) / 360)) / (2 * Math.PI);
+}
+
+function mercToLng(x) {
+    return x * 360 - 180;
+}
+
+function mercToLat(y) {
+    const rad = 2 * Math.atan(Math.exp((0.5 - y) * 2 * Math.PI)) - Math.PI / 2;
+    return (rad * 180) / Math.PI;
 }
 
 function ensureShadowCanvas() {
@@ -463,7 +472,7 @@ function ensureShadowCanvas() {
 }
 
 // Converts a ring of [lng, lat] to Mercator x,y. Long straight edges are split into short pieces so
-// they still follow the curve of the globe.
+// they still follow the curve of the globe or perspective pitch.
 function densifyRing(ring) {
     const out = [];
     let px = 0;
@@ -519,7 +528,7 @@ function rebuildShadowShapes() {
     drawShadow(true);
 }
 
-/* ---------- flat map (Mercator) ---------- */
+/* ---------- flat map (Mercator - untilted fast path) ---------- */
 
 function makeFlatView(cw, ch, center, bearing, zoom) {
     const rad = bearing * RAD;
@@ -540,8 +549,9 @@ function flatPoint(v, mx, my) {
     return [v.hw + dx * v.cos + dy * v.sin, v.hh - dx * v.sin + dy * v.cos];
 }
 
-// True if the map currently draws like a flat Mercator map (checked against the map's own unproject)
+// True if the map currently draws like an untilted flat Mercator map
 function isFlatProjection(map, view, cw, ch) {
+    if (map.getPitch() >= 0.01) return false;
     const probes = [[0.3, 0.3], [0.7, 0.35], [0.5, 0.75]];
     for (const [fx, fy] of probes) {
         try {
@@ -561,7 +571,6 @@ function isFlatProjection(map, view, cw, ch) {
 function buildFlatPaths(map, view, cw, ch) {
     const { worldSize, cx, cy, cos, sin, hw, hh } = view;
 
-    // Only shapes near the screen are drawn (padding covers the shadow's reach)
     const reach = (Math.hypot(cw, ch) / 2 + 60) / worldSize;
     const offsets = (typeof map.getRenderWorldCopies === 'function' ? map.getRenderWorldCopies() : true) ? [-1, 0, 1] : [0];
 
@@ -579,7 +588,7 @@ function buildFlatPaths(map, view, cw, ch) {
                 path.moveTo(x, y);
                 started = true;
             } else {
-                if (Math.abs(x - lastX) < 0.5 && Math.abs(y - lastY) < 0.5) continue; // skip sub-pixel points
+                if (Math.abs(x - lastX) < 0.5 && Math.abs(y - lastY) < 0.5) continue;
                 path.lineTo(x, y);
             }
             lastX = x;
@@ -599,7 +608,79 @@ function buildFlatPaths(map, view, cw, ch) {
     return { fill: path, stroke: path };
 }
 
-/* ---------- 3D globe ---------- */
+/* ---------- 🌟 3D perspective projection (for tilted maps & dynamic camera views) ---------- */
+
+function buildProjectedPaths(map, cw, ch) {
+    const fill = new Path2D();
+    const stroke = new Path2D();
+
+    const isGlobe = (map.getProjection ? map.getProjection()?.type === 'globe' : false);
+    const offsets = (!isGlobe && (typeof map.getRenderWorldCopies === 'function' ? map.getRenderWorldCopies() : true))
+        ? [-1, 0, 1]
+        : [0];
+
+    const pad = 140;
+
+    for (const shape of shadowShapes) {
+        for (const off of offsets) {
+            for (const ring of shape.rings) {
+                let started = false;
+                let lastX = 0;
+                let lastY = 0;
+                let firstX = 0;
+                let firstY = 0;
+                let anyVisible = false;
+
+                for (let i = 0; i < ring.length; i += 2) {
+                    const mx = ring[i] + off;
+                    const my = ring[i + 1];
+
+                    const lng = mercToLng(mx);
+                    const lat = mercToLat(my);
+
+                    let pt;
+                    try {
+                        pt = map.project([lng, lat]);
+                    } catch (e) {
+                        continue;
+                    }
+
+                    if (!pt || !isFinite(pt.x) || !isFinite(pt.y)) continue;
+
+                    const x = pt.x;
+                    const y = pt.y;
+
+                    if (x >= -pad && x <= cw + pad && y >= -pad && y <= ch + pad) {
+                        anyVisible = true;
+                    }
+
+                    if (!started) {
+                        fill.moveTo(x, y);
+                        stroke.moveTo(x, y);
+                        firstX = x;
+                        firstY = y;
+                        started = true;
+                    } else {
+                        if (Math.abs(x - lastX) < 0.5 && Math.abs(y - lastY) < 0.5) continue;
+                        fill.lineTo(x, y);
+                        stroke.lineTo(x, y);
+                    }
+                    lastX = x;
+                    lastY = y;
+                }
+
+                if (started && anyVisible) {
+                    fill.closePath();
+                    stroke.lineTo(firstX, firstY);
+                }
+            }
+        }
+    }
+
+    return { fill, stroke };
+}
+
+/* ---------- 3D globe (untilted fast path) ---------- */
 
 function vecMix(a, b, theta) {
     const ct = Math.cos(theta);
@@ -621,10 +702,6 @@ function projectWithModel(m, v) {
     return [m.px + pr * k, m.py - pu * k];
 }
 
-// The globe is a sphere seen by a perspective camera looking straight down at the map center:
-//   screen = center + f * (p·right, -p·up) / (s - p·centerVector)
-// f (focal length) and s (camera distance / globe radius) are fitted from a few of the map's own project() calls.
-// 1/s is also where the horizon is.
 function fitGlobeModel(map, p0, c, r, u) {
     for (let th2 = 1.0, tries = 0; tries < 9; tries++, th2 *= 0.72) {
         const thA = th2 * 0.5;
@@ -634,7 +711,6 @@ function fitGlobeModel(map, p0, c, r, u) {
         const A = vecToScreen(map, vecMix(c, r, thA)).x - p0.x;
         const M = vecToScreen(map, vecMix(c, r, thM)).x - p0.x;
         const B = vecToScreen(map, vecMix(c, r, thB)).x - p0.x;
-        // each sample must be farther out than the last, otherwise it is past the horizon: use smaller angles
         if (!(A > 0.5 && M > A + 0.2 && B > M + 0.2)) continue;
 
         const sa = Math.sin(thA);
@@ -657,7 +733,6 @@ function fitGlobeModel(map, p0, c, r, u) {
             py: p0.y
         };
 
-        // Check the fit on directions it was not fitted on
         const diag = [(r[0] + u[0]) * Math.SQRT1_2, (r[1] + u[1]) * Math.SQRT1_2, (r[2] + u[2]) * Math.SQRT1_2];
         const checks = [
             vecMix(c, r, thM),
@@ -681,31 +756,30 @@ function fitGlobeModel(map, p0, c, r, u) {
 }
 
 function buildGlobeModel(map, center, bearingDeg) {
+    if (map.getPitch() >= 0.01) return null;
+
     const lam = center.lng * RAD;
     const phi = Math.max(-89.9, Math.min(89.9, center.lat)) * RAD;
     const cl = Math.cos(phi);
     const sl = Math.sin(phi);
 
-    const c = [cl * Math.cos(lam), cl * Math.sin(lam), sl];                 // center of the view, as a point on the unit sphere
-    const e = [-Math.sin(lam), Math.cos(lam), 0];                           // east
-    const n = [-sl * Math.cos(lam), -sl * Math.sin(lam), cl];               // north
+    const c = [cl * Math.cos(lam), cl * Math.sin(lam), sl];
+    const e = [-Math.sin(lam), Math.cos(lam), 0];
+    const n = [-sl * Math.cos(lam), -sl * Math.sin(lam), cl];
     const p0 = map.project(center);
 
-    // try both rotation directions so we don't depend on the library's bearing convention
     for (const sign of [1, -1]) {
         const b = sign * bearingDeg * RAD;
         const cb = Math.cos(b);
         const sb = Math.sin(b);
-        const r = [e[0] * cb - n[0] * sb, e[1] * cb - n[1] * sb, e[2] * cb - n[2] * sb]; // screen right
-        const u = [n[0] * cb + e[0] * sb, n[1] * cb + e[1] * sb, n[2] * cb + e[2] * sb]; // screen up
+        const r = [e[0] * cb - n[0] * sb, e[1] * cb - n[1] * sb, e[2] * cb - n[2] * sb];
+        const u = [n[0] * cb + e[0] * sb, n[1] * cb + e[1] * sb, n[2] * cb + e[2] * sb];
         const model = fitGlobeModel(map, p0, c, r, u);
         if (model) return model;
     }
     return null;
 }
 
-// Unit-sphere vectors for a shape (built the first time the globe is drawn), plus a bounding cap
-// used to skip shapes that are on the far side of the planet
 function ensureShapeXYZ(shape) {
     if (shape.xyz) return;
 
@@ -733,7 +807,7 @@ function ensureShapeXYZ(shape) {
     }
     const len = Math.hypot(mx, my, mz);
     if (len < 0.2 * n) {
-        shape.cap = null; // wraps around the planet, always draw
+        shape.cap = null;
         return;
     }
     const ax = mx / len, ay = my / len, az = mz / len;
@@ -767,7 +841,6 @@ function addGlobeRing(fill, stroke, ring, m) {
             x = m.px + pr * k;
             y = m.py - pu * k;
         } else {
-            // Far side of the planet: slide the point onto the edge (horizon) of the visible disk
             const len = Math.hypot(pr, pu);
             if (len < 1e-9) continue;
             const k = (m.f * m.limbSin) / ((m.s - m.h) * len);
@@ -783,7 +856,7 @@ function addGlobeRing(fill, stroke, ring, m) {
             firstVis = vis;
             if (vis) stroke.moveTo(x, y);
         } else {
-            if (vis === lastVis && Math.abs(x - lastX) < 0.5 && Math.abs(y - lastY) < 0.5) continue; // skip sub-pixel points
+            if (vis === lastVis && Math.abs(x - lastX) < 0.5 && Math.abs(y - lastY) < 0.5) continue;
             fill.lineTo(x, y);
             if (vis) {
                 if (lastVis) stroke.lineTo(x, y);
@@ -803,7 +876,7 @@ function addGlobeRing(fill, stroke, ring, m) {
 
 function buildGlobePaths(model) {
     const fill = new Path2D();
-    const stroke = new Path2D(); // only the part of the outline that is actually on the visible side
+    const stroke = new Path2D();
     const thetaH = Math.acos(model.h);
 
     for (const shape of shadowShapes) {
@@ -830,7 +903,8 @@ function drawShadow(force = false) {
     const cw = glCanvas.clientWidth;
     const ch = glCanvas.clientHeight;
 
-    if (isPicking || shadowShapes.length === 0 || cw <= 0 || ch <= 0 || map.getPitch() >= 0.01) {
+    // 🌟 Pitch no longer blocks drawing!
+    if (isPicking || shadowShapes.length === 0 || cw <= 0 || ch <= 0) {
         if (shadowCanvas.style.display !== 'none') shadowCanvas.style.display = 'none';
         shadowRenderKey = '';
         return;
@@ -840,23 +914,39 @@ function drawShadow(force = false) {
     const center = map.getCenter();
     const zoom = map.getZoom();
     const bearing = map.getBearing();
-    // the probe point changes if the projection changes (flat <-> globe) even when the camera doesn't
+    const pitch = map.getPitch();
+
     const probe = map.project([center.lng + 1, center.lat]);
-    const key = [cw, ch, dpr, center.lng, center.lat, zoom, bearing, probe.x.toFixed(1), probe.y.toFixed(1)].join('|');
+    const key = [
+        cw, ch, dpr,
+        center.lng.toFixed(4), center.lat.toFixed(4),
+        zoom.toFixed(2), bearing.toFixed(2), pitch.toFixed(2),
+        probe.x.toFixed(1), probe.y.toFixed(1)
+    ].join('|');
+
     if (!force && key === shadowRenderKey) return;
     shadowRenderKey = key;
 
     let paths = null;
-    const view = makeFlatView(cw, ch, center, bearing, zoom);
-    if (isFlatProjection(map, view, cw, ch)) {
-        paths = buildFlatPaths(map, view, cw, ch);
-    } else {
-        const model = buildGlobeModel(map, center, bearing);
-        if (model) paths = buildGlobePaths(model);
+    const isUntilted = pitch < 0.01;
+
+    // Fast-path analytical calculations when untilted
+    if (isUntilted) {
+        const view = makeFlatView(cw, ch, center, bearing, zoom);
+        if (isFlatProjection(map, view, cw, ch)) {
+            paths = buildFlatPaths(map, view, cw, ch);
+        } else {
+            const model = buildGlobeModel(map, center, bearing);
+            if (model) paths = buildGlobePaths(model);
+        }
+    }
+
+    // 🌟 3D perspective projection when tilted / pitched
+    if (!paths) {
+        paths = buildProjectedPaths(map, cw, ch);
     }
 
     if (!paths) {
-        // Unknown projection (or tilted/transitioning): hide the shadow rather than draw it in the wrong place
         if (shadowCanvas.style.display !== 'none') shadowCanvas.style.display = 'none';
         return;
     }
@@ -876,14 +966,14 @@ function drawShadow(force = false) {
     ctx.clearRect(0, 0, pw, ph);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Clip = everything EXCEPT the highlighted area (even-odd: big rectangle minus the shapes)
+    // Clip = everything EXCEPT the highlighted area
     ctx.save();
     const clipPath = new Path2D();
     clipPath.rect(-100, -100, cw + 200, ch + 200);
     clipPath.addPath(paths.fill);
     ctx.clip(clipPath, 'evenodd');
 
-    // The shape casts the shadow; the shape itself is clipped away, so only the shadow outside remains
+    // Soft drop shadow outside the cutout
     ctx.shadowColor = SHADOW_COLOR;
     ctx.shadowBlur = SHADOW_BLUR_PX * dpr;
     ctx.shadowOffsetX = SHADOW_OFFSET_PX[0] * dpr;
@@ -892,8 +982,7 @@ function drawShadow(force = false) {
     ctx.fill(paths.fill, 'evenodd');
     ctx.restore();
 
-    // Redraw the crisp white border on top (same style as the 'highlight-border' layer)
-    // so the shadow can't dim the outer half of it
+    // Redraw the crisp white border on top
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
     ctx.lineWidth = 1.75;
     ctx.lineJoin = 'round';
@@ -932,8 +1021,6 @@ export function applyHighlightLayers(map = mapRef) {
             'fill-opacity': 0.65
         }
     });
-
-    // (The drop shadow is drawn on the overlay canvas, see drawShadow)
 
     // Subtle outer glow
     map.addLayer({
@@ -1014,7 +1101,7 @@ async function startPickingMode(categories) {
     bindPickingMapListeners();
     setEditorChromeHiddenForPicking(true);
     mountPickingLayers();
-    drawShadow(); // hides the shadow while picking
+    drawShadow();
     showPickingBarUI();
     updatePickingBarUI();
     notifyStatusChange();
