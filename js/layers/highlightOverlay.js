@@ -525,21 +525,21 @@ export function applyHighlightLayers(map = mapRef) {
         }
     });
 
-    // 🌟 Physical cast shadow: ONLY on the Southeast exterior ground, NEVER inside the highlighted region!
+    // 🌟 100% Outset Depth Shadow: Pushed strictly OUTSIDE onto the ground, ZERO shadow inside the highlighted region!
     map.addLayer({
         id: 'highlight-shadow',
         type: 'line',
-        source: 'highlight-shadow-src',
+        source: 'highlight-outline-src',
         layout: {
             'line-cap': 'round',
             'line-join': 'round'
         },
         paint: {
             'line-color': '#000000',
-            'line-width': 10,
-            'line-blur': 6,
-            'line-opacity': 0.8,
-            'line-translate': [4, 5]
+            'line-width': 12,
+            'line-blur': 7,
+            'line-opacity': 0.85,
+            'line-offset': -6
         }
     });
 
