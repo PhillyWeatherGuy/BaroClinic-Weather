@@ -2307,3 +2307,18 @@ body.light-mode .map-card {
 .highlight-bar-done-btn:hover {
     background: #1d4ed8;
 }
+
+.basemap-dropdown-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#highlight-dropdown-body .basemap-slider-label {
+    min-width: 82px;
+}
+
+#btn-open-highlight {
+    justify-content: center;
+    text-align: center;
+}
