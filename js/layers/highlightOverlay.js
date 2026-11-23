@@ -46,6 +46,11 @@ const WORLD_FC = {
     features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [WORLD_RING] } }]
 };
 
+// Drop shadow settings (shadow is built as geometry that can only exist OUTSIDE the highlight)
+const SHADOW_PX = [4, 5];          // direction/size of the shadow in screen pixels (right, down)
+const SHADOW_STEPS = 8;            // stacked slivers that make the soft falloff
+const SHADOW_STEP_OPACITY = 0.11;  // 8 stacked steps ≈ 0.6 at the edge
+
 const regionCache = {};
 const selectedFeaturesMap = new Map();
 
@@ -59,7 +64,9 @@ let statusChangeCallback = null;
 
 let activeDimMaskGeoJSON = null;
 let activeOutlineGeoJSON = null;
-let activeShadowGeoJSON = null;
+let activeShadowBase = null;
+let activeShadowGeoJSON = EMPTY_FC;
+let shadowZoomTimer = null;
 
 let pickingListenersBound = false;
 
@@ -204,6 +211,7 @@ function getActivePickingFeatures() {
 function updatePickingSources(updateBase = false) {
     if (!mapRef || !isPicking) return;
 
+    // 🌟 ONLY re-parse the giant world boundary dataset when switching categories, NEVER on clicks!
     if (updateBase) {
         const baseSrc = mapRef.getSource('highlight-pick-base-src');
         if (baseSrc) {
@@ -338,7 +346,7 @@ function handlePickClick(e) {
         selectedFeaturesMap.set(key, fullFeature);
     }
 
-    updatePickingSources(false);
+    updatePickingSources();
 }
 
 function bindPickingMapListeners() {
@@ -364,82 +372,63 @@ function setEditorChromeHiddenForPicking(hidden) {
     }
 }
 
-/**
- * 🌟 Extracts ONLY outer perimeter segments facing Southeast to cast a physical shadow onto the ground.
- * Prevents any shadow from bleeding into the West or North sides of the highlighted area!
- */
-function buildShadowCastingLines(featureCollection) {
-    if (!featureCollection || !featureCollection.features || featureCollection.features.length === 0) {
-        return EMPTY_FC;
-    }
-
+function unionFeatures(features) {
     const turf = window.turf;
-    if (!turf) return EMPTY_FC;
+    if (features.length === 1) return features[0];
+    try {
+        return turf.union(turf.featureCollection(features)) || features[0];
+    } catch (err) {
+        let merged = features[0];
+        for (let i = 1; i < features.length; i++) {
+            try {
+                const next = turf.union(turf.featureCollection([merged, features[i]]));
+                if (next) merged = next;
+            } catch (e) {}
+        }
+        return merged;
+    }
+}
 
-    const lines = [];
+function rebuildShadowGeometry() {
+    activeShadowGeoJSON = EMPTY_FC;
+    const turf = window.turf;
+    if (!turf || !activeShadowBase || !mapRef) return;
 
-    featureCollection.features.forEach((feat) => {
-        if (!feat || !feat.geometry) return;
-        const standardized = turf.rewind(feat, { reverse: false });
-        const geom = standardized.geometry;
-        const polyRings = geom.type === 'Polygon' ? [geom.coordinates] : (geom.type === 'MultiPolygon' ? geom.coordinates : []);
+    // Convert the pixel offset to meters at the current zoom so the shadow stays a constant screen size
+    const lat = mapRef.getCenter().lat;
+    const metersPerPx = 78271.517 * Math.cos(lat * Math.PI / 180) / Math.pow(2, mapRef.getZoom());
+    const [dx, dy] = SHADOW_PX;
+    const totalMeters = Math.hypot(dx, dy) * metersPerPx;
+    const bearing = 90 + Math.atan2(dy, dx) * 180 / Math.PI; // right+down => ~141° (SE)
 
-        polyRings.forEach((rings) => {
-            if (!rings || rings.length === 0) return;
-            // Exterior ring only (rings[0])
-            const coords = rings[0];
-            if (!coords || coords.length < 3) return;
-
-            let currentLine = [];
-
-            for (let i = 0; i < coords.length - 1; i++) {
-                const p1 = coords[i];
-                const p2 = coords[i + 1];
-
-                const midLatRad = ((p1[1] + p2[1]) / 2) * (Math.PI / 180);
-                const cosLat = Math.cos(midLatRad);
-
-                const dLng = (p2[0] - p1[0]) * cosLat;
-                const dLat = p2[1] - p1[1];
-
-                // Outward normal dot product with Southeast shadow vector [1.0, 1.2]
-                const dot = (dLat * 1.0) + (dLng * 1.2);
-
-                if (dot > 0) {
-                    if (currentLine.length === 0) {
-                        currentLine.push(p1);
-                    }
-                    currentLine.push(p2);
-                } else {
-                    if (currentLine.length >= 2) {
-                        lines.push(turf.lineString(currentLine));
-                    }
-                    currentLine = [];
-                }
-            }
-
-            if (currentLine.length >= 2) {
-                lines.push(turf.lineString(currentLine));
-            }
-        });
-    });
-
-    return turf.featureCollection(lines);
+    const pieces = [];
+    for (let i = 1; i <= SHADOW_STEPS; i++) {
+        try {
+            const shifted = turf.transformTranslate(
+                activeShadowBase, totalMeters * i / SHADOW_STEPS, bearing, { units: 'meters' }
+            );
+            // shifted minus the highlight => can only exist OUTSIDE the highlight
+            const piece = turf.difference(turf.featureCollection([shifted, activeShadowBase]));
+            if (piece) pieces.push(piece);
+        } catch (e) {}
+    }
+    activeShadowGeoJSON = { type: 'FeatureCollection', features: pieces };
 }
 
 function buildSpotlightGeometry() {
     const selected = Array.from(selectedFeaturesMap.values());
+    activeShadowBase = null;
+    activeShadowGeoJSON = EMPTY_FC;
+
     if (selected.length === 0) {
         activeDimMaskGeoJSON = null;
         activeOutlineGeoJSON = null;
-        activeShadowGeoJSON = null;
         return;
     }
 
     if (typeof window.turf === 'undefined') {
         activeOutlineGeoJSON = { type: 'FeatureCollection', features: selected };
         activeDimMaskGeoJSON = EMPTY_FC;
-        activeShadowGeoJSON = EMPTY_FC;
         return;
     }
 
@@ -452,33 +441,21 @@ function buildSpotlightGeometry() {
     const selectedLandCount = selected.filter(f => f.properties._hlCategory === 'land').length;
     const selectedWaterCount = selected.filter(f => f.properties._hlCategory === 'water').length;
 
-    if (landCount > 0 && selectedLandCount === landCount && selected.length === landCount && regionCache.water) {
-        activeOutlineGeoJSON = regionCache.land.fc;
-        activeDimMaskGeoJSON = regionCache.water.fc;
-        activeShadowGeoJSON = buildShadowCastingLines(activeOutlineGeoJSON);
-        return;
-    }
-    if (waterCount > 0 && selectedWaterCount === waterCount && selected.length === waterCount && regionCache.land) {
-        activeOutlineGeoJSON = regionCache.water.fc;
-        activeDimMaskGeoJSON = regionCache.land.fc;
-        activeShadowGeoJSON = buildShadowCastingLines(activeOutlineGeoJSON);
+    const allLand = landCount > 0 && selectedLandCount === landCount && selected.length === landCount && regionCache.water;
+    const allWater = waterCount > 0 && selectedWaterCount === waterCount && selected.length === waterCount && regionCache.land;
+
+    if (allLand || allWater) {
+        activeOutlineGeoJSON = allLand ? regionCache.land.fc : regionCache.water.fc;
+        activeDimMaskGeoJSON = allLand ? regionCache.water.fc : regionCache.land.fc;
+        // Unioning a huge number of polygons is expensive, so cap it
+        if (selected.length <= 400) {
+            activeShadowBase = unionFeatures(selected);
+            rebuildShadowGeometry();
+        }
         return;
     }
 
-    let merged = selected[0];
-    if (selected.length > 1) {
-        try {
-            merged = turf.union(turf.featureCollection(selected)) || selected[0];
-        } catch (err) {
-            merged = selected[0];
-            for (let i = 1; i < selected.length; i++) {
-                try {
-                    const next = turf.union(turf.featureCollection([merged, selected[i]]));
-                    if (next) merged = next;
-                } catch (e) {}
-            }
-        }
-    }
+    const merged = unionFeatures(selected);
 
     let dimMask = null;
     try {
@@ -489,7 +466,9 @@ function buildSpotlightGeometry() {
 
     activeOutlineGeoJSON = { type: 'FeatureCollection', features: [merged] };
     activeDimMaskGeoJSON = dimMask ? { type: 'FeatureCollection', features: [dimMask] } : EMPTY_FC;
-    activeShadowGeoJSON = buildShadowCastingLines(activeOutlineGeoJSON);
+
+    activeShadowBase = merged;
+    rebuildShadowGeometry();
 }
 
 export function applyHighlightLayers(map = mapRef) {
@@ -512,7 +491,7 @@ export function applyHighlightLayers(map = mapRef) {
 
     map.addSource('highlight-dim-src', { type: 'geojson', data: activeDimMaskGeoJSON });
     map.addSource('highlight-outline-src', { type: 'geojson', data: activeOutlineGeoJSON });
-    map.addSource('highlight-shadow-src', { type: 'geojson', data: activeShadowGeoJSON || EMPTY_FC });
+    map.addSource('highlight-shadow-src', { type: 'geojson', data: activeShadowGeoJSON });
 
     // Dim everything outside the selected regions
     map.addLayer({
@@ -525,21 +504,15 @@ export function applyHighlightLayers(map = mapRef) {
         }
     });
 
-    // 🌟 100% Outset Depth Shadow: Pushed strictly OUTSIDE onto the ground, ZERO shadow inside the highlighted region!
+    // Drop shadow: geometry that exists only outside the highlight
     map.addLayer({
         id: 'highlight-shadow',
-        type: 'line',
-        source: 'highlight-outline-src',
-        layout: {
-            'line-cap': 'round',
-            'line-join': 'round'
-        },
+        type: 'fill',
+        source: 'highlight-shadow-src',
         paint: {
-            'line-color': '#000000',
-            'line-width': 12,
-            'line-blur': 7,
-            'line-opacity': 0.85,
-            'line-offset': -6
+            'fill-color': '#000000',
+            'fill-opacity': SHADOW_STEP_OPACITY,
+            'fill-antialias': false
         }
     });
 
@@ -580,7 +553,8 @@ export function clearHighlightOverlay() {
     selectedFeaturesMap.clear();
     activeDimMaskGeoJSON = null;
     activeOutlineGeoJSON = null;
-    activeShadowGeoJSON = null;
+    activeShadowBase = null;
+    activeShadowGeoJSON = EMPTY_FC;
     hoveredKey = null;
 
     if (isPicking) {
@@ -599,6 +573,7 @@ async function startPickingMode(categories) {
         features: Array.from(selectedFeaturesMap.entries()),
         dimMask: activeDimMaskGeoJSON,
         outline: activeOutlineGeoJSON,
+        shadowBase: activeShadowBase,
         shadow: activeShadowGeoJSON
     };
 
@@ -645,6 +620,7 @@ function finishPickingMode(applyChanges = true) {
         snapshotBeforePick.features.forEach(([k, v]) => selectedFeaturesMap.set(k, v));
         activeDimMaskGeoJSON = snapshotBeforePick.dimMask;
         activeOutlineGeoJSON = snapshotBeforePick.outline;
+        activeShadowBase = snapshotBeforePick.shadowBase;
         activeShadowGeoJSON = snapshotBeforePick.shadow;
     } else if (applyChanges) {
         buildSpotlightGeometry();
@@ -767,12 +743,12 @@ function ensureHighlightUI() {
             regionCache[currentPickTarget].fc.features.forEach((feat) => {
                 selectedFeaturesMap.set(feat.properties._hlKey, feat);
             });
-            updatePickingSources(false);
+            updatePickingSources();
         });
 
         document.getElementById('btn-highlight-clear-pick')?.addEventListener('click', () => {
             selectedFeaturesMap.clear();
-            updatePickingSources(false);
+            updatePickingSources();
         });
 
         document.getElementById('btn-highlight-cancel')?.addEventListener('click', () => {
@@ -858,4 +834,15 @@ export function openHighlightTypeModal(map = mapRef) {
 export function initHighlightOverlay(map) {
     mapRef = map;
     ensureHighlightUI();
+
+    // Rebuild the shadow after zooming so it stays a constant size on screen
+    map.on('zoomend', () => {
+        if (isPicking || !activeShadowBase) return;
+        clearTimeout(shadowZoomTimer);
+        shadowZoomTimer = setTimeout(() => {
+            rebuildShadowGeometry();
+            const src = mapRef.getSource('highlight-shadow-src');
+            if (src) src.setData(activeShadowGeoJSON);
+        }, 150);
+    });
 }
