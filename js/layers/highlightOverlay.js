@@ -46,14 +46,19 @@ const WORLD_FC = {
     features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [WORLD_RING] } }]
 };
 
-// Drop shadow settings. The shadow is drawn on a small overlay canvas (Canvas 2D can clip natively),
-// and it is clipped so it can NEVER be drawn over the highlighted area.
-const SHADOW_OFFSET_PX = [4, 5];            // direction/size of the shadow (right, down)
-const SHADOW_BLUR_PX = 10;                  // softness
-const SHADOW_COLOR = 'rgba(0, 0, 0, 0.8)';  // strength
+const DEFAULT_HIGHLIGHT_STYLE = {
+    shadowStrength: 1.0,
+    dimOpacity: 0.65,
+    borderColor: '#ffffff',
+    borderWidth: 1.8
+};
+
+// Base drop shadow parameters (scaled by highlightStyle.shadowStrength)
+const SHADOW_OFFSET_PX = [4, 5];
+const SHADOW_BLUR_PX = 10;
 
 const RAD = Math.PI / 180;
-const DENSIFY_STEP = 0.0015; // long straight edges are split into pieces this long (Mercator units, ~0.5° of longitude)
+const DENSIFY_STEP = 0.0015;
 
 const regionCache = {};
 const selectedFeaturesMap = new Map();
@@ -68,12 +73,13 @@ let statusChangeCallback = null;
 
 let activeDimMaskGeoJSON = null;
 let activeOutlineGeoJSON = null;
+let highlightStyle = { ...DEFAULT_HIGHLIGHT_STYLE };
 
 let pickingListenersBound = false;
 
 let shadowCanvas = null;
 let shadowCtx = null;
-let shadowShapes = [];      // [{ bbox, rings: [Float64Array xy], xyz: null, cap: null }] in Mercator 0..1 units
+let shadowShapes = [];
 let shadowRenderKey = '';
 
 const PICK_LAYER_IDS = [
@@ -100,6 +106,16 @@ const SPOTLIGHT_SOURCE_IDS = [
     'highlight-outline-src'
 ];
 
+function hexToRgba(hex, alpha = 1) {
+    if (!hex || typeof hex !== 'string') return `rgba(255, 255, 255, ${alpha})`;
+    const clean = hex.replace('#', '').trim();
+    if (clean.length !== 6) return `rgba(255, 255, 255, ${alpha})`;
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export function setHighlightStatusCallback(cb) {
     statusChangeCallback = cb;
 }
@@ -108,11 +124,23 @@ export function isHighlightPickingActive() {
     return isPicking;
 }
 
+export function getHighlightStyle() {
+    return { ...highlightStyle };
+}
+
+export function isHighlightStyleModified() {
+    return Math.abs(highlightStyle.shadowStrength - DEFAULT_HIGHLIGHT_STYLE.shadowStrength) > 0.01 ||
+           Math.abs(highlightStyle.dimOpacity - DEFAULT_HIGHLIGHT_STYLE.dimOpacity) > 0.005 ||
+           (highlightStyle.borderColor || '').toLowerCase() !== DEFAULT_HIGHLIGHT_STYLE.borderColor ||
+           Math.abs(highlightStyle.borderWidth - DEFAULT_HIGHLIGHT_STYLE.borderWidth) > 0.05;
+}
+
 export function getHighlightStatus() {
     return {
         isActive: Boolean(activeOutlineGeoJSON && activeOutlineGeoJSON.features.length > 0),
         count: selectedFeaturesMap.size,
-        isPicking
+        isPicking,
+        styleModified: isHighlightStyleModified()
     };
 }
 
@@ -120,6 +148,42 @@ function notifyStatusChange() {
     if (typeof statusChangeCallback === 'function') {
         statusChangeCallback(getHighlightStatus());
     }
+}
+
+export function setHighlightStyle(partial = {}) {
+    highlightStyle = {
+        ...highlightStyle,
+        ...partial
+    };
+
+    if (mapRef && mapRef.getStyle() && !isPicking) {
+        if (mapRef.getLayer('highlight-dim-mask')) {
+            mapRef.setPaintProperty('highlight-dim-mask', 'fill-opacity', highlightStyle.dimOpacity);
+        }
+
+        const showBorder = highlightStyle.borderWidth > 0.01;
+        if (mapRef.getLayer('highlight-border')) {
+            mapRef.setLayoutProperty('highlight-border', 'visibility', showBorder ? 'visible' : 'none');
+            if (showBorder) {
+                mapRef.setPaintProperty('highlight-border', 'line-color', highlightStyle.borderColor);
+                mapRef.setPaintProperty('highlight-border', 'line-width', highlightStyle.borderWidth);
+            }
+        }
+        if (mapRef.getLayer('highlight-rim-glow')) {
+            mapRef.setLayoutProperty('highlight-rim-glow', 'visibility', showBorder ? 'visible' : 'none');
+            if (showBorder) {
+                mapRef.setPaintProperty('highlight-rim-glow', 'line-color', hexToRgba(highlightStyle.borderColor, 0.45));
+                mapRef.setPaintProperty('highlight-rim-glow', 'line-width', Math.max(2, highlightStyle.borderWidth * 2.2));
+            }
+        }
+    }
+
+    drawShadow(true);
+    notifyStatusChange();
+}
+
+export function resetHighlightStyle() {
+    setHighlightStyle({ ...DEFAULT_HIGHLIGHT_STYLE });
 }
 
 function getFeatureDisplayName(props = {}, category) {
@@ -438,9 +502,6 @@ function buildSpotlightGeometry() {
 
 /* =========================================================================
    DROP SHADOW (overlay canvas, clipped so it never touches the highlight)
-
-   Works on the flat map (fast Mercator math, with perspective 3D projection when tilted)
-   and on the 3D globe (perspective-sphere model, with fallback to camera projection).
    ========================================================================= */
 
 function lngToMercX(lng) {
@@ -471,8 +532,6 @@ function ensureShadowCanvas() {
     mapRef.on('render', () => drawShadow());
 }
 
-// Converts a ring of [lng, lat] to Mercator x,y. Long straight edges are split into short pieces so
-// they still follow the curve of the globe or perspective pitch.
 function densifyRing(ring) {
     const out = [];
     let px = 0;
@@ -497,7 +556,6 @@ function densifyRing(ring) {
     return Float64Array.from(out);
 }
 
-// Converts the highlighted shapes once, so redrawing is cheap
 function rebuildShadowShapes() {
     shadowShapes = [];
     shadowRenderKey = '';
@@ -549,7 +607,6 @@ function flatPoint(v, mx, my) {
     return [v.hw + dx * v.cos + dy * v.sin, v.hh - dx * v.sin + dy * v.cos];
 }
 
-// True if the map currently draws like an untilted flat Mercator map
 function isFlatProjection(map, view, cw, ch) {
     if (map.getPitch() >= 0.01) return false;
     const probes = [[0.3, 0.3], [0.7, 0.35], [0.5, 0.75]];
@@ -608,7 +665,7 @@ function buildFlatPaths(map, view, cw, ch) {
     return { fill: path, stroke: path };
 }
 
-/* ---------- 🌟 3D perspective projection (for tilted maps & dynamic camera views) ---------- */
+/* ---------- 3D perspective projection (tilted maps) ---------- */
 
 function buildProjectedPaths(map, cw, ch) {
     const fill = new Path2D();
@@ -903,8 +960,10 @@ function drawShadow(force = false) {
     const cw = glCanvas.clientWidth;
     const ch = glCanvas.clientHeight;
 
-    // 🌟 Pitch no longer blocks drawing!
-    if (isPicking || shadowShapes.length === 0 || cw <= 0 || ch <= 0) {
+    const hasShadow = highlightStyle.shadowStrength > 0.01;
+    const hasBorder = highlightStyle.borderWidth > 0.01;
+
+    if (isPicking || shadowShapes.length === 0 || cw <= 0 || ch <= 0 || (!hasShadow && !hasBorder)) {
         if (shadowCanvas.style.display !== 'none') shadowCanvas.style.display = 'none';
         shadowRenderKey = '';
         return;
@@ -921,7 +980,8 @@ function drawShadow(force = false) {
         cw, ch, dpr,
         center.lng.toFixed(4), center.lat.toFixed(4),
         zoom.toFixed(2), bearing.toFixed(2), pitch.toFixed(2),
-        probe.x.toFixed(1), probe.y.toFixed(1)
+        probe.x.toFixed(1), probe.y.toFixed(1),
+        highlightStyle.shadowStrength, highlightStyle.borderColor, highlightStyle.borderWidth
     ].join('|');
 
     if (!force && key === shadowRenderKey) return;
@@ -930,7 +990,6 @@ function drawShadow(force = false) {
     let paths = null;
     const isUntilted = pitch < 0.01;
 
-    // Fast-path analytical calculations when untilted
     if (isUntilted) {
         const view = makeFlatView(cw, ch, center, bearing, zoom);
         if (isFlatProjection(map, view, cw, ch)) {
@@ -941,7 +1000,6 @@ function drawShadow(force = false) {
         }
     }
 
-    // 🌟 3D perspective projection when tilted / pitched
     if (!paths) {
         paths = buildProjectedPaths(map, cw, ch);
     }
@@ -967,27 +1025,33 @@ function drawShadow(force = false) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // Clip = everything EXCEPT the highlighted area
-    ctx.save();
-    const clipPath = new Path2D();
-    clipPath.rect(-100, -100, cw + 200, ch + 200);
-    clipPath.addPath(paths.fill);
-    ctx.clip(clipPath, 'evenodd');
+    if (hasShadow) {
+        const str = highlightStyle.shadowStrength;
+        const shadowAlpha = Math.min(0.95, 0.8 * Math.min(str, 1.25));
 
-    // Soft drop shadow outside the cutout
-    ctx.shadowColor = SHADOW_COLOR;
-    ctx.shadowBlur = SHADOW_BLUR_PX * dpr;
-    ctx.shadowOffsetX = SHADOW_OFFSET_PX[0] * dpr;
-    ctx.shadowOffsetY = SHADOW_OFFSET_PX[1] * dpr;
-    ctx.fillStyle = '#000000';
-    ctx.fill(paths.fill, 'evenodd');
-    ctx.restore();
+        ctx.save();
+        const clipPath = new Path2D();
+        clipPath.rect(-100, -100, cw + 200, ch + 200);
+        clipPath.addPath(paths.fill);
+        ctx.clip(clipPath, 'evenodd');
 
-    // Redraw the crisp white border on top
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-    ctx.lineWidth = 1.75;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.stroke(paths.stroke);
+        ctx.shadowColor = `rgba(0, 0, 0, ${shadowAlpha.toFixed(2)})`;
+        ctx.shadowBlur = SHADOW_BLUR_PX * str * dpr;
+        ctx.shadowOffsetX = SHADOW_OFFSET_PX[0] * str * dpr;
+        ctx.shadowOffsetY = SHADOW_OFFSET_PX[1] * str * dpr;
+        ctx.fillStyle = '#000000';
+        ctx.fill(paths.fill, 'evenodd');
+        ctx.restore();
+    }
+
+    // Redraw the crisp highlight border on top
+    if (hasBorder) {
+        ctx.strokeStyle = hexToRgba(highlightStyle.borderColor, 0.95);
+        ctx.lineWidth = highlightStyle.borderWidth;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke(paths.stroke);
+    }
 }
 
 export function applyHighlightLayers(map = mapRef) {
@@ -1018,9 +1082,11 @@ export function applyHighlightLayers(map = mapRef) {
         source: 'highlight-dim-src',
         paint: {
             'fill-color': '#020612',
-            'fill-opacity': 0.65
+            'fill-opacity': highlightStyle.dimOpacity
         }
     });
+
+    const showBorder = highlightStyle.borderWidth > 0.01;
 
     // Subtle outer glow
     map.addLayer({
@@ -1029,11 +1095,12 @@ export function applyHighlightLayers(map = mapRef) {
         source: 'highlight-outline-src',
         layout: {
             'line-cap': 'round',
-            'line-join': 'round'
+            'line-join': 'round',
+            'visibility': showBorder ? 'visible' : 'none'
         },
         paint: {
-            'line-color': 'rgba(255, 255, 255, 0.45)',
-            'line-width': 4,
+            'line-color': hexToRgba(highlightStyle.borderColor, 0.45),
+            'line-width': Math.max(2, highlightStyle.borderWidth * 2.2),
             'line-blur': 2.5
         }
     });
@@ -1045,11 +1112,12 @@ export function applyHighlightLayers(map = mapRef) {
         source: 'highlight-outline-src',
         layout: {
             'line-cap': 'round',
-            'line-join': 'round'
+            'line-join': 'round',
+            'visibility': showBorder ? 'visible' : 'none'
         },
         paint: {
-            'line-color': '#ffffff',
-            'line-width': 1.75,
+            'line-color': highlightStyle.borderColor,
+            'line-width': highlightStyle.borderWidth,
             'line-opacity': 0.95
         }
     });
