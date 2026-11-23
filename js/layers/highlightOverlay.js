@@ -46,13 +46,11 @@ const WORLD_FC = {
     features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [WORLD_RING] } }]
 };
 
-// Drop shadow settings (shadow is built as geometry that can only exist OUTSIDE the highlight)
-const SHADOW_PX = [4, 5];          // direction/size of the shadow in screen pixels (right, down)
-const SHADOW_STEPS = 6;            // stacked slivers that make the soft falloff
-const SHADOW_STEP_OPACITY = 0.14;  // 6 stacked steps ≈ 0.6 at the edge
-const SHADOW_SIMPLIFY_PX = 0.4;    // shape is simplified to this many screen px (hidden under the white border line)
-const SHADOW_VIEW_PAD = 0.75;      // shadow is only built for the viewport + this much padding on each side
-const SHADOW_DEBOUNCE_MS = 250;    // wait for pan/zoom to settle before rebuilding
+// Drop shadow settings. The shadow is drawn on a small overlay canvas (Canvas 2D can clip natively),
+// and it is clipped so it can NEVER be drawn over the highlighted area.
+const SHADOW_OFFSET_PX = [4, 5];            // direction/size of the shadow (right, down)
+const SHADOW_BLUR_PX = 10;                  // softness
+const SHADOW_COLOR = 'rgba(0, 0, 0, 0.8)';  // strength
 
 const regionCache = {};
 const selectedFeaturesMap = new Map();
@@ -67,13 +65,13 @@ let statusChangeCallback = null;
 
 let activeDimMaskGeoJSON = null;
 let activeOutlineGeoJSON = null;
-let activeShadowBase = null;
-let activeShadowGeoJSON = EMPTY_FC;
-let shadowTimer = null;
-let shadowJobId = 0;
-let shadowCoverage = null;
 
 let pickingListenersBound = false;
+
+let shadowCanvas = null;
+let shadowCtx = null;
+let shadowShapes = [];      // [{ bbox: [minX, minY, maxX, maxY], rings: [Float64Array] }] in Mercator 0..1 units
+let shadowRenderKey = '';
 
 const PICK_LAYER_IDS = [
     'highlight-pick-backdrop',
@@ -91,14 +89,12 @@ const PICK_SOURCE_IDS = [
 
 const SPOTLIGHT_LAYER_IDS = [
     'highlight-dim-mask',
-    'highlight-shadow',
     'highlight-rim-glow',
     'highlight-border'
 ];
 const SPOTLIGHT_SOURCE_IDS = [
     'highlight-dim-src',
-    'highlight-outline-src',
-    'highlight-shadow-src'
+    'highlight-outline-src'
 ];
 
 export function setHighlightStatusCallback(cb) {
@@ -377,183 +373,8 @@ function setEditorChromeHiddenForPicking(hidden) {
     }
 }
 
-function unionFeatures(features) {
-    const turf = window.turf;
-    if (features.length === 1) return features[0];
-    try {
-        return turf.union(turf.featureCollection(features)) || features[0];
-    } catch (err) {
-        let merged = features[0];
-        for (let i = 1; i < features.length; i++) {
-            try {
-                const next = turf.union(turf.featureCollection([merged, features[i]]));
-                if (next) merged = next;
-            } catch (e) {}
-        }
-        return merged;
-    }
-}
-
-const DEG = Math.PI / 180;
-const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-function latToMercY(lat) {
-    const c = Math.max(-85.0511, Math.min(85.0511, lat));
-    return Math.log(Math.tan(Math.PI / 4 + (c * DEG) / 2)) / DEG;
-}
-
-function mercYToLat(y) {
-    return (2 * Math.atan(Math.exp(y * DEG)) - Math.PI / 2) / DEG;
-}
-
-// Shift a polygon by a fixed number of SCREEN pixels. Done in Mercator space so the shadow
-// looks the same size at every latitude. (dyMercDeg > 0 moves it down the screen)
-function translateFeature(feature, dxDeg, dyMercDeg) {
-    const mapRing = (ring) => ring.map(([lon, lat]) => [lon + dxDeg, mercYToLat(latToMercY(lat) - dyMercDeg)]);
-    const g = feature.geometry;
-    const coordinates = g.type === 'Polygon'
-        ? g.coordinates.map(mapRing)
-        : g.coordinates.map((poly) => poly.map(mapRing));
-    return { type: 'Feature', properties: {}, geometry: { type: g.type, coordinates } };
-}
-
-// Bundle non-overlapping polygons (land, or ocean + lakes) into one feature without a slow union
-function combineAsMultiPolygon(features) {
-    const polys = [];
-    features.forEach((f) => {
-        const g = f.geometry;
-        if (g.type === 'Polygon') polys.push(g.coordinates);
-        else if (g.type === 'MultiPolygon') g.coordinates.forEach((p) => polys.push(p));
-    });
-    return { type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: polys } };
-}
-
-// Keep only the parts of the shape near the viewport (cheap, no boolean ops)
-function clipToBBox(feature, bbox) {
-    const turf = window.turf;
-    const g = feature.geometry;
-    const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
-    const [minX, minY, maxX, maxY] = bbox;
-    const out = [];
-
-    for (const rings of polys) {
-        const outer = rings[0];
-        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-        for (let i = 0; i < outer.length; i++) {
-            const x = outer[i][0];
-            const y = outer[i][1];
-            if (x < x0) x0 = x;
-            if (x > x1) x1 = x;
-            if (y < y0) y0 = y;
-            if (y > y1) y1 = y;
-        }
-        if (x1 < minX || x0 > maxX || y1 < minY || y0 > maxY) continue;                      // fully outside
-        if (x0 >= minX && x1 <= maxX && y0 >= minY && y1 <= maxY) { out.push(rings); continue; } // fully inside
-        try {
-            const clipped = turf.bboxClip(turf.polygon(rings), bbox);
-            const c = clipped.geometry.coordinates;
-            if (c.length > 0 && c[0].length >= 4) out.push(c);
-        } catch (e) {}
-    }
-
-    if (out.length === 0) return null;
-    return {
-        type: 'Feature',
-        properties: {},
-        geometry: out.length === 1
-            ? { type: 'Polygon', coordinates: out[0] }
-            : { type: 'MultiPolygon', coordinates: out }
-    };
-}
-
-// Builds the shadow in the background, one small step per task, so the UI never freezes
-async function rebuildShadowGeometry() {
-    const jobId = ++shadowJobId;
-    const turf = window.turf;
-    if (!turf || !activeShadowBase || !mapRef) return;
-    const map = mapRef;
-
-    const commit = (features, coverage) => {
-        activeShadowGeoJSON = { type: 'FeatureCollection', features };
-        shadowCoverage = coverage;
-        const src = mapRef && mapRef.getSource('highlight-shadow-src');
-        if (src) src.setData(activeShadowGeoJSON);
-    };
-
-    // 1 screen pixel in degrees at this zoom (MapLibre/Mapbox world = 512 * 2^zoom px)
-    const zoom = map.getZoom();
-    const degPerPx = 360 / (512 * Math.pow(2, zoom));
-    const dxDeg = SHADOW_PX[0] * degPerPx;
-    const dyDeg = SHADOW_PX[1] * degPerPx;
-
-    // Only build the shadow for the viewport plus some padding
-    const b = map.getBounds();
-    const cosLat = Math.max(0.1, Math.cos(map.getCenter().lat * DEG));
-    const padX = (b.getEast() - b.getWest()) * SHADOW_VIEW_PAD + dxDeg * 4;
-    const padY = (b.getNorth() - b.getSouth()) * SHADOW_VIEW_PAD + dyDeg * cosLat * 4;
-    const bbox = [
-        Math.max(-180, b.getWest() - padX),
-        Math.max(-85.05, b.getSouth() - padY),
-        Math.min(180, b.getEast() + padX),
-        Math.min(85.05, b.getNorth() + padY)
-    ];
-    const coverage = { bbox, zoom };
-
-    let base = clipToBBox(activeShadowBase, bbox);
-    if (!base) {
-        commit([], coverage);
-        return;
-    }
-
-    await nextTask();
-    if (jobId !== shadowJobId) return;
-
-    // Simplify to ~half a pixel. Any tiny mismatch with the real border is hidden under the white border line.
-    try {
-        base = turf.simplify(base, { tolerance: degPerPx * SHADOW_SIMPLIFY_PX, highQuality: false });
-    } catch (e) {}
-
-    const pieces = [];
-    for (let i = 1; i <= SHADOW_STEPS; i++) {
-        await nextTask();
-        if (jobId !== shadowJobId) return;
-        try {
-            const shifted = translateFeature(base, dxDeg * i / SHADOW_STEPS, dyDeg * i / SHADOW_STEPS);
-            // shifted minus the highlight => can only exist OUTSIDE the highlight
-            const piece = turf.difference(turf.featureCollection([shifted, base]));
-            if (piece) pieces.push(piece);
-        } catch (e) {}
-    }
-
-    if (jobId !== shadowJobId) return;
-    commit(pieces, coverage);
-}
-
-function scheduleShadowRebuild(delay = SHADOW_DEBOUNCE_MS) {
-    clearTimeout(shadowTimer);
-    if (!activeShadowBase) return;
-    shadowTimer = setTimeout(rebuildShadowGeometry, delay);
-}
-
-// True if the shadow we already built still covers what's on screen at the same zoom
-function viewStillCovered() {
-    if (!shadowCoverage || !mapRef) return false;
-    if (Math.abs(mapRef.getZoom() - shadowCoverage.zoom) > 0.01) return false;
-    const b = mapRef.getBounds();
-    const [w, s, e, n] = shadowCoverage.bbox;
-    return Math.max(-180, b.getWest()) >= w
-        && Math.min(180, b.getEast()) <= e
-        && Math.max(-85.05, b.getSouth()) >= s
-        && Math.min(85.05, b.getNorth()) <= n;
-}
-
 function buildSpotlightGeometry() {
     const selected = Array.from(selectedFeaturesMap.values());
-    activeShadowBase = null;
-    activeShadowGeoJSON = EMPTY_FC;
-    shadowCoverage = null;
-    shadowJobId++;
-
     if (selected.length === 0) {
         activeDimMaskGeoJSON = null;
         activeOutlineGeoJSON = null;
@@ -575,18 +396,31 @@ function buildSpotlightGeometry() {
     const selectedLandCount = selected.filter(f => f.properties._hlCategory === 'land').length;
     const selectedWaterCount = selected.filter(f => f.properties._hlCategory === 'water').length;
 
-    const allLand = landCount > 0 && selectedLandCount === landCount && selected.length === landCount && regionCache.water;
-    const allWater = waterCount > 0 && selectedWaterCount === waterCount && selected.length === waterCount && regionCache.land;
-
-    if (allLand || allWater) {
-        activeOutlineGeoJSON = allLand ? regionCache.land.fc : regionCache.water.fc;
-        activeDimMaskGeoJSON = allLand ? regionCache.water.fc : regionCache.land.fc;
-        // These polygons don't overlap, so skip the slow union and just bundle them together
-        activeShadowBase = combineAsMultiPolygon(selected);
+    if (landCount > 0 && selectedLandCount === landCount && selected.length === landCount && regionCache.water) {
+        activeOutlineGeoJSON = regionCache.land.fc;
+        activeDimMaskGeoJSON = regionCache.water.fc;
+        return;
+    }
+    if (waterCount > 0 && selectedWaterCount === waterCount && selected.length === waterCount && regionCache.land) {
+        activeOutlineGeoJSON = regionCache.water.fc;
+        activeDimMaskGeoJSON = regionCache.land.fc;
         return;
     }
 
-    const merged = unionFeatures(selected);
+    let merged = selected[0];
+    if (selected.length > 1) {
+        try {
+            merged = turf.union(turf.featureCollection(selected)) || selected[0];
+        } catch (err) {
+            merged = selected[0];
+            for (let i = 1; i < selected.length; i++) {
+                try {
+                    const next = turf.union(turf.featureCollection([merged, selected[i]]));
+                    if (next) merged = next;
+                } catch (e) {}
+            }
+        }
+    }
 
     let dimMask = null;
     try {
@@ -597,8 +431,176 @@ function buildSpotlightGeometry() {
 
     activeOutlineGeoJSON = { type: 'FeatureCollection', features: [merged] };
     activeDimMaskGeoJSON = dimMask ? { type: 'FeatureCollection', features: [dimMask] } : EMPTY_FC;
+}
 
-    activeShadowBase = merged;
+/* =========================================================================
+   DROP SHADOW (overlay canvas, clipped so it never touches the highlight)
+   ========================================================================= */
+
+function lngToMercX(lng) {
+    return (lng + 180) / 360;
+}
+
+function latToMercY(lat) {
+    const c = Math.max(-85.0511, Math.min(85.0511, lat));
+    return 0.5 - Math.log(Math.tan(Math.PI / 4 + (c * Math.PI) / 360)) / (2 * Math.PI);
+}
+
+function ensureShadowCanvas() {
+    if (shadowCanvas || !mapRef) return;
+    shadowCanvas = document.createElement('canvas');
+    shadowCanvas.id = 'highlight-shadow-canvas';
+    shadowCanvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;display:none;';
+    mapRef.getCanvasContainer().appendChild(shadowCanvas);
+    shadowCtx = shadowCanvas.getContext('2d');
+    mapRef.on('render', () => drawShadow());
+}
+
+// Converts the highlighted shapes to Mercator coordinates once, so redrawing is cheap
+function rebuildShadowShapes() {
+    shadowShapes = [];
+    shadowRenderKey = '';
+
+    const features = activeOutlineGeoJSON?.features || [];
+    features.forEach((f) => {
+        const g = f.geometry;
+        if (!g) return;
+        const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+
+        polys.forEach((poly) => {
+            const rings = poly.map((ring) => {
+                const arr = new Float64Array(ring.length * 2);
+                for (let i = 0; i < ring.length; i++) {
+                    arr[i * 2] = lngToMercX(ring[i][0]);
+                    arr[i * 2 + 1] = latToMercY(ring[i][1]);
+                }
+                return arr;
+            });
+
+            const outer = rings[0];
+            if (!outer || outer.length < 6) return;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (let i = 0; i < outer.length; i += 2) {
+                if (outer[i] < minX) minX = outer[i];
+                if (outer[i] > maxX) maxX = outer[i];
+                if (outer[i + 1] < minY) minY = outer[i + 1];
+                if (outer[i + 1] > maxY) maxY = outer[i + 1];
+            }
+            shadowShapes.push({ bbox: [minX, minY, maxX, maxY], rings });
+        });
+    });
+
+    ensureShadowCanvas();
+    drawShadow(true);
+}
+
+function drawShadow(force = false) {
+    const map = mapRef;
+    if (!shadowCanvas || !shadowCtx || !map) return;
+
+    const glCanvas = map.getCanvas();
+    const cw = glCanvas.clientWidth;
+    const ch = glCanvas.clientHeight;
+    const shouldShow = !isPicking && shadowShapes.length > 0 && cw > 0 && ch > 0 && map.getPitch() < 0.01;
+
+    if (!shouldShow) {
+        if (shadowCanvas.style.display !== 'none') shadowCanvas.style.display = 'none';
+        shadowRenderKey = '';
+        return;
+    }
+    shadowCanvas.style.display = 'block';
+
+    const dpr = window.devicePixelRatio || 1;
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    const bearing = map.getBearing();
+    const key = `${cw}|${ch}|${dpr}|${center.lng}|${center.lat}|${zoom}|${bearing}`;
+    if (!force && key === shadowRenderKey) return;
+    shadowRenderKey = key;
+
+    const pw = Math.round(cw * dpr);
+    const ph = Math.round(ch * dpr);
+    if (shadowCanvas.width !== pw || shadowCanvas.height !== ph) {
+        shadowCanvas.width = pw;
+        shadowCanvas.height = ph;
+    }
+    shadowCanvas.style.width = `${cw}px`;
+    shadowCanvas.style.height = `${ch}px`;
+
+    const ctx = shadowCtx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, pw, ph);
+
+    // Screen position of a Mercator point (flat map, with rotation)
+    const worldSize = 512 * Math.pow(2, zoom);
+    const cx = lngToMercX(center.lng);
+    const cy = latToMercY(center.lat);
+    const rad = (bearing * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const hw = cw / 2;
+    const hh = ch / 2;
+
+    // Only shapes near the screen are drawn (padding covers the shadow's reach)
+    const reach = (Math.hypot(cw, ch) / 2 + 60) / worldSize;
+    const offsets = (typeof map.getRenderWorldCopies === 'function' ? map.getRenderWorldCopies() : true) ? [-1, 0, 1] : [0];
+
+    const ringsPath = new Path2D();
+    const addRing = (ring, off) => {
+        let lastX = 0;
+        let lastY = 0;
+        let started = false;
+        for (let i = 0; i < ring.length; i += 2) {
+            const dx = (ring[i] + off - cx) * worldSize;
+            const dy = (ring[i + 1] - cy) * worldSize;
+            const x = hw + dx * cos + dy * sin;
+            const y = hh - dx * sin + dy * cos;
+            if (!started) {
+                ringsPath.moveTo(x, y);
+                started = true;
+            } else {
+                if (Math.abs(x - lastX) < 0.5 && Math.abs(y - lastY) < 0.5) continue; // skip sub-pixel points
+                ringsPath.lineTo(x, y);
+            }
+            lastX = x;
+            lastY = y;
+        }
+        ringsPath.closePath();
+    };
+
+    for (const shape of shadowShapes) {
+        for (const off of offsets) {
+            const b = shape.bbox;
+            if (b[2] + off < cx - reach || b[0] + off > cx + reach || b[3] < cy - reach || b[1] > cy + reach) continue;
+            for (const ring of shape.rings) addRing(ring, off);
+        }
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Clip = everything EXCEPT the highlighted area (even-odd: big rectangle minus the shapes)
+    ctx.save();
+    const clipPath = new Path2D();
+    clipPath.rect(-100, -100, cw + 200, ch + 200);
+    clipPath.addPath(ringsPath);
+    ctx.clip(clipPath, 'evenodd');
+
+    // The shape casts the shadow; the shape itself is clipped away, so only the shadow outside remains
+    ctx.shadowColor = SHADOW_COLOR;
+    ctx.shadowBlur = SHADOW_BLUR_PX * dpr;
+    ctx.shadowOffsetX = SHADOW_OFFSET_PX[0] * dpr;
+    ctx.shadowOffsetY = SHADOW_OFFSET_PX[1] * dpr;
+    ctx.fillStyle = '#000000';
+    ctx.fill(ringsPath, 'evenodd');
+    ctx.restore();
+
+    // Redraw the crisp white border on top (same style as the 'highlight-border' layer)
+    // so the shadow can't dim the outer half of it
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.lineWidth = 1.75;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke(ringsPath);
 }
 
 export function applyHighlightLayers(map = mapRef) {
@@ -621,7 +623,6 @@ export function applyHighlightLayers(map = mapRef) {
 
     map.addSource('highlight-dim-src', { type: 'geojson', data: activeDimMaskGeoJSON });
     map.addSource('highlight-outline-src', { type: 'geojson', data: activeOutlineGeoJSON });
-    map.addSource('highlight-shadow-src', { type: 'geojson', data: activeShadowGeoJSON });
 
     // Dim everything outside the selected regions
     map.addLayer({
@@ -634,17 +635,7 @@ export function applyHighlightLayers(map = mapRef) {
         }
     });
 
-    // Drop shadow: geometry that exists only outside the highlight
-    map.addLayer({
-        id: 'highlight-shadow',
-        type: 'fill',
-        source: 'highlight-shadow-src',
-        paint: {
-            'fill-color': '#000000',
-            'fill-opacity': SHADOW_STEP_OPACITY,
-            'fill-antialias': false
-        }
-    });
+    // (The drop shadow is drawn on the overlay canvas, see drawShadow)
 
     // Subtle outer glow
     map.addLayer({
@@ -683,11 +674,6 @@ export function clearHighlightOverlay() {
     selectedFeaturesMap.clear();
     activeDimMaskGeoJSON = null;
     activeOutlineGeoJSON = null;
-    activeShadowBase = null;
-    activeShadowGeoJSON = EMPTY_FC;
-    clearTimeout(shadowTimer);
-    shadowJobId++;
-    shadowCoverage = null;
     hoveredKey = null;
 
     if (isPicking) {
@@ -696,6 +682,7 @@ export function clearHighlightOverlay() {
         removeLayersAndSources(mapRef, SPOTLIGHT_LAYER_IDS, SPOTLIGHT_SOURCE_IDS);
     }
 
+    rebuildShadowShapes();
     notifyStatusChange();
 }
 
@@ -705,9 +692,7 @@ async function startPickingMode(categories) {
     snapshotBeforePick = {
         features: Array.from(selectedFeaturesMap.entries()),
         dimMask: activeDimMaskGeoJSON,
-        outline: activeOutlineGeoJSON,
-        shadowBase: activeShadowBase,
-        shadow: activeShadowGeoJSON
+        outline: activeOutlineGeoJSON
     };
 
     activePickCategories = categories;
@@ -731,6 +716,7 @@ async function startPickingMode(categories) {
     bindPickingMapListeners();
     setEditorChromeHiddenForPicking(true);
     mountPickingLayers();
+    drawShadow(); // hides the shadow while picking
     showPickingBarUI();
     updatePickingBarUI();
     notifyStatusChange();
@@ -753,15 +739,13 @@ function finishPickingMode(applyChanges = true) {
         snapshotBeforePick.features.forEach(([k, v]) => selectedFeaturesMap.set(k, v));
         activeDimMaskGeoJSON = snapshotBeforePick.dimMask;
         activeOutlineGeoJSON = snapshotBeforePick.outline;
-        activeShadowBase = snapshotBeforePick.shadowBase;
-        activeShadowGeoJSON = snapshotBeforePick.shadow;
     } else if (applyChanges) {
         buildSpotlightGeometry();
     }
 
     snapshotBeforePick = null;
     applyHighlightLayers(mapRef);
-    scheduleShadowRebuild(0);
+    rebuildShadowShapes();
     notifyStatusChange();
 }
 
@@ -968,10 +952,5 @@ export function openHighlightTypeModal(map = mapRef) {
 export function initHighlightOverlay(map) {
     mapRef = map;
     ensureHighlightUI();
-
-    // Rebuild the shadow after panning/zooming (only if the view left the area it was built for)
-    map.on('moveend', () => {
-        if (isPicking || !activeShadowBase || viewStillCovered()) return;
-        scheduleShadowRebuild();
-    });
+    ensureShadowCanvas();
 }
