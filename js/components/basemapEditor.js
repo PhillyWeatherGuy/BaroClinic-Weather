@@ -5,7 +5,10 @@ import {
     openHighlightTypeModal,
     clearHighlightOverlay,
     getHighlightStatus,
-    setHighlightStatusCallback
+    setHighlightStatusCallback,
+    getHighlightStyle,
+    setHighlightStyle,
+    resetHighlightStyle
 } from '../layers/highlightOverlay.js';
 
 const BASEMAP_PRESETS = [
@@ -61,6 +64,7 @@ let presetCallback = null;
 let editorChangeCallback = null;
 let bordersExpanded = false;
 let labelsExpanded = false;
+let highlightExpanded = false;
 let lastBaseColors = { land: '#ededed', water: '#f5fdff', borders: {}, borderMinZooms: {} };
 
 function createDefaultBordersState() {
@@ -135,7 +139,8 @@ function getPreviewUrl(preset, theme) {
 
 function hasAnyCustomizations() {
     if ((stateManager.activeBasemapPreset || 'default') !== 'default') return true;
-    if (getHighlightStatus().isActive) return true;
+    const hlStatus = getHighlightStatus();
+    if (hlStatus.isActive || hlStatus.styleModified) return true;
 
     const overrides = ensureOverridesState();
     if (overrides.landColor || overrides.waterColor) return true;
@@ -338,11 +343,20 @@ export function syncBasemapColorInputs(baseColors = null) {
         resetLabelsBtn.disabled = !isModified;
     }
 
-    // Sync Highlight controls
+    // Sync Highlight controls & style sliders
     const hlStatus = getHighlightStatus();
+    const hlStyle = getHighlightStyle();
     const hlBadge = document.getElementById('highlight-active-badge');
     const hlClearBtn = document.getElementById('btn-clear-highlight');
     const hlOpenBtn = document.getElementById('btn-open-highlight');
+    const hlShadowEl = document.getElementById('highlight-shadow-slider');
+    const hlShadowValEl = document.getElementById('highlight-shadow-val');
+    const hlDullEl = document.getElementById('highlight-dullness-slider');
+    const hlDullValEl = document.getElementById('highlight-dullness-val');
+    const hlBorderColorEl = document.getElementById('highlight-border-color');
+    const hlBorderWidthEl = document.getElementById('highlight-border-width-slider');
+    const hlBorderWidthValEl = document.getElementById('highlight-border-width-val');
+    const hlResetStyleBtn = document.getElementById('btn-reset-highlight-style');
 
     if (hlBadge) {
         hlBadge.style.display = hlStatus.isActive ? 'inline-block' : 'none';
@@ -355,6 +369,21 @@ export function syncBasemapColorInputs(baseColors = null) {
         hlOpenBtn.classList.toggle('active', hlStatus.isActive);
     }
 
+    if (hlShadowEl) hlShadowEl.value = String(hlStyle.shadowStrength);
+    if (hlShadowValEl) hlShadowValEl.textContent = `${hlStyle.shadowStrength.toFixed(1)}x`;
+
+    const dullPercent = Math.round(hlStyle.dimOpacity * 100);
+    if (hlDullEl) hlDullEl.value = String(dullPercent);
+    if (hlDullValEl) hlDullValEl.textContent = `${dullPercent}%`;
+
+    if (hlBorderColorEl) hlBorderColorEl.value = hlStyle.borderColor;
+    if (hlBorderWidthEl) hlBorderWidthEl.value = String(hlStyle.borderWidth);
+    if (hlBorderWidthValEl) hlBorderWidthValEl.textContent = `${hlStyle.borderWidth.toFixed(1)}px`;
+
+    if (hlResetStyleBtn) {
+        hlResetStyleBtn.disabled = !hlStatus.styleModified;
+    }
+
     const resetAllBtn = document.getElementById('btn-reset-all-basemap');
     if (resetAllBtn) {
         resetAllBtn.disabled = !hasAnyCustomizations();
@@ -365,6 +394,7 @@ function renderEditorSections(bodyEl) {
     const currentTheme = stateManager.currentTheme || 'dark';
     const activePreset = stateManager.activeBasemapPreset || 'default';
     const labelDefaults = getContextualLabelDefaults();
+    const hlStyle = getHighlightStyle();
 
     bodyEl.innerHTML = `
         <section class="basemap-editor-section">
@@ -571,13 +601,87 @@ function renderEditorSections(bodyEl) {
                 </div>
             </div>
 
-            <!-- Highlight Regions Button -->
-            <div class="basemap-highlight-row">
-                <button id="btn-open-highlight" class="basemap-highlight-btn" type="button">
-                    <span>Highlight</span>
-                    <span id="highlight-active-badge" class="highlight-active-badge" style="display: none;"></span>
+            <!-- Highlight Section Dropdown -->
+            <div class="basemap-dropdown-block">
+                <button
+                    id="btn-highlight-dropdown"
+                    class="basemap-dropdown-toggle ${highlightExpanded ? 'open' : ''}"
+                    type="button"
+                    aria-expanded="${String(highlightExpanded)}"
+                >
+                    <span class="basemap-dropdown-title-group">
+                        <span>Highlight</span>
+                        <span id="highlight-active-badge" class="highlight-active-badge" style="display: none;"></span>
+                    </span>
+                    <span class="basemap-dropdown-arrow">${highlightExpanded ? '▾' : '▸'}</span>
                 </button>
-                <button id="btn-clear-highlight" class="basemap-reset-btn" type="button" style="display: none;">Clear</button>
+                <div id="highlight-dropdown-body" class="basemap-dropdown-body" style="display: ${highlightExpanded ? 'flex' : 'none'};">
+                    <div class="basemap-highlight-row">
+                        <button id="btn-open-highlight" class="basemap-highlight-btn" type="button">
+                            <span>Pick Regions to Highlight</span>
+                        </button>
+                        <button id="btn-clear-highlight" class="basemap-reset-btn" type="button" style="display: none;">Clear</button>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-slider-row">
+                            <span class="basemap-slider-label">Drop Shadow</span>
+                            <input
+                                id="highlight-shadow-slider"
+                                class="basemap-range-slider"
+                                type="range"
+                                min="0"
+                                max="2.5"
+                                step="0.1"
+                                value="${hlStyle.shadowStrength}"
+                                aria-label="Highlight drop shadow"
+                            />
+                            <span id="highlight-shadow-val" class="basemap-slider-value">${hlStyle.shadowStrength.toFixed(1)}x</span>
+                        </div>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-slider-row">
+                            <span class="basemap-slider-label">Dullness</span>
+                            <input
+                                id="highlight-dullness-slider"
+                                class="basemap-range-slider"
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value="${Math.round(hlStyle.dimOpacity * 100)}"
+                                aria-label="Non-highlighted background dullness"
+                            />
+                            <span id="highlight-dullness-val" class="basemap-slider-value">${Math.round(hlStyle.dimOpacity * 100)}%</span>
+                        </div>
+                    </div>
+
+                    <div class="basemap-border-row">
+                        <div class="basemap-border-top">
+                            <span class="basemap-control-label">Border</span>
+                            <input id="highlight-border-color" class="basemap-color-input" type="color" value="${hlStyle.borderColor}" aria-label="Highlight border color" />
+                        </div>
+                        <div class="basemap-border-slider-row">
+                            <span class="basemap-slider-label">Thickness</span>
+                            <input
+                                id="highlight-border-width-slider"
+                                class="basemap-range-slider"
+                                type="range"
+                                min="0"
+                                max="6"
+                                step="0.1"
+                                value="${hlStyle.borderWidth}"
+                                aria-label="Highlight border thickness"
+                            />
+                            <span id="highlight-border-width-val" class="basemap-slider-value">${hlStyle.borderWidth.toFixed(1)}px</span>
+                        </div>
+                    </div>
+
+                    <div class="basemap-row-right-align">
+                        <button id="btn-reset-highlight-style" class="basemap-reset-btn" type="button" disabled>Reset Style</button>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -668,6 +772,20 @@ function renderEditorSections(bodyEl) {
             labelsBody.style.display = labelsExpanded ? 'flex' : 'none';
             const arrow = labelsToggle.querySelector('.basemap-dropdown-arrow');
             if (arrow) arrow.textContent = labelsExpanded ? '▾' : '▸';
+        });
+    }
+
+    // Highlight dropdown toggle
+    const highlightToggle = document.getElementById('btn-highlight-dropdown');
+    const highlightBody = document.getElementById('highlight-dropdown-body');
+    if (highlightToggle && highlightBody) {
+        highlightToggle.addEventListener('click', () => {
+            highlightExpanded = !highlightExpanded;
+            highlightToggle.classList.toggle('open', highlightExpanded);
+            highlightToggle.setAttribute('aria-expanded', String(highlightExpanded));
+            highlightBody.style.display = highlightExpanded ? 'flex' : 'none';
+            const arrow = highlightToggle.querySelector('.basemap-dropdown-arrow');
+            if (arrow) arrow.textContent = highlightExpanded ? '▾' : '▸';
         });
     }
 
@@ -841,9 +959,15 @@ function renderEditorSections(bodyEl) {
         });
     }
 
-    // Highlight controls
+    // Highlight controls & style sliders
     const openHighlightBtn = document.getElementById('btn-open-highlight');
     const clearHighlightBtn = document.getElementById('btn-clear-highlight');
+    const hlShadowEl = document.getElementById('highlight-shadow-slider');
+    const hlDullEl = document.getElementById('highlight-dullness-slider');
+    const hlBorderColorEl = document.getElementById('highlight-border-color');
+    const hlBorderWidthEl = document.getElementById('highlight-border-width-slider');
+    const hlResetStyleBtn = document.getElementById('btn-reset-highlight-style');
+
     if (openHighlightBtn) {
         openHighlightBtn.addEventListener('click', () => {
             openHighlightTypeModal();
@@ -852,6 +976,34 @@ function renderEditorSections(bodyEl) {
     if (clearHighlightBtn) {
         clearHighlightBtn.addEventListener('click', () => {
             clearHighlightOverlay();
+        });
+    }
+    if (hlShadowEl) {
+        hlShadowEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (Number.isFinite(val)) setHighlightStyle({ shadowStrength: val });
+        });
+    }
+    if (hlDullEl) {
+        hlDullEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (Number.isFinite(val)) setHighlightStyle({ dimOpacity: Math.min(1, Math.max(0, val / 100)) });
+        });
+    }
+    if (hlBorderColorEl) {
+        hlBorderColorEl.addEventListener('input', (e) => {
+            setHighlightStyle({ borderColor: e.target.value });
+        });
+    }
+    if (hlBorderWidthEl) {
+        hlBorderWidthEl.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (Number.isFinite(val)) setHighlightStyle({ borderWidth: val });
+        });
+    }
+    if (hlResetStyleBtn) {
+        hlResetStyleBtn.addEventListener('click', () => {
+            resetHighlightStyle();
         });
     }
 
@@ -863,6 +1015,7 @@ function renderEditorSections(bodyEl) {
             stateManager.activeBasemapPreset = 'default';
             stateManager.basemapOverrides = createDefaultBasemapOverrides();
             clearHighlightOverlay();
+            resetHighlightStyle();
 
             bodyEl.querySelectorAll('.basemap-preset-card').forEach((c) => {
                 c.classList.toggle('active', c.dataset.presetId === 'default');
