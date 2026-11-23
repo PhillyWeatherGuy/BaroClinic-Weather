@@ -59,6 +59,7 @@ let statusChangeCallback = null;
 
 let activeDimMaskGeoJSON = null;
 let activeOutlineGeoJSON = null;
+let activeShadowGeoJSON = null;
 
 let pickingListenersBound = false;
 
@@ -84,7 +85,8 @@ const SPOTLIGHT_LAYER_IDS = [
 ];
 const SPOTLIGHT_SOURCE_IDS = [
     'highlight-dim-src',
-    'highlight-outline-src'
+    'highlight-outline-src',
+    'highlight-shadow-src'
 ];
 
 export function setHighlightStatusCallback(cb) {
@@ -202,7 +204,6 @@ function getActivePickingFeatures() {
 function updatePickingSources(updateBase = false) {
     if (!mapRef || !isPicking) return;
 
-    // 🌟 ONLY re-parse the giant world boundary dataset when switching categories, NEVER on clicks!
     if (updateBase) {
         const baseSrc = mapRef.getSource('highlight-pick-base-src');
         if (baseSrc) {
@@ -337,7 +338,7 @@ function handlePickClick(e) {
         selectedFeaturesMap.set(key, fullFeature);
     }
 
-    updatePickingSources();
+    updatePickingSources(false);
 }
 
 function bindPickingMapListeners() {
@@ -363,17 +364,82 @@ function setEditorChromeHiddenForPicking(hidden) {
     }
 }
 
+/**
+ * 🌟 Extracts ONLY outer perimeter segments facing Southeast to cast a physical shadow onto the ground.
+ * Prevents any shadow from bleeding into the West or North sides of the highlighted area!
+ */
+function buildShadowCastingLines(featureCollection) {
+    if (!featureCollection || !featureCollection.features || featureCollection.features.length === 0) {
+        return EMPTY_FC;
+    }
+
+    const turf = window.turf;
+    if (!turf) return EMPTY_FC;
+
+    const lines = [];
+
+    featureCollection.features.forEach((feat) => {
+        if (!feat || !feat.geometry) return;
+        const standardized = turf.rewind(feat, { reverse: false });
+        const geom = standardized.geometry;
+        const polyRings = geom.type === 'Polygon' ? [geom.coordinates] : (geom.type === 'MultiPolygon' ? geom.coordinates : []);
+
+        polyRings.forEach((rings) => {
+            if (!rings || rings.length === 0) return;
+            // Exterior ring only (rings[0])
+            const coords = rings[0];
+            if (!coords || coords.length < 3) return;
+
+            let currentLine = [];
+
+            for (let i = 0; i < coords.length - 1; i++) {
+                const p1 = coords[i];
+                const p2 = coords[i + 1];
+
+                const midLatRad = ((p1[1] + p2[1]) / 2) * (Math.PI / 180);
+                const cosLat = Math.cos(midLatRad);
+
+                const dLng = (p2[0] - p1[0]) * cosLat;
+                const dLat = p2[1] - p1[1];
+
+                // Outward normal dot product with Southeast shadow vector [1.0, 1.2]
+                const dot = (dLat * 1.0) + (dLng * 1.2);
+
+                if (dot > 0) {
+                    if (currentLine.length === 0) {
+                        currentLine.push(p1);
+                    }
+                    currentLine.push(p2);
+                } else {
+                    if (currentLine.length >= 2) {
+                        lines.push(turf.lineString(currentLine));
+                    }
+                    currentLine = [];
+                }
+            }
+
+            if (currentLine.length >= 2) {
+                lines.push(turf.lineString(currentLine));
+            }
+        });
+    });
+
+    return turf.featureCollection(lines);
+}
+
 function buildSpotlightGeometry() {
     const selected = Array.from(selectedFeaturesMap.values());
     if (selected.length === 0) {
         activeDimMaskGeoJSON = null;
         activeOutlineGeoJSON = null;
+        activeShadowGeoJSON = null;
         return;
     }
 
     if (typeof window.turf === 'undefined') {
         activeOutlineGeoJSON = { type: 'FeatureCollection', features: selected };
         activeDimMaskGeoJSON = EMPTY_FC;
+        activeShadowGeoJSON = EMPTY_FC;
         return;
     }
 
@@ -389,11 +455,13 @@ function buildSpotlightGeometry() {
     if (landCount > 0 && selectedLandCount === landCount && selected.length === landCount && regionCache.water) {
         activeOutlineGeoJSON = regionCache.land.fc;
         activeDimMaskGeoJSON = regionCache.water.fc;
+        activeShadowGeoJSON = buildShadowCastingLines(activeOutlineGeoJSON);
         return;
     }
     if (waterCount > 0 && selectedWaterCount === waterCount && selected.length === waterCount && regionCache.land) {
         activeOutlineGeoJSON = regionCache.water.fc;
         activeDimMaskGeoJSON = regionCache.land.fc;
+        activeShadowGeoJSON = buildShadowCastingLines(activeOutlineGeoJSON);
         return;
     }
 
@@ -421,6 +489,7 @@ function buildSpotlightGeometry() {
 
     activeOutlineGeoJSON = { type: 'FeatureCollection', features: [merged] };
     activeDimMaskGeoJSON = dimMask ? { type: 'FeatureCollection', features: [dimMask] } : EMPTY_FC;
+    activeShadowGeoJSON = buildShadowCastingLines(activeOutlineGeoJSON);
 }
 
 export function applyHighlightLayers(map = mapRef) {
@@ -443,6 +512,7 @@ export function applyHighlightLayers(map = mapRef) {
 
     map.addSource('highlight-dim-src', { type: 'geojson', data: activeDimMaskGeoJSON });
     map.addSource('highlight-outline-src', { type: 'geojson', data: activeOutlineGeoJSON });
+    map.addSource('highlight-shadow-src', { type: 'geojson', data: activeShadowGeoJSON || EMPTY_FC });
 
     // Dim everything outside the selected regions
     map.addLayer({
@@ -455,20 +525,20 @@ export function applyHighlightLayers(map = mapRef) {
         }
     });
 
-    // Soft cast shadow for the "pop out / lifted" look
+    // 🌟 Physical cast shadow: ONLY on the Southeast exterior ground, NEVER inside the highlighted region!
     map.addLayer({
         id: 'highlight-shadow',
         type: 'line',
-        source: 'highlight-outline-src',
+        source: 'highlight-shadow-src',
         layout: {
             'line-cap': 'round',
             'line-join': 'round'
         },
         paint: {
             'line-color': '#000000',
-            'line-width': 12,
-            'line-blur': 8,
-            'line-opacity': 0.85,
+            'line-width': 10,
+            'line-blur': 6,
+            'line-opacity': 0.8,
             'line-translate': [4, 5]
         }
     });
@@ -510,6 +580,7 @@ export function clearHighlightOverlay() {
     selectedFeaturesMap.clear();
     activeDimMaskGeoJSON = null;
     activeOutlineGeoJSON = null;
+    activeShadowGeoJSON = null;
     hoveredKey = null;
 
     if (isPicking) {
@@ -527,7 +598,8 @@ async function startPickingMode(categories) {
     snapshotBeforePick = {
         features: Array.from(selectedFeaturesMap.entries()),
         dimMask: activeDimMaskGeoJSON,
-        outline: activeOutlineGeoJSON
+        outline: activeOutlineGeoJSON,
+        shadow: activeShadowGeoJSON
     };
 
     activePickCategories = categories;
@@ -573,6 +645,7 @@ function finishPickingMode(applyChanges = true) {
         snapshotBeforePick.features.forEach(([k, v]) => selectedFeaturesMap.set(k, v));
         activeDimMaskGeoJSON = snapshotBeforePick.dimMask;
         activeOutlineGeoJSON = snapshotBeforePick.outline;
+        activeShadowGeoJSON = snapshotBeforePick.shadow;
     } else if (applyChanges) {
         buildSpotlightGeometry();
     }
@@ -694,12 +767,12 @@ function ensureHighlightUI() {
             regionCache[currentPickTarget].fc.features.forEach((feat) => {
                 selectedFeaturesMap.set(feat.properties._hlKey, feat);
             });
-            updatePickingSources();
+            updatePickingSources(false);
         });
 
         document.getElementById('btn-highlight-clear-pick')?.addEventListener('click', () => {
             selectedFeaturesMap.clear();
-            updatePickingSources();
+            updatePickingSources(false);
         });
 
         document.getElementById('btn-highlight-cancel')?.addEventListener('click', () => {
