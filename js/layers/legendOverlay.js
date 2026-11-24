@@ -5,8 +5,7 @@ import {
     PRATE_PALETTE,
     SNOW_PALETTE,
     FRZR_PALETTE,
-    SLEET_PALETTE,
-    TEMP_STOPS_F
+    SLEET_PALETTE
 } from '../config/palettes.js';
 import { getPaletteForParameter as getDarkPalette } from '../config/darkPalettes.js';
 import { getRadarPalette, WXTOOLS_PALETTE_256 } from '../config/radarPalettes.js';
@@ -18,29 +17,97 @@ const SECTION_LABELS = {
     init: 'Init Time',
     fhr: 'Forecast Hour',
     valid: 'Valid Time',
-    colorbar: 'Color Key'
+    colorbar: 'Color Key',
+    __box__: 'Legend Box'
 };
 
+let mapRef = null;
 let legendRoot = null;
 let editMode = false;
-let selectedSectionId = null;
-let freeLayoutActive = false; // switches to true as soon as an inner element is dragged or resized
+let selectedId = null;
+let freeLayoutActive = false;
 
-let boxRect = null; // null = default docked position; otherwise { left, top, width, height }
-let sectionState = createDefaultSectionState();
+let boxRect = null; // null = full-width docked under navbar
+let boxStyle = createDefaultBoxStyle();
+let elementsMap = createDefaultElementsMap();
+let customOrder = [];
+let customCounter = 0;
 
 let editToggleCallback = null;
 let selectionChangeCallback = null;
 
-function createDefaultSectionState() {
+function createDefaultBoxStyle() {
+    return {
+        bgColor: null,   // null = follow Light/Dark mode
+        bgOpacity: 0.92,
+        borderColor: null,
+        borderWidth: 1
+    };
+}
+
+function createDefaultElementStyle(id) {
+    if (id === 'header') {
+        return {
+            fontFamily: "'Roboto', -apple-system, sans-serif",
+            fontSize: 13,
+            color: null, // null = follow Light/Dark mode
+            bold: true,
+            italic: false,
+            underline: false,
+            align: 'left',
+            opacity: 1
+        };
+    }
+    if (id === 'fhr') {
+        return {
+            fontFamily: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+            fontSize: 11,
+            color: null,
+            bold: true,
+            italic: false,
+            underline: false,
+            align: 'center',
+            opacity: 1
+        };
+    }
+    if (id === 'init' || id === 'valid') {
+        return {
+            fontFamily: "'Roboto', -apple-system, sans-serif",
+            fontSize: 11,
+            color: null,
+            bold: false,
+            italic: false,
+            underline: false,
+            align: 'left',
+            opacity: 1
+        };
+    }
+    if (id === 'colorbar') {
+        return {
+            barHeight: 13,
+            tickFontFamily: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+            tickFontSize: 10,
+            tickColor: null,
+            opacity: 1
+        };
+    }
+    return {};
+}
+
+function createDefaultElementsMap() {
     const out = {};
     DEFAULT_SECTION_ORDER.forEach((id) => {
         out[id] = {
+            id,
+            kind: id === 'colorbar' ? 'colorbar' : 'text',
+            isDefault: true,
+            label: SECTION_LABELS[id],
             deleted: false,
             x: null,
             y: null,
             w: null,
-            h: null
+            h: null,
+            style: createDefaultElementStyle(id)
         };
     });
     return out;
@@ -55,21 +122,30 @@ export function isLegendEditMode() {
     return editMode;
 }
 
-export function getSelectedLegendSection() {
-    if (!selectedSectionId) return null;
-    return {
-        id: selectedSectionId,
-        label: SECTION_LABELS[selectedSectionId] || selectedSectionId,
-        ...sectionState[selectedSectionId]
-    };
+export function getLegendBoxStyle() {
+    return { ...boxStyle };
 }
 
-export function getLegendSectionsSummary() {
-    return DEFAULT_SECTION_ORDER.map((id) => ({
-        id,
-        label: SECTION_LABELS[id],
-        deleted: Boolean(sectionState[id]?.deleted)
-    }));
+export function getSelectedLegendElement() {
+    if (!selectedId) return null;
+    if (selectedId === '__box__') {
+        return { id: '__box__', kind: 'box', label: 'Legend Box', style: { ...boxStyle } };
+    }
+    const el = elementsMap[selectedId];
+    if (!el || el.deleted) return null;
+    return { ...el, style: { ...el.style } };
+}
+
+export function getDeletedDefaultSections() {
+    return DEFAULT_SECTION_ORDER
+        .filter((id) => elementsMap[id]?.deleted)
+        .map((id) => ({ id, label: SECTION_LABELS[id] }));
+}
+
+function notifySelectionChange() {
+    if (typeof selectionChangeCallback === 'function') {
+        selectionChangeCallback(getSelectedLegendElement());
+    }
 }
 
 export function setLegendEditMode(active) {
@@ -77,73 +153,90 @@ export function setLegendEditMode(active) {
     if (!legendRoot) return;
 
     legendRoot.classList.toggle('is-editing', editMode);
+    document.body.classList.toggle('legend-editor-open', editMode);
 
     if (!editMode) {
-        selectedSectionId = null;
+        selectedId = null;
         updateSelectionClasses();
-    } else if (!selectedSectionId) {
-        // Auto-select header on enter edit mode so the editor immediately shows active context
-        const firstVisible = DEFAULT_SECTION_ORDER.find((id) => !sectionState[id].deleted);
-        if (firstVisible) {
-            selectedSectionId = firstVisible;
-            updateSelectionClasses();
-        }
+    } else if (!selectedId) {
+        const firstVisible = DEFAULT_SECTION_ORDER.find((id) => !elementsMap[id].deleted) || customOrder[0] || '__box__';
+        selectedId = firstVisible;
+        updateSelectionClasses();
     }
 
     if (typeof editToggleCallback === 'function') {
         editToggleCallback(editMode);
     }
-    if (typeof selectionChangeCallback === 'function') {
-        selectionChangeCallback(getSelectedLegendSection());
-    }
+    notifySelectionChange();
+
+    // Sync MapLibre canvas & colorbar dimensions with the split-screen workspace
+    requestAnimationFrame(() => {
+        if (mapRef && typeof mapRef.resize === 'function') {
+            mapRef.resize();
+        }
+        renderColorKeyCanvas();
+    });
+    setTimeout(() => {
+        if (mapRef && typeof mapRef.resize === 'function') {
+            mapRef.resize();
+        }
+        renderColorKeyCanvas();
+    }, 260);
 }
 
-export function selectLegendSection(sectionId) {
-    if (sectionId && sectionState[sectionId]?.deleted) return;
-    selectedSectionId = sectionId || null;
+export function selectLegendElement(id) {
+    if (id && id !== '__box__' && elementsMap[id]?.deleted) return;
+    selectedId = id || null;
     updateSelectionClasses();
-    if (typeof selectionChangeCallback === 'function') {
-        selectionChangeCallback(getSelectedLegendSection());
-    }
+    notifySelectionChange();
 }
 
-export function deleteSelectedLegendSection() {
-    if (!selectedSectionId || !sectionState[selectedSectionId]) return;
-    sectionState[selectedSectionId].deleted = true;
-    const deletedEl = legendRoot?.querySelector(`.legend-section[data-section-id="${selectedSectionId}"]`);
-    if (deletedEl) deletedEl.style.display = 'none';
+export function deleteSelectedLegendElement() {
+    if (!selectedId || selectedId === '__box__') return;
+    const item = elementsMap[selectedId];
+    if (!item) return;
 
-    const nextVisible = DEFAULT_SECTION_ORDER.find((id) => !sectionState[id].deleted);
-    selectedSectionId = nextVisible || null;
-    updateSelectionClasses();
+    const domEl = legendRoot?.querySelector(`.legend-section[data-section-id="${selectedId}"]`);
 
-    if (typeof selectionChangeCallback === 'function') {
-        selectionChangeCallback(getSelectedLegendSection());
+    if (item.isDefault) {
+        item.deleted = true;
+        if (domEl) domEl.style.display = 'none';
+    } else {
+        delete elementsMap[selectedId];
+        customOrder = customOrder.filter((cid) => cid !== selectedId);
+        if (domEl) domEl.remove();
     }
+
+    const nextVisible = DEFAULT_SECTION_ORDER.find((id) => !elementsMap[id].deleted) || customOrder[0] || '__box__';
+    selectedId = nextVisible;
+    updateSelectionClasses();
+    notifySelectionChange();
 }
 
 export function restoreLegendSection(sectionId) {
-    if (!sectionState[sectionId]) return;
-    sectionState[sectionId].deleted = false;
-    const el = legendRoot?.querySelector(`.legend-section[data-section-id="${sectionId}"]`);
-    if (el) {
-        el.style.display = '';
+    const item = elementsMap[sectionId];
+    if (!item) return;
+    item.deleted = false;
+    const domEl = legendRoot?.querySelector(`.legend-section[data-section-id="${sectionId}"]`);
+    if (domEl) {
+        domEl.style.display = '';
     }
-    selectedSectionId = sectionId;
+    selectedId = sectionId;
     updateSelectionClasses();
     requestAnimationFrame(() => renderColorKeyCanvas());
-
-    if (typeof selectionChangeCallback === 'function') {
-        selectionChangeCallback(getSelectedLegendSection());
-    }
+    notifySelectionChange();
 }
 
 export function resetLegendToDefault() {
     boxRect = null;
+    boxStyle = createDefaultBoxStyle();
     freeLayoutActive = false;
-    sectionState = createDefaultSectionState();
+    elementsMap = createDefaultElementsMap();
+    customOrder = [];
 
     if (legendRoot) {
+        legendRoot.querySelectorAll('.legend-section.is-custom-element').forEach((el) => el.remove());
+
         legendRoot.classList.remove('is-free-layout', 'is-custom-box');
         legendRoot.style.left = '';
         legendRoot.style.top = '';
@@ -158,31 +251,346 @@ export function resetLegendToDefault() {
             el.style.top = '';
             el.style.width = '';
             el.style.height = '';
+            applyElementVisualStyles(id);
         });
+        applyBoxVisualStyles();
     }
 
-    if (editMode) {
-        selectedSectionId = 'header';
-    } else {
-        selectedSectionId = null;
-    }
+    selectedId = editMode ? 'header' : null;
     updateSelectionClasses();
     requestAnimationFrame(() => renderColorKeyCanvas());
-
-    if (typeof selectionChangeCallback === 'function') {
-        selectionChangeCallback(getSelectedLegendSection());
-    }
+    notifySelectionChange();
 }
 
 function updateSelectionClasses() {
     if (!legendRoot) return;
+    legendRoot.classList.toggle('is-box-selected', editMode && selectedId === '__box__');
     legendRoot.querySelectorAll('.legend-section').forEach((el) => {
-        el.classList.toggle('is-selected', editMode && el.dataset.sectionId === selectedSectionId);
+        el.classList.toggle('is-selected', editMode && el.dataset.sectionId === selectedId);
     });
 }
 
 /* =========================================================================
-   FREE-LAYOUT SNAPSHOT (Converts clean default flex positions -> movable px)
+   STYLE UPDATES (Text, Colorbar, Shape, Image, Outer Box)
+   ========================================================================= */
+
+function hexToRgba(hex, alpha = 1) {
+    if (!hex || typeof hex !== 'string') return `rgba(19, 23, 34, ${alpha})`;
+    const clean = hex.replace('#', '').trim();
+    if (clean.length !== 6) return `rgba(19, 23, 34, ${alpha})`;
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+export function applyBoxVisualStyles() {
+    if (!legendRoot) return;
+
+    if (boxStyle.bgColor) {
+        legendRoot.style.background = hexToRgba(boxStyle.bgColor, boxStyle.bgOpacity ?? 0.92);
+    } else if (boxStyle.bgOpacity !== 0.92) {
+        const isLight = document.body.classList.contains('light-mode');
+        legendRoot.style.background = isLight
+            ? `rgba(255, 255, 255, ${boxStyle.bgOpacity})`
+            : `rgba(19, 23, 34, ${boxStyle.bgOpacity})`;
+    } else {
+        legendRoot.style.background = '';
+    }
+
+    if (boxStyle.borderColor) {
+        legendRoot.style.borderColor = boxStyle.borderColor;
+    } else {
+        legendRoot.style.borderColor = '';
+    }
+
+    if (Number.isFinite(boxStyle.borderWidth) && boxStyle.borderWidth !== 1) {
+        legendRoot.style.borderWidth = `${boxStyle.borderWidth}px`;
+        legendRoot.style.borderStyle = boxStyle.borderWidth <= 0 ? 'none' : 'solid';
+    } else {
+        legendRoot.style.borderWidth = '';
+        legendRoot.style.borderStyle = '';
+    }
+}
+
+export function updateLegendBoxStyle(patch = {}) {
+    boxStyle = { ...boxStyle, ...patch };
+    applyBoxVisualStyles();
+    notifySelectionChange();
+}
+
+export function applyElementVisualStyles(id) {
+    if (!legendRoot) return;
+    const item = elementsMap[id];
+    const el = legendRoot.querySelector(`.legend-section[data-section-id="${id}"]`);
+    if (!item || !el) return;
+
+    const s = item.style || {};
+    el.style.opacity = Number.isFinite(s.opacity) ? String(s.opacity) : '1';
+
+    if (item.kind === 'text') {
+        const contentEl = el.querySelector('.legend-section-content');
+        if (!contentEl) return;
+
+        contentEl.style.fontFamily = s.fontFamily || '';
+        contentEl.style.fontSize = Number.isFinite(s.fontSize) ? `${s.fontSize}px` : '';
+        contentEl.style.color = s.color || '';
+        contentEl.style.fontWeight = s.bold ? '700' : '400';
+        contentEl.style.fontStyle = s.italic ? 'italic' : 'normal';
+        contentEl.style.textDecoration = s.underline ? 'underline' : 'none';
+        contentEl.style.textAlign = s.align || 'left';
+
+        if (!item.isDefault && item.text !== undefined) {
+            contentEl.textContent = item.text;
+        }
+    } else if (item.kind === 'colorbar') {
+        const canvas = el.querySelector('#legend-colorbar-canvas');
+        if (canvas && Number.isFinite(s.barHeight)) {
+            canvas.style.height = `${s.barHeight}px`;
+        }
+        el.querySelectorAll('.legend-tick-label').forEach((lbl) => {
+            lbl.style.fontFamily = s.tickFontFamily || '';
+            lbl.style.fontSize = Number.isFinite(s.tickFontSize) ? `${s.tickFontSize}px` : '';
+            lbl.style.color = s.tickColor || '';
+        });
+        renderColorKeyCanvas();
+    } else if (item.kind === 'shape') {
+        const shapeBox = el.querySelector('.legend-shape-node');
+        if (!shapeBox) return;
+        if (item.shapeType === 'line') {
+            shapeBox.style.background = s.borderColor || s.fillColor || '#ffffff';
+            shapeBox.style.height = `${Math.max(1, s.borderWidth || 3)}px`;
+            shapeBox.style.border = 'none';
+            shapeBox.style.borderRadius = '0';
+        } else {
+            shapeBox.style.height = '100%';
+            shapeBox.style.background = s.fillColor || 'rgba(59, 130, 246, 0.25)';
+            shapeBox.style.border = `${s.borderWidth ?? 1.5}px solid ${s.borderColor || '#ffffff'}`;
+            shapeBox.style.borderRadius = item.shapeType === 'circle'
+                ? '50%'
+                : `${s.borderRadius ?? 0}px`;
+        }
+    }
+}
+
+export function updateSelectedLegendStyle(patch = {}) {
+    if (!selectedId) return;
+    if (selectedId === '__box__') {
+        updateLegendBoxStyle(patch);
+        return;
+    }
+    const item = elementsMap[selectedId];
+    if (!item) return;
+
+    item.style = { ...item.style, ...patch };
+    applyElementVisualStyles(selectedId);
+    notifySelectionChange();
+}
+
+export function updateSelectedLegendText(newText) {
+    if (!selectedId) return;
+    const item = elementsMap[selectedId];
+    if (!item || item.kind !== 'text' || item.isDefault) return;
+    item.text = String(newText ?? '');
+    applyElementVisualStyles(selectedId);
+}
+
+/* =========================================================================
+   ADD CUSTOM ELEMENTS: TEXT, SHAPES, UPLOAD IMAGE
+   ========================================================================= */
+
+function getWorkspaceDimensionsForBox() {
+    const rootRect = legendRoot.getBoundingClientRect();
+    return {
+        w: rootRect.width || 600,
+        h: rootRect.height || 64
+    };
+}
+
+export function addLegendText(initialText = 'Custom Text') {
+    if (!legendRoot) return;
+    activateFreeLayoutIfNeeded();
+
+    const id = `custom_text_${++customCounter}`;
+    const { w, h } = getWorkspaceDimensionsForBox();
+    const elW = 150;
+    const elH = 28;
+    const x = Math.max(8, Math.round((w - elW) / 2));
+    const y = Math.max(4, Math.round((h - elH) / 2));
+
+    elementsMap[id] = {
+        id,
+        kind: 'text',
+        isDefault: false,
+        label: 'Text',
+        text: initialText,
+        deleted: false,
+        x, y, w: elW, h: elH,
+        style: {
+            fontFamily: "'Roboto', -apple-system, sans-serif",
+            fontSize: 14,
+            color: '#ffffff',
+            bold: true,
+            italic: false,
+            underline: false,
+            align: 'center',
+            opacity: 1
+        }
+    };
+    customOrder.push(id);
+
+    const node = document.createElement('div');
+    node.className = 'legend-section is-custom-element legend-sec-custom-text';
+    node.dataset.sectionId = id;
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    node.style.width = `${elW}px`;
+    node.style.height = `${elH}px`;
+    node.innerHTML = `
+        <div class="legend-section-content">${initialText}</div>
+        ${buildHandleHTML('legend-sec-handle', SEC_HANDLE_DIRS)}
+    `;
+
+    // Double-click custom text on the legend to edit inline
+    node.addEventListener('dblclick', (e) => {
+        if (!editMode) return;
+        e.stopPropagation();
+        const contentEl = node.querySelector('.legend-section-content');
+        if (!contentEl) return;
+        contentEl.contentEditable = 'true';
+        contentEl.focus();
+        const range = document.createRange();
+        range.selectNodeContents(contentEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finishEdit = () => {
+            contentEl.contentEditable = 'false';
+            elementsMap[id].text = contentEl.textContent || 'Text';
+            notifySelectionChange();
+        };
+        contentEl.addEventListener('blur', finishEdit, { once: true });
+        contentEl.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter') {
+                ke.preventDefault();
+                contentEl.blur();
+            }
+        });
+    });
+
+    legendRoot.insertBefore(node, legendRoot.querySelector('#btn-legend-edit-pencil'));
+    applyElementVisualStyles(id);
+    selectLegendElement(id);
+}
+
+export function addLegendShape(shapeType = 'rect') {
+    if (!legendRoot) return;
+    activateFreeLayoutIfNeeded();
+
+    const id = `custom_shape_${++customCounter}`;
+    const { w, h } = getWorkspaceDimensionsForBox();
+    const elW = shapeType === 'line' ? 140 : (shapeType === 'circle' ? 42 : 110);
+    const elH = shapeType === 'line' ? 12 : (shapeType === 'circle' ? 42 : 34);
+    const x = Math.max(8, Math.round((w - elW) / 2));
+    const y = Math.max(4, Math.round((h - elH) / 2));
+
+    const shapeNames = { rect: 'Rectangle', circle: 'Circle', line: 'Line' };
+
+    elementsMap[id] = {
+        id,
+        kind: 'shape',
+        shapeType,
+        isDefault: false,
+        label: shapeNames[shapeType] || 'Shape',
+        deleted: false,
+        x, y, w: elW, h: elH,
+        style: {
+            fillColor: '#2563eb',
+            borderColor: '#ffffff',
+            borderWidth: shapeType === 'line' ? 3 : 1.5,
+            borderRadius: 0,
+            opacity: 0.9
+        }
+    };
+    customOrder.push(id);
+
+    const node = document.createElement('div');
+    node.className = 'legend-section is-custom-element legend-sec-custom-shape';
+    node.dataset.sectionId = id;
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    node.style.width = `${elW}px`;
+    node.style.height = `${elH}px`;
+    node.innerHTML = `
+        <div class="legend-shape-node"></div>
+        ${buildHandleHTML('legend-sec-handle', SEC_HANDLE_DIRS)}
+    `;
+
+    legendRoot.insertBefore(node, legendRoot.querySelector('#btn-legend-edit-pencil'));
+    applyElementVisualStyles(id);
+    selectLegendElement(id);
+}
+
+export function addLegendImage(dataUrl) {
+    if (!legendRoot || !dataUrl) return;
+    activateFreeLayoutIfNeeded();
+
+    const img = new Image();
+    img.onload = () => {
+        const id = `custom_img_${++customCounter}`;
+        const { w, h } = getWorkspaceDimensionsForBox();
+        const maxH = Math.max(28, Math.min(54, h - 8));
+        const ratio = img.naturalWidth && img.naturalHeight ? (img.naturalWidth / img.naturalHeight) : 1;
+        const elH = Math.round(maxH);
+        const elW = Math.max(28, Math.round(elH * ratio));
+        const x = Math.max(8, Math.round((w - elW) / 2));
+        const y = Math.max(4, Math.round((h - elH) / 2));
+
+        elementsMap[id] = {
+            id,
+            kind: 'image',
+            isDefault: false,
+            label: 'Image',
+            src: dataUrl,
+            deleted: false,
+            x, y, w: elW, h: elH,
+            style: {
+                opacity: 1
+            }
+        };
+        customOrder.push(id);
+
+        const node = document.createElement('div');
+        node.className = 'legend-section is-custom-element legend-sec-custom-image';
+        node.dataset.sectionId = id;
+        node.style.left = `${x}px`;
+        node.style.top = `${y}px`;
+        node.style.width = `${elW}px`;
+        node.style.height = `${elH}px`;
+        node.innerHTML = `
+            <img class="legend-custom-img" src="${dataUrl}" alt="Custom legend graphic" draggable="false" />
+            ${buildHandleHTML('legend-sec-handle', SEC_HANDLE_DIRS)}
+        `;
+
+        legendRoot.insertBefore(node, legendRoot.querySelector('#btn-legend-edit-pencil'));
+        applyElementVisualStyles(id);
+        selectLegendElement(id);
+    };
+    img.src = dataUrl;
+}
+
+export function replaceSelectedLegendImage(dataUrl) {
+    if (!selectedId || !dataUrl) return;
+    const item = elementsMap[selectedId];
+    if (!item || item.kind !== 'image') return;
+    item.src = dataUrl;
+    const imgEl = legendRoot?.querySelector(`.legend-section[data-section-id="${selectedId}"] .legend-custom-img`);
+    if (imgEl) imgEl.src = dataUrl;
+}
+
+/* =========================================================================
+   FREE-LAYOUT SNAPSHOT
    ========================================================================= */
 
 function activateFreeLayoutIfNeeded() {
@@ -198,16 +606,17 @@ function activateFreeLayoutIfNeeded() {
         };
     }
 
-    // Snapshot every visible child's exact current coordinates before switching to position: absolute
     const measurements = {};
     DEFAULT_SECTION_ORDER.forEach((id) => {
         const el = legendRoot.querySelector(`.legend-section[data-section-id="${id}"]`);
-        if (!el || sectionState[id].deleted) return;
+        if (!el || elementsMap[id].deleted) return;
         const r = el.getBoundingClientRect();
+        // Add +8px horizontal breathing room on text sections to prevent tight-fit glyph clipping
+        const padW = elementsMap[id].kind === 'text' ? 8 : 0;
         measurements[id] = {
             x: r.left - rootRect.left,
             y: r.top - rootRect.top,
-            w: r.width,
+            w: r.width + padW,
             h: r.height
         };
     });
@@ -223,15 +632,15 @@ function activateFreeLayoutIfNeeded() {
         const el = legendRoot.querySelector(`.legend-section[data-section-id="${id}"]`);
         const m = measurements[id];
         if (!el || !m) return;
-        sectionState[id].x = Math.round(m.x);
-        sectionState[id].y = Math.round(m.y);
-        sectionState[id].w = Math.round(m.w);
-        sectionState[id].h = Math.round(m.h);
+        elementsMap[id].x = Math.round(m.x);
+        elementsMap[id].y = Math.round(m.y);
+        elementsMap[id].w = Math.round(m.w);
+        elementsMap[id].h = Math.round(m.h);
 
-        el.style.left = `${sectionState[id].x}px`;
-        el.style.top = `${sectionState[id].y}px`;
-        el.style.width = `${sectionState[id].w}px`;
-        el.style.height = `${sectionState[id].h}px`;
+        el.style.left = `${elementsMap[id].x}px`;
+        el.style.top = `${elementsMap[id].y}px`;
+        el.style.width = `${elementsMap[id].w}px`;
+        el.style.height = `${elementsMap[id].h}px`;
     });
 }
 
@@ -246,27 +655,8 @@ function applyBoxRect() {
 }
 
 /* =========================================================================
-   COLOR KEY & UNIT RESOLUTION (Exact match to palettes.js / darkPalettes / radar)
+   COLOR KEY & UNIT RESOLUTION (Zero interpolation exact colors)
    ========================================================================= */
-
-function decodeScalingValue(byteVal, scaling, minDefault = 0, maxDefault = 255) {
-    if (scaling && scaling.mode === 'piecewise' && Array.isArray(scaling.val_points) && Array.isArray(scaling.byte_points)) {
-        const vp = scaling.val_points.map(Number);
-        const bp = scaling.byte_points.map(Number);
-        for (let i = 0; i < bp.length - 1; i++) {
-            if (byteVal >= bp[i] && byteVal <= bp[i + 1]) {
-                const span = bp[i + 1] - bp[i];
-                const t = span > 0 ? (byteVal - bp[i]) / span : 0;
-                return vp[i] + t * (vp[i + 1] - vp[i]);
-            }
-        }
-        return vp[vp.length - 1];
-    }
-
-    const minV = Number(scaling?.min_val ?? minDefault);
-    const maxV = Number(scaling?.max_val ?? maxDefault);
-    return minV + (byteVal / 255.0) * (maxV - minV);
-}
 
 function byteForPhysicalValue(targetVal, scaling, minDefault = 0, maxDefault = 255) {
     if (scaling && scaling.mode === 'piecewise' && Array.isArray(scaling.val_points) && Array.isArray(scaling.byte_points)) {
@@ -299,7 +689,6 @@ function getActiveColorKeySpec() {
     const isDark = (stateManager.currentTheme || 'dark') === 'dark';
     const isMetric = stateManager.currentUnits === 'metric';
 
-    // 1. Radar Mode
     if (stateManager.activeMode === 'radar') {
         const prodSelect = document.getElementById('radar-product-select');
         const productCode = (prodSelect?.value || stateManager.activeRadarProduct || 'BR').toUpperCase();
@@ -334,7 +723,6 @@ function getActiveColorKeySpec() {
             return { type: 'gradient', palette: pal256.slice(1), ticks };
         }
 
-        // Reflectivity (dBZ)
         const minDbz = -10;
         const maxDbz = 80;
         const dbzTicks = [5, 15, 25, 35, 45, 55, 65, 75].map(dbz => ({
@@ -346,7 +734,6 @@ function getActiveColorKeySpec() {
         return { type: 'gradient', palette: pal256.slice(startByte, endByte + 1), ticks: dbzTicks };
     }
 
-    // 2. Model Viewer Mode
     const paramConfig = stateManager.paramConfig || {};
     const manifest = stateManager.manifest || {};
     const paramId = (paramConfig.id || stateManager.activeParam || '2t').toLowerCase();
@@ -370,7 +757,6 @@ function getActiveColorKeySpec() {
     const rawUnit = (manifest.unit || paramConfig.unit || '').trim();
     const normUnit = rawUnit.toLowerCase();
 
-    // Temperature parameters
     const isTemp = rawUnit.includes('°') || normUnit === 'k' || normUnit === 'c' || normUnit === 'f' ||
         normUnit.includes('kelvin') || normUnit.includes('celsius') || normUnit.includes('fahrenheit') ||
         (paramId.startsWith('t') && !paramId.startsWith('tp')) || paramId === '2t' || paramId === 'd2m';
@@ -382,7 +768,6 @@ function getActiveColorKeySpec() {
         const minF = toF(minK);
         const maxF = toF(maxK);
 
-        // Display crisp -40°F to 110°F (or -40°C to 45°C) span clamped to actual range
         const dispMinF = Math.max(minF, -50);
         const dispMaxF = Math.min(maxF, 115);
         const startByte = Math.max(0, Math.round(((dispMinF - minF) / (maxF - minF)) * 255));
@@ -402,7 +787,6 @@ function getActiveColorKeySpec() {
         };
     }
 
-    // Piecewise / non-linear fields (Precip, Snow, CAPE, PWAT, PVA, Wind, Anomalies)
     let tickValues = [];
     if (paramId === 'prate') {
         tickValues = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0];
@@ -431,7 +815,6 @@ function getActiveColorKeySpec() {
         tickValues = Array.from({ length: 6 }, (_, i) => Math.round((minV + i * step) * 10) / 10);
     }
 
-    // Find first non-transparent byte for cleaner leading edge
     let startByte = 0;
     for (let i = 0; i < palette256.length; i++) {
         if (palette256[i] && palette256[i] !== 'transparent') {
@@ -445,10 +828,10 @@ function getActiveColorKeySpec() {
         if (isMetric && (normUnit === 'in' || normUnit.includes('inch'))) {
             return `${Math.round(v * 25.4)}`;
         }
-        if (isMetric && (normUnit === 'in/hr')) {
+        if (isMetric && normUnit === 'in/hr') {
             return `${(v * 25.4).toFixed(0)}`;
         }
-        return Number.isInteger(v) ? `${v}` : `${v}`;
+        return `${v}`;
     };
 
     const ticks = tickValues
@@ -482,18 +865,20 @@ function getColorRuns(palette) {
 }
 
 function renderColorKeyCanvas() {
-    if (!legendRoot || sectionState.colorbar?.deleted) return;
+    if (!legendRoot || elementsMap.colorbar?.deleted) return;
     const canvas = legendRoot.querySelector('#legend-colorbar-canvas');
     const labelsRow = legendRoot.querySelector('#legend-colorbar-labels');
     const ptypeWrap = legendRoot.querySelector('#legend-ptype-wrap');
     const gradWrap = legendRoot.querySelector('#legend-gradient-wrap');
     if (!canvas || !labelsRow || !ptypeWrap || !gradWrap) return;
 
+    const cbStyle = elementsMap.colorbar?.style || {};
     const spec = getActiveColorKeySpec();
 
     if (spec.type === 'ptype') {
         gradWrap.style.display = 'none';
         ptypeWrap.style.display = 'flex';
+        const barH = Number.isFinite(cbStyle.barHeight) ? cbStyle.barHeight : 10;
         ptypeWrap.innerHTML = spec.bands.map((band) => {
             const runs = getColorRuns(band.palette);
             const segs = runs.map((r) =>
@@ -502,7 +887,7 @@ function renderColorKeyCanvas() {
             return `
                 <div class="legend-ptype-item">
                     <span class="legend-ptype-label">${band.label}</span>
-                    <div class="legend-ptype-bar" style="display: flex; overflow: hidden;">${segs}</div>
+                    <div class="legend-ptype-bar" style="display: flex; overflow: hidden; height: ${barH}px;">${segs}</div>
                 </div>
             `;
         }).join('');
@@ -514,7 +899,7 @@ function renderColorKeyCanvas() {
 
     const rect = canvas.getBoundingClientRect();
     const w = Math.max(140, Math.round(rect.width || 300));
-    const h = Math.max(10, Math.round(rect.height || 14));
+    const h = Math.max(8, Math.round(rect.height || cbStyle.barHeight || 13));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
@@ -526,7 +911,6 @@ function renderColorKeyCanvas() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // Draw exact discrete color bands with zero sub-pixel overlap or interpolation
     const pal = spec.palette;
     const len = Math.max(1, pal.length);
     for (let i = 0; i < len; i++) {
@@ -538,10 +922,13 @@ function renderColorKeyCanvas() {
         ctx.fillRect(x0, 0, segW, h);
     }
 
-    // Render tick labels positioned accurately along the bar
+    const tickFont = cbStyle.tickFontFamily || "SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    const tickSize = Number.isFinite(cbStyle.tickFontSize) ? cbStyle.tickFontSize : 10;
+    const tickColorStyle = cbStyle.tickColor ? `color: ${cbStyle.tickColor};` : '';
+
     labelsRow.innerHTML = spec.ticks.map((t) => {
         const pct = Math.max(2, Math.min(98, t.pos * 100));
-        return `<span class="legend-tick-label" style="left: ${pct.toFixed(1)}%;">${t.label}</span>`;
+        return `<span class="legend-tick-label" style="left: ${pct.toFixed(1)}%; font-family: ${tickFont}; font-size: ${tickSize}px; ${tickColorStyle}">${t.label}</span>`;
     }).join('');
 }
 
@@ -576,7 +963,6 @@ function getResolvedUnitLabel() {
 export function updateLegendOverlay() {
     if (!legendRoot) return;
 
-    // Hide on Coming Soon screens (Satellite / Tropics) or 10-panel Ensemble grid
     const hideModes = stateManager.activeMode === 'satellite' || stateManager.activeMode === 'tropics';
     if (hideModes) {
         legendRoot.style.display = 'none';
@@ -617,11 +1003,12 @@ export function updateLegendOverlay() {
         validEl.textContent = `Valid: ${validText}`;
     }
 
+    applyBoxVisualStyles();
     requestAnimationFrame(() => renderColorKeyCanvas());
 }
 
 /* =========================================================================
-   DRAG & 8-HANDLE RESIZE INTERACTIONS (Outer Box + Individual Inner Sections)
+   DRAG & 8-HANDLE RESIZE INTERACTIONS
    ========================================================================= */
 
 function attachDragAndResizeHandlers() {
@@ -635,7 +1022,8 @@ function attachDragAndResizeHandlers() {
         const dy = e.clientY - interaction.startY;
 
         if (interaction.kind === 'move-box') {
-            const maxLeft = Math.max(0, window.innerWidth - interaction.origW);
+            const editorAllowance = editMode && window.innerWidth >= 1024 ? 360 : 0;
+            const maxLeft = Math.max(0, (window.innerWidth - editorAllowance) - interaction.origW);
             const maxTop = Math.max(0, window.innerHeight - interaction.origH);
             boxRect.left = Math.max(0, Math.min(maxLeft, interaction.origLeft + dx));
             boxRect.top = Math.max(0, Math.min(maxTop, interaction.origTop + dy));
@@ -666,15 +1054,15 @@ function attachDragAndResizeHandlers() {
             const el = interaction.el;
             const newX = Math.max(0, Math.min(boxRect.width - interaction.origW, interaction.origX + dx));
             const newY = Math.max(0, Math.min(boxRect.height - interaction.origH, interaction.origY + dy));
-            sectionState[id].x = Math.round(newX);
-            sectionState[id].y = Math.round(newY);
-            el.style.left = `${sectionState[id].x}px`;
-            el.style.top = `${sectionState[id].y}px`;
+            elementsMap[id].x = Math.round(newX);
+            elementsMap[id].y = Math.round(newY);
+            el.style.left = `${elementsMap[id].x}px`;
+            el.style.top = `${elementsMap[id].y}px`;
         } else if (interaction.kind === 'resize-section') {
             const id = interaction.sectionId;
             const el = interaction.el;
-            const minW = id === 'colorbar' ? 120 : 48;
-            const minH = id === 'colorbar' ? 24 : 18;
+            const minW = id === 'colorbar' ? 120 : 28;
+            const minH = id === 'colorbar' ? 24 : 10;
             let { origX: x, origY: y, origW: w, origH: h } = interaction;
             const dir = interaction.dir;
 
@@ -691,15 +1079,15 @@ function attachDragAndResizeHandlers() {
                 h -= clampedDy;
             }
 
-            sectionState[id].x = Math.round(x);
-            sectionState[id].y = Math.round(y);
-            sectionState[id].w = Math.round(w);
-            sectionState[id].h = Math.round(h);
+            elementsMap[id].x = Math.round(x);
+            elementsMap[id].y = Math.round(y);
+            elementsMap[id].w = Math.round(w);
+            elementsMap[id].h = Math.round(h);
 
-            el.style.left = `${sectionState[id].x}px`;
-            el.style.top = `${sectionState[id].y}px`;
-            el.style.width = `${sectionState[id].w}px`;
-            el.style.height = `${sectionState[id].h}px`;
+            el.style.left = `${elementsMap[id].x}px`;
+            el.style.top = `${elementsMap[id].y}px`;
+            el.style.width = `${elementsMap[id].w}px`;
+            el.style.height = `${elementsMap[id].h}px`;
 
             if (id === 'colorbar') renderColorKeyCanvas();
         }
@@ -717,6 +1105,7 @@ function attachDragAndResizeHandlers() {
     legendRoot.addEventListener('pointerdown', (e) => {
         if (!editMode) return;
         if (e.target.closest('#btn-legend-edit-pencil')) return;
+        if (e.target.isContentEditable) return;
 
         e.stopPropagation();
 
@@ -745,7 +1134,7 @@ function attachDragAndResizeHandlers() {
             if (!secEl) return;
             const id = secEl.dataset.sectionId;
             activateFreeLayoutIfNeeded();
-            selectLegendSection(id);
+            selectLegendElement(id);
             document.body.style.userSelect = 'none';
             interaction = {
                 kind: 'resize-section',
@@ -754,20 +1143,20 @@ function attachDragAndResizeHandlers() {
                 dir: secHandle.dataset.dir,
                 startX: e.clientX,
                 startY: e.clientY,
-                origX: sectionState[id].x,
-                origY: sectionState[id].y,
-                origW: sectionState[id].w,
-                origH: sectionState[id].h
+                origX: elementsMap[id].x,
+                origY: elementsMap[id].y,
+                origW: elementsMap[id].w,
+                origH: elementsMap[id].h
             };
             return;
         }
 
-        // 3. Check click/drag on an inner section
+        // 3. Check click/drag on an inner element
         const secEl = e.target.closest('.legend-section');
         if (secEl) {
             const id = secEl.dataset.sectionId;
             activateFreeLayoutIfNeeded();
-            selectLegendSection(id);
+            selectLegendElement(id);
             document.body.style.userSelect = 'none';
             interaction = {
                 kind: 'move-section',
@@ -775,16 +1164,17 @@ function attachDragAndResizeHandlers() {
                 el: secEl,
                 startX: e.clientX,
                 startY: e.clientY,
-                origX: sectionState[id].x,
-                origY: sectionState[id].y,
-                origW: sectionState[id].w,
-                origH: sectionState[id].h
+                origX: elementsMap[id].x,
+                origY: elementsMap[id].y,
+                origW: elementsMap[id].w,
+                origH: elementsMap[id].h
             };
             return;
         }
 
-        // 4. Drag anywhere else on the Legend box -> move entire box
+        // 4. Clicked empty Legend Box background -> select box & allow moving it
         activateFreeLayoutIfNeeded();
+        selectLegendElement('__box__');
         document.body.style.userSelect = 'none';
         interaction = {
             kind: 'move-box',
@@ -797,14 +1187,14 @@ function attachDragAndResizeHandlers() {
         };
     });
 
-    // Keyboard Delete / Backspace removes selected section when in Edit Mode
     window.addEventListener('keydown', (e) => {
-        if (!editMode || !selectedSectionId) return;
+        if (!editMode || !selectedId || selectedId === '__box__') return;
+        if (document.activeElement?.isContentEditable) return;
         const tag = document.activeElement?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         if (e.key === 'Delete' || e.key === 'Backspace') {
             e.preventDefault();
-            deleteSelectedLegendSection();
+            deleteSelectedLegendElement();
         }
     });
 }
@@ -820,7 +1210,8 @@ function buildHandleHTML(cls, dirs) {
     return dirs.map((d) => `<span class="${cls} dir-${d}" data-dir="${d}"></span>`).join('');
 }
 
-export function initLegendOverlay() {
+export function initLegendOverlay(map = null) {
+    if (map) mapRef = map;
     if (legendRoot) return;
 
     legendRoot = document.createElement('div');
