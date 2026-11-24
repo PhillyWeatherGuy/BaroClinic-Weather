@@ -466,6 +466,21 @@ function getActiveColorKeySpec() {
     };
 }
 
+function getColorRuns(palette) {
+    const runs = [];
+    for (let i = 0; i < palette.length; i++) {
+        const c = palette[i];
+        if (!c || c === 'transparent') continue;
+        const css = paletteEntryToCss(c);
+        if (runs.length > 0 && runs[runs.length - 1].css === css) {
+            runs[runs.length - 1].count++;
+        } else {
+            runs.push({ css, count: 1 });
+        }
+    }
+    return runs;
+}
+
 function renderColorKeyCanvas() {
     if (!legendRoot || sectionState.colorbar?.deleted) return;
     const canvas = legendRoot.querySelector('#legend-colorbar-canvas');
@@ -480,16 +495,14 @@ function renderColorKeyCanvas() {
         gradWrap.style.display = 'none';
         ptypeWrap.style.display = 'flex';
         ptypeWrap.innerHTML = spec.bands.map((band) => {
-            const stops = [];
-            const sampleCount = 16;
-            for (let i = 0; i < sampleCount; i++) {
-                const idx = Math.min(band.palette.length - 1, Math.round((i / (sampleCount - 1)) * (band.palette.length - 1)));
-                stops.push(paletteEntryToCss(band.palette[idx]));
-            }
+            const runs = getColorRuns(band.palette);
+            const segs = runs.map((r) =>
+                `<span style="flex: ${r.count} 1 0; height: 100%; background: ${r.css};"></span>`
+            ).join('');
             return `
                 <div class="legend-ptype-item">
                     <span class="legend-ptype-label">${band.label}</span>
-                    <div class="legend-ptype-bar" style="background: linear-gradient(90deg, ${stops.join(', ')});"></div>
+                    <div class="legend-ptype-bar" style="display: flex; overflow: hidden;">${segs}</div>
                 </div>
             `;
         }).join('');
@@ -513,11 +526,16 @@ function renderColorKeyCanvas() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
+    // Draw exact discrete color bands with zero sub-pixel overlap or interpolation
     const pal = spec.palette;
-    for (let x = 0; x < w; x++) {
-        const idx = Math.min(pal.length - 1, Math.floor((x / Math.max(1, w - 1)) * (pal.length - 1)));
-        ctx.fillStyle = paletteEntryToCss(pal[idx]);
-        ctx.fillRect(x, 0, 1.5, h);
+    const len = Math.max(1, pal.length);
+    for (let i = 0; i < len; i++) {
+        const x0 = Math.floor((i / len) * w);
+        const x1 = Math.floor(((i + 1) / len) * w);
+        const segW = x1 - x0;
+        if (segW <= 0) continue;
+        ctx.fillStyle = paletteEntryToCss(pal[i]);
+        ctx.fillRect(x0, 0, segW, h);
     }
 
     // Render tick labels positioned accurately along the bar
