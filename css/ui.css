@@ -2322,23 +2322,23 @@ body.light-mode .map-card {
     justify-content: center;
     text-align: center;
 }
-
 /* ==========================================
    LEGEND OVERLAY & LEGEND EDITOR
    ========================================== */
 .legend-overlay-box {
     position: fixed;
-    top: 46px;
+    top: 48px;
     left: 0;
     right: 0;
     width: 100%;
+    min-height: 58px;
     box-sizing: border-box;
     z-index: 24;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 8px 64px 8px 156px;
+    gap: 24px;
+    padding: 10px 76px 10px 176px;
     background: rgba(19, 23, 34, 0.92);
     backdrop-filter: blur(10px);
     border-top: 1px solid rgba(255, 255, 255, 0.14);
@@ -2363,6 +2363,7 @@ body.light-mode .legend-overlay-box {
 .legend-overlay-box.is-custom-box {
     right: auto;
     max-width: none;
+    min-height: 0;
     padding: 8px 28px 8px 12px;
     border: 1px solid rgba(255, 255, 255, 0.22);
     overflow: visible;
@@ -2398,8 +2399,8 @@ body.light-mode .legend-overlay-box.is-custom-box {
 .legend-meta-col {
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    min-width: 0;
+    gap: 4px;
+    flex-shrink: 0;
 }
 
 .legend-times-row {
@@ -2448,7 +2449,7 @@ body.light-mode .legend-sec-fhr .legend-section-content {
 
 .legend-sec-colorbar {
     flex: 1;
-    max-width: 540px;
+    max-width: none;
     min-width: 180px;
 }
 
@@ -2538,8 +2539,8 @@ body.light-mode .legend-ptype-bar {
 /* Hover Pencil Button */
 .legend-edit-pencil-btn {
     position: absolute;
-    right: 60px;
-    bottom: 4px;
+    right: 68px;
+    bottom: 5px;
     width: 22px;
     height: 22px;
     padding: 0;
@@ -2795,6 +2796,7 @@ body.light-mode .legend-ptype-bar {
         left: 0;
         right: 0;
         width: 100%;
+        min-height: 0;
         padding: 8px 12px 24px 12px;
         flex-wrap: wrap;
         gap: 8px;
