@@ -86,50 +86,44 @@
         </div>
     </nav>
 
-    <!-- 🌟 Floating Dark / Light Mode Toggle Pill -->
-    <button id="btn-theme-toggle" class="theme-toggle-pill" title="Toggle Dark/Light Mode" aria-label="Toggle Theme">
-        <span class="theme-pill-track">
-            <svg class="theme-icon sun-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="5"></circle>
-                <line x1="12" y1="1" x2="12" y2="3"></line>
-                <line x1="12" y1="21" x2="12" y2="23"></line>
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                <line x1="1" y1="12" x2="3" y2="12"></line>
-                <line x1="21" y1="12" x2="23" y2="12"></line>
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+   <!-- 🌟 Left Vertical Toolbar -->
+    <div id="left-tool-rail" class="left-tool-rail">
+        <button id="btn-basemap-editor" class="basemap-toggle-btn" type="button" title="Basemap Editor" aria-label="Open Basemap Editor" aria-expanded="false">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+                <line x1="8" y1="2" x2="8" y2="18"></line>
+                <line x1="16" y1="6" x2="16" y2="22"></line>
             </svg>
-            <svg class="theme-icon moon-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-            <span class="theme-thumb"></span>
-        </span>
-    </button>
-    <button id="btn-unit-toggle" class="unit-toggle-pill" type="button" role="switch" aria-checked="false" aria-label="Units: Imperial" title="Units: Imperial">
-        <span class="unit-toggle-track">
-            <span class="unit-thumb"></span>
-            <span class="unit-option">IMP</span>
-            <span class="unit-option">MET</span>
-        </span>
-    </button>
+        </button>
 
-    <!-- 🌟 Floating Basemap Editor Button & Expandable Right-Half Panel -->
-    <button id="btn-basemap-editor" class="basemap-toggle-btn" type="button" title="Basemap Editor" aria-label="Open Basemap Editor" aria-expanded="false">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
-            <line x1="8" y1="2" x2="8" y2="18"></line>
-            <line x1="16" y1="6" x2="16" y2="22"></line>
-        </svg>
-    </button>
+        <button id="btn-theme-toggle" class="theme-toggle-pill" title="Toggle Dark/Light Mode" aria-label="Toggle Theme">
+            <span class="theme-pill-track">
+                <svg class="theme-icon sun-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="theme-icon moon-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+                <span class="theme-thumb"></span>
+            </span>
+        </button>
 
-    <aside id="basemap-editor-panel" class="basemap-editor-panel" aria-hidden="true">
-        <div class="basemap-editor-header">
-            <span class="basemap-editor-title">Basemap Editor</span>
-            <button id="btn-close-basemap-editor" class="ctrl-btn close-btn" type="button" title="Close Basemap Editor" aria-label="Close Basemap Editor">✕</button>
-        </div>
-        <div id="basemap-editor-body" class="basemap-editor-body"></div>
-    </aside>
+        <button id="btn-unit-toggle" class="unit-toggle-pill" type="button" role="switch" aria-checked="false" aria-label="Units: Imperial" title="Units: Imperial">
+            <span class="unit-toggle-track">
+                <span class="unit-thumb"></span>
+                <span class="unit-option">IMP</span>
+                <span class="unit-option">MET</span>
+            </span>
+        </button>
+    </div>
 
     <!-- 🌟 Floating Radar Volumetric & Multi-Tilt Toolbar -->
     <div id="radar-tools-container" style="display: none;">
