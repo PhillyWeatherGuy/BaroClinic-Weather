@@ -1545,7 +1545,7 @@ body.light-mode .map-card {
 }
 
 .basemap-editor-panel {
-    position: absolute;
+    position: fixed;
     top: 62px;
     right: 16px;
     bottom: 58px;
@@ -2341,17 +2341,17 @@ body.light-mode .legend-canvas-root {
 
 .legend-dock-wrap {
     position: fixed;
-    top: 48px;
+    top: 50px;
     left: 0;
     right: 0;
     width: 100%;
-    min-height: 58px;
+    height: 56px;
     box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 24px;
-    padding: 10px 42px 10px 14px;
+    padding: 6px 42px 6px 14px;
     pointer-events: auto;
 }
 
@@ -2671,7 +2671,7 @@ body.light-mode .legend-ptype-bar {
    ========================================== */
 .legend-editor-panel {
     position: fixed;
-    top: 48px;
+    top: 50px;
     right: 0;
     bottom: 0;
     width: 260px;
@@ -3110,7 +3110,7 @@ body.light-mode .legend-ptype-bar {
     position: fixed;
     top: 106px;
     left: 0;
-    bottom: 46px;
+    bottom: 44px;
     width: 48px;
     z-index: 26;
     display: flex;
@@ -3251,4 +3251,363 @@ body.light-mode .left-tool-rail {
     .left-tool-rail .unit-toggle-pill.metric-mode .unit-thumb {
         transform: translateX(100%);
     }
+}
+
+/* ==========================================
+   FULL APP LIGHT MODE THEME
+   ========================================== */
+body.light-mode {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+/* Top Navbar, Mode Tabs, Category Pills & Dropdown Buttons */
+body.light-mode #top-nav {
+    background: #ffffff;
+    border-bottom-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode .mode-nav-btn {
+    color: #475569;
+}
+
+body.light-mode .mode-nav-btn:hover {
+    color: #0f172a;
+}
+
+body.light-mode .mode-nav-btn.active {
+    color: #0f172a;
+    border-bottom-color: #2563eb;
+}
+
+body.light-mode .clock-display {
+    color: #0f172a;
+}
+
+body.light-mode #top-time-container {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+}
+
+body.light-mode .param-cat-pill,
+body.light-mode .nav-dropdown-btn {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-mode .param-cat-pill:hover,
+body.light-mode .nav-dropdown-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    color: #0f172a;
+}
+
+body.light-mode .param-cat-pill.active,
+body.light-mode .nav-dropdown-btn.active,
+body.light-mode .nav-dropdown-btn.open {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+/* Category Sub-Bars & Dropdown Menus */
+body.light-mode .sub-nav-bar {
+    background: #f8fafc;
+    border-bottom-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode .model-cat-pill,
+body.light-mode .model-list-scroll-container button,
+body.light-mode .param-list-scroll-container button {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-mode .model-cat-pill:hover,
+body.light-mode .model-list-scroll-container button:hover,
+body.light-mode .param-list-scroll-container button:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+body.light-mode .model-cat-pill.active,
+body.light-mode .model-list-scroll-container button.active,
+body.light-mode .param-list-scroll-container button.active {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+body.light-mode .run-dropdown-menu,
+body.light-mode .view-dropdown-menu {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14);
+}
+
+body.light-mode .run-dropdown-menu button,
+body.light-mode .view-option-btn {
+    color: #334155;
+}
+
+body.light-mode .run-dropdown-menu button:hover,
+body.light-mode .view-option-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+body.light-mode .run-dropdown-menu button.active,
+body.light-mode .view-option-btn.active {
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+/* Left Tool Rail Buttons */
+body.light-mode .left-tool-rail {
+    background: rgba(255, 255, 255, 0.94);
+    border-right-color: #cbd5e1;
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn,
+body.light-mode .left-tool-rail .theme-toggle-pill,
+body.light-mode .left-tool-rail .unit-toggle-pill {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn:hover,
+body.light-mode .left-tool-rail .theme-toggle-pill:hover,
+body.light-mode .left-tool-rail .unit-toggle-pill:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    color: #0f172a;
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn.active {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+body.light-mode .left-tool-rail .theme-toggle-pill.light-mode .sun-icon {
+    color: #d97706;
+}
+
+body.light-mode .left-tool-rail .unit-thumb {
+    background: #ffffff;
+    border-color: #94a3b8;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15);
+}
+
+body.light-mode .left-tool-rail .unit-option {
+    color: #334155;
+}
+
+/* Bottom Timeline Capsule */
+body.light-mode #timeline-container {
+    background: #ffffff;
+    border-top-color: #cbd5e1;
+    color: #0f172a;
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.1);
+}
+
+body.light-mode .ctrl-btn,
+body.light-mode .gif-btn,
+body.light-mode .run-toggle-btn,
+body.light-mode .radar-tool-btn {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-mode .ctrl-btn:hover,
+body.light-mode .gif-btn:hover,
+body.light-mode .run-toggle-btn:hover,
+body.light-mode .radar-tool-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    color: #0f172a;
+}
+
+body.light-mode .ctrl-btn.active,
+body.light-mode .view-toggle-btn.active,
+body.light-mode .radar-tool-btn.active {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+body.light-mode #time-label {
+    color: #334155;
+}
+
+/* Toast, Popups & Coming Soon */
+body.light-mode #status-toast {
+    background: #ffffff;
+    color: #1d4ed8;
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+}
+
+body.light-mode .maplibregl-popup-content {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+body.light-mode .temp-f {
+    color: #1d4ed8;
+}
+
+body.light-mode .temp-c {
+    color: #475569;
+}
+
+body.light-mode .coming-soon-screen {
+    background: #f8fafc;
+    color: #0f172a;
+}
+
+/* Basemap Editor, Legend Editor, Highlight Modal & Picking Bar */
+body.light-mode .basemap-editor-panel,
+body.light-mode .legend-editor-panel,
+body.light-mode .highlight-modal-card,
+body.light-mode .highlight-picking-bar {
+    background: #ffffff;
+    border-color: #0f172a;
+    outline-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode .basemap-editor-header,
+body.light-mode .highlight-modal-header,
+body.light-mode .le-footer,
+body.light-mode .basemap-editor-footer {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+body.light-mode .basemap-editor-title,
+body.light-mode .highlight-modal-title,
+body.light-mode .le-target-name,
+body.light-mode .basemap-control-label,
+body.light-mode .basemap-checkbox-label,
+body.light-mode .basemap-preset-card.active .basemap-preset-name,
+body.light-mode .highlight-pick-single-label {
+    color: #0f172a;
+}
+
+body.light-mode .basemap-section-header,
+body.light-mode .basemap-slider-label,
+body.light-mode .basemap-disabled-note,
+body.light-mode .basemap-dropdown-arrow,
+body.light-mode .le-presets-empty,
+body.light-mode .le-restore-label,
+body.light-mode .le-empty-msg {
+    color: #64748b;
+}
+
+body.light-mode .basemap-control-row,
+body.light-mode .basemap-dropdown-block,
+body.light-mode .basemap-dropdown-toggle,
+body.light-mode .basemap-border-row,
+body.light-mode .basemap-preset-card,
+body.light-mode .basemap-label-switches-row,
+body.light-mode .le-presets-row,
+body.light-mode .le-inspector-card,
+body.light-mode .le-restore-strip,
+body.light-mode .le-shapes-popover,
+body.light-mode .legend-tool-btn,
+body.light-mode .highlight-type-btn,
+body.light-mode .highlight-multiple-box,
+body.light-mode .basemap-highlight-btn,
+body.light-mode .basemap-zoom-readout {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode .basemap-dropdown-body {
+    background: #f1f5f9;
+}
+
+body.light-mode .basemap-border-row.is-all-row {
+    background: #eff6ff;
+    border-color: #93c5fd;
+}
+
+body.light-mode .basemap-preset-name,
+body.light-mode .basemap-color-hex,
+body.light-mode .basemap-slider-value {
+    color: #334155;
+}
+
+body.light-mode .basemap-zoom-readout,
+body.light-mode .highlight-pick-count {
+    color: #1d4ed8;
+}
+
+body.light-mode .basemap-font-select,
+body.light-mode .basemap-font-size-wrap,
+body.light-mode .basemap-font-size-input,
+body.light-mode .le-text-input,
+body.light-mode .basemap-reset-btn,
+body.light-mode .le-mini-btn,
+body.light-mode .le-fmt-btn,
+body.light-mode .le-align-btn,
+body.light-mode .le-shape-pick-btn,
+body.light-mode .highlight-bar-btn,
+body.light-mode .highlight-pick-tab {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode .basemap-reset-btn:hover:not(:disabled),
+body.light-mode .le-mini-btn:hover:not(:disabled),
+body.light-mode .le-fmt-btn:hover,
+body.light-mode .le-align-btn:hover,
+body.light-mode .legend-tool-btn:hover,
+body.light-mode .basemap-dropdown-toggle:hover,
+body.light-mode .basemap-preset-card:hover,
+body.light-mode .highlight-type-btn:hover,
+body.light-mode .highlight-bar-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+body.light-mode .legend-tool-btn.active,
+body.light-mode .le-mini-btn.active,
+body.light-mode .le-fmt-btn.active,
+body.light-mode .le-align-btn.active,
+body.light-mode .highlight-type-btn.active,
+body.light-mode .highlight-pick-tab.active {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+body.light-mode .basemap-reset-all-btn {
+    background: #f1f5f9;
+    border-color: #0f172a;
+    outline: none;
+    color: #0f172a;
+}
+
+body.light-mode .basemap-reset-all-btn:hover:not(:disabled) {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+body.light-mode .basemap-reset-all-btn:disabled {
+    border-color: #cbd5e1;
+    color: #94a3b8;
 }
