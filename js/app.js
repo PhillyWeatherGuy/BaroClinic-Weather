@@ -1781,7 +1781,7 @@ map.on('load', async () => {
     updateBasemapZoomReadout(map.getZoom());
     initHighlightOverlay(map);
     applyHighlightLayers(map);
-    initLegendOverlay();
+    initLegendOverlay(map);
     initLegendEditor();
 
     // Keep Legend synced in Radar mode too (product changes & frame scrubbing)
