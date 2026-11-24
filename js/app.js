@@ -39,12 +39,13 @@ import {
 } from './layers/cityOverlay.js';
 import { initVectorContours, updateVectorContours, preloadAllContours, setContourActiveMember, getActiveContourFeatures, setContourGridMode, ensureEnsembleContourLayer } from './layers/vectorContours.js';
 import { initPolarMap, updatePolarFrame, updatePolarPalette, showPolarMap, hidePolarMap, clearPolarTextures, zoomPolarAtPoint, setPolarContourFeatures } from './layers/polarMap.js';
-
 import {
     initHighlightOverlay,
     applyHighlightLayers,
     isHighlightPickingActive
 } from './layers/highlightOverlay.js';
+import { initLegendOverlay, updateLegendOverlay } from './layers/legendOverlay.js';
+import { initLegendEditor } from './components/legendEditor.js';
 
 // 🛰️ Real-Time Radar Engine
 import { initRadarMode, destroyRadarMode, updateRadarUnitLabels } from './components/radarUI.js';
@@ -1260,6 +1261,7 @@ export async function applyTheme(theme) {
 
     if (stateManager.activeMode === 'radar') {
         applyRadarTheme(theme);
+        updateLegendOverlay();
         return;
     }
 
@@ -1300,6 +1302,7 @@ export async function applyTheme(theme) {
     if (polarMapLoaded) {
         try { updatePolarPalette(newPalette); } catch (e) {}
     }
+    updateLegendOverlay();
 }
 
 export function initLayer(shaderType = null) {
@@ -1385,6 +1388,7 @@ export function initLayer(shaderType = null) {
     // 🌟 Sync Basemap Editor label checkboxes & color pickers for the new parameter
     syncBasemapColorInputs(currentStyleBaseColors);
     applyHighlightLayers(map);
+    updateLegendOverlay();
 }
 
 async function renderFrame(globalIdx) {
@@ -1461,6 +1465,7 @@ async function renderFrame(globalIdx) {
     if (isDrawingEnsemble) {
         renderAllEnsembleMembers();
     }
+    updateLegendOverlay();
 }
 
 export async function preloadRemainingChunks(currentGen) {
@@ -1596,6 +1601,7 @@ export async function switchAppMode(targetMode) {
         if (modelBtn) modelBtn.style.display = 'none';
         if (paramBtn) paramBtn.style.display = 'none';
         showComingSoonScreen(targetMode);
+        updateLegendOverlay();
         return;
     }
 
@@ -1623,6 +1629,7 @@ export async function switchAppMode(targetMode) {
                 setBasemapLabelsVisibility(map, true);
                 await initRadarMode(map);
                 hideToast();
+                updateLegendOverlay();
             };
 
             map.once('style.load', onReady);
@@ -1633,6 +1640,7 @@ export async function switchAppMode(targetMode) {
             setBasemapLabelsVisibility(map, true);
             await initRadarMode(map);
             hideToast();
+            updateLegendOverlay();
         }
 
     } else if (targetMode === 'modelViewer') {
@@ -1725,6 +1733,7 @@ initViewerUI(
             updateCityCallouts(map, stateManager.activeFrameState, stateManager.manifest);
         }
         updateRadarUnitLabels();
+        updateLegendOverlay();
         const currentStep = stateManager.globalSteps[stateManager.currentStepIndex]?.step;
         if (currentStep !== undefined) updateVectorContours(currentStep);
         const location = popup.getLngLat();
@@ -1772,6 +1781,20 @@ map.on('load', async () => {
     updateBasemapZoomReadout(map.getZoom());
     initHighlightOverlay(map);
     applyHighlightLayers(map);
+    initLegendOverlay();
+    initLegendEditor();
+
+    // Keep Legend synced in Radar mode too (product changes & frame scrubbing)
+    document.getElementById('radar-product-select')?.addEventListener('change', () => updateLegendOverlay());
+    document.getElementById('radar-palette-select')?.addEventListener('change', () => updateLegendOverlay());
+    const validTimeEl = document.getElementById('header-valid-time');
+    const stepReadoutEl = document.getElementById('step-readout');
+    const legendDomObserver = new MutationObserver(() => {
+        if (stateManager.activeMode === 'radar') updateLegendOverlay();
+    });
+    if (validTimeEl) legendDomObserver.observe(validTimeEl, { childList: true, characterData: true, subtree: true });
+    if (stepReadoutEl) legendDomObserver.observe(stepReadoutEl, { childList: true, characterData: true, subtree: true });
+
     initBasemapMap();
     initWeatherMap();
     initAtmosphereHaloCanvas();
@@ -1789,6 +1812,7 @@ map.on('style.load', () => {
         applyBasemapOverrides();
     }
     applyHighlightLayers(map);
+    updateLegendOverlay();
     if (basemapMap && stateManager.currentMapStyle) {
         updateBasemapMapStyle(stateManager.currentMapStyle);
     }
