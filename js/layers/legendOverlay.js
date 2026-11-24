@@ -35,10 +35,24 @@ let customCounter = 0;
 let editToggleCallback = null;
 let selectionChangeCallback = null;
 
+/**
+ * 🌟 Detects active CSS zoom factor (e.g. 0.75) so getBoundingClientRect() & pointer deltas map 1:1 to CSS px
+ */
+function getCssZoomFactor() {
+    if (canvasRoot && typeof canvasRoot.currentCSSZoom === 'number' && canvasRoot.currentCSSZoom > 0) {
+        return canvasRoot.currentCSSZoom;
+    }
+    const htmlZoom = parseFloat(getComputedStyle(document.documentElement).zoom);
+    const bodyZoom = parseFloat(getComputedStyle(document.body).zoom);
+    const z = (Number.isFinite(htmlZoom) && htmlZoom > 0 ? htmlZoom : 1) *
+              (Number.isFinite(bodyZoom) && bodyZoom > 0 ? bodyZoom : 1);
+    return z > 0 ? z : 1;
+}
+
 function createDefaultElementStyle(id) {
     if (id === 'bg') {
         return {
-            bgColor: null,   // null = follow Light/Dark mode
+            bgColor: null,
             bgOpacity: 0.92,
             borderColor: null,
             borderWidth: 1,
@@ -233,7 +247,6 @@ export function resetLegendToDefault() {
         canvasRoot.classList.remove('is-free-layout');
         canvasRoot.querySelectorAll('.legend-item.is-custom-element').forEach((el) => el.remove());
 
-        // Re-dock default elements back into their original clean bar structure
         const bgEl = getElementDom('bg');
         const headerEl = getElementDom('header');
         const initEl = getElementDom('init');
@@ -390,14 +403,15 @@ export function updateSelectedLegendText(newText) {
 }
 
 /* =========================================================================
-   ADD CUSTOM ELEMENTS: TEXT, SHAPES, UPLOAD IMAGE (Free anywhere on screen)
+   ADD CUSTOM ELEMENTS: TEXT, SHAPES, UPLOAD IMAGE
    ========================================================================= */
 
 function getWorkspaceCenter() {
+    const z = getCssZoomFactor();
     const editorAllowance = editMode && window.innerWidth >= 1024 ? 260 : 0;
     return {
-        cx: Math.round((window.innerWidth - editorAllowance) / 2),
-        cy: 160
+        cx: Math.round(((window.innerWidth / z) - editorAllowance) / 2),
+        cy: Math.round(160 / z)
     };
 }
 
@@ -582,13 +596,15 @@ export function replaceSelectedLegendImage(dataUrl) {
 }
 
 /* =========================================================================
-   DETACH TO INDEPENDENT FREE-FLOATING SCREEN ELEMENTS (Zero Shrinking!)
+   DETACH TO INDEPENDENT FREE-FLOATING ELEMENTS (Zoom-compensated 1:1!)
    ========================================================================= */
 
 function activateFreeLayoutIfNeeded() {
     if (freeLayoutActive || !canvasRoot) return;
 
-    // 1. Measure every default element's exact current screen rect BEFORE moving it
+    const z = getCssZoomFactor();
+
+    // 1. Measure every default element's exact CSS coordinates BEFORE moving it (compensating for CSS zoom!)
     const rects = {};
     DEFAULT_ELEMENT_ORDER.forEach((id) => {
         const el = getElementDom(id);
@@ -596,10 +612,10 @@ function activateFreeLayoutIfNeeded() {
         const r = el.getBoundingClientRect();
         const extraW = elementsMap[id].kind === 'text' ? 6 : 0;
         rects[id] = {
-            x: Math.round(r.left),
-            y: Math.round(r.top),
-            w: Math.round(r.width + extraW),
-            h: Math.round(r.height)
+            x: Math.round(r.left / z),
+            y: Math.round(r.top / z),
+            w: Math.round((r.width / z) + extraW),
+            h: Math.round(r.height / z)
         };
     });
 
@@ -875,9 +891,10 @@ function renderColorKeyCanvas() {
     ptypeWrap.style.display = 'none';
     gradWrap.style.display = 'flex';
 
+    const z = getCssZoomFactor();
     const rect = canvas.getBoundingClientRect();
-    const w = Math.max(120, Math.round(rect.width || 300));
-    const h = Math.max(6, Math.round(rect.height || cbStyle.barHeight || 13));
+    const w = Math.max(120, Math.round(canvas.clientWidth || (rect.width / z) || 300));
+    const h = Math.max(6, Math.round(canvas.clientHeight || (rect.height / z) || cbStyle.barHeight || 13));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
@@ -983,7 +1000,7 @@ export function updateLegendOverlay() {
 }
 
 /* =========================================================================
-   UNBOUNDED DRAG & RESIZE INTERACTIONS (Any item anywhere on screen!)
+   UNBOUNDED DRAG & RESIZE INTERACTIONS (Zoom-compensated 1:1!)
    ========================================================================= */
 
 function attachDragAndResizeHandlers() {
@@ -993,7 +1010,9 @@ function attachDragAndResizeHandlers() {
         if (!interaction) return;
         e.preventDefault();
 
-        // Only detach from docked layout if user actually moves pointer > 3px (prevents click-shrink!)
+        const z = getCssZoomFactor();
+
+        // Only detach from docked layout if user actually moves pointer > 3px
         if (!interaction.detached) {
             if (Math.hypot(e.clientX - interaction.startX, e.clientY - interaction.startY) < 4 && interaction.kind === 'move') {
                 return;
@@ -1007,15 +1026,17 @@ function attachDragAndResizeHandlers() {
             interaction.detached = true;
         }
 
-        const dx = e.clientX - interaction.startX;
-        const dy = e.clientY - interaction.startY;
+        const dx = (e.clientX - interaction.startX) / z;
+        const dy = (e.clientY - interaction.startY) / z;
         const id = interaction.id;
         const el = interaction.el;
         const item = elementsMap[id];
 
         if (interaction.kind === 'move') {
-            const maxX = Math.max(0, window.innerWidth - interaction.origW);
-            const maxY = Math.max(0, window.innerHeight - interaction.origH);
+            const viewW = window.innerWidth / z;
+            const viewH = window.innerHeight / z;
+            const maxX = Math.max(0, viewW - interaction.origW);
+            const maxY = Math.max(0, viewH - interaction.origH);
             item.x = Math.round(Math.max(0, Math.min(maxX, interaction.origX + dx)));
             item.y = Math.round(Math.max(0, Math.min(maxY, interaction.origY + dy)));
             el.style.left = `${item.x}px`;
