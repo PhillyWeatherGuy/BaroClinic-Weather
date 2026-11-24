@@ -36,7 +36,7 @@ const FONT_OPTIONS = [
 let panelEl = null;
 let renderedKey = '';
 let shapesMenuOpen = false;
-let imageMode = 'add'; // 'add' | 'replace'
+let imageMode = 'add';
 
 function closeBasemapEditorIfOpen() {
     const basemapPanel = document.getElementById('basemap-editor-panel');
@@ -84,7 +84,7 @@ function syncRestoreStrip() {
 
     restoreWrap.style.display = 'flex';
     restoreWrap.innerHTML = `
-        <span class="le-restore-label">Hidden:</span>
+        <span class="le-restore-label">Deleted:</span>
         ${deleted.map((sec) => `
             <button type="button" class="le-restore-pill" data-restore-id="${sec.id}">+ ${sec.label}</button>
         `).join('')}
@@ -99,29 +99,28 @@ function renderInspectorForSelection(selected) {
     const host = panelEl?.querySelector('#legend-inspector-controls');
     const titleEl = panelEl?.querySelector('#legend-active-target-name');
     const deleteBtn = panelEl?.querySelector('#btn-le-delete');
-    const boxBtn = panelEl?.querySelector('#btn-le-select-box');
+    const bgBtn = panelEl?.querySelector('#btn-le-select-bg');
     if (!host) return;
 
     if (titleEl) {
-        titleEl.textContent = selected ? selected.label : 'Nothing Selected';
+        titleEl.textContent = selected ? selected.label : 'None';
     }
     if (deleteBtn) {
-        deleteBtn.disabled = !selected || selected.id === '__box__';
+        deleteBtn.disabled = !selected;
     }
-    if (boxBtn) {
-        boxBtn.classList.toggle('active', selected?.id === '__box__');
+    if (bgBtn) {
+        bgBtn.classList.toggle('active', selected?.id === 'bg');
     }
 
     if (!selected) {
         renderedKey = 'none';
-        host.innerHTML = `<div class="le-empty-msg">Click any element on the legend to edit it.</div>`;
+        host.innerHTML = `<div class="le-empty-msg">Click any element on the screen to edit it.</div>`;
         return;
     }
 
     const nextKey = `${selected.id}:${selected.kind}:${selected.shapeType || ''}`;
     const s = selected.style || {};
 
-    // Update existing inputs without rebuilding DOM while user is dragging sliders or typing
     if (nextKey === renderedKey) {
         syncExistingControlValues(selected, s);
         return;
@@ -164,7 +163,7 @@ function renderInspectorForSelection(selected) {
             </div>
 
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
             </div>
@@ -240,7 +239,7 @@ function renderInspectorForSelection(selected) {
             </div>
 
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
             </div>
@@ -293,7 +292,7 @@ function renderInspectorForSelection(selected) {
                 </div>
             ` : ''}
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
             </div>
@@ -325,7 +324,7 @@ function renderInspectorForSelection(selected) {
                 <button id="btn-le-replace-img" class="basemap-highlight-btn" type="button" style="justify-content:center;">Replace Image</button>
             </div>
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
             </div>
@@ -348,7 +347,7 @@ function renderInspectorForSelection(selected) {
 
         host.innerHTML = `
             <div class="le-row le-space-between">
-                <span class="basemap-control-label">Background</span>
+                <span class="basemap-control-label">Fill Color</span>
                 <input id="le-box-bg" class="basemap-color-input" type="color" value="${bgHex}" />
             </div>
             <div class="le-row le-slider-row">
@@ -361,7 +360,7 @@ function renderInspectorForSelection(selected) {
                 <input id="le-box-border" class="basemap-color-input" type="color" value="${borderHex}" />
             </div>
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Border Width</span>
+                <span class="basemap-slider-label">Border W</span>
                 <input id="le-box-bw" class="basemap-range-slider" type="range" min="0" max="4" step="0.5" value="${s.borderWidth ?? 1}" />
                 <span id="le-box-bw-val" class="basemap-slider-value">${(s.borderWidth ?? 1).toFixed(1)}px</span>
             </div>
@@ -431,13 +430,11 @@ export function initLegendEditor() {
         </div>
 
         <div class="le-body">
-            <!-- Compact Presets Slot (ready for presets) -->
             <div class="le-presets-row">
                 <span class="basemap-slider-label">Presets</span>
                 <span class="le-presets-empty">—</span>
             </div>
 
-            <!-- Elements Toolbar -->
             <div class="le-tools-wrap">
                 <div class="legend-tools-bar">
                     <button type="button" class="legend-tool-btn active" data-tool="select" title="Select & Move">
@@ -479,16 +476,14 @@ export function initLegendEditor() {
                 <input id="le-hidden-file-input" type="file" accept="image/*" style="display: none;" />
             </div>
 
-            <!-- Only shown if user deleted a default section -->
             <div id="legend-restore-strip" class="le-restore-strip" style="display: none;"></div>
 
-            <!-- Active Selection Header + Controls -->
             <div class="le-inspector-card">
                 <div class="le-inspector-head">
                     <span id="legend-active-target-name" class="le-target-name">Header</span>
                     <div class="le-head-actions">
-                        <button id="btn-le-select-box" class="le-mini-btn" type="button" title="Edit Legend Container Background & Border">Box</button>
-                        <button id="btn-le-delete" class="le-mini-btn is-danger" type="button" title="Delete Selected Element">Delete</button>
+                        <button id="btn-le-select-bg" class="le-mini-btn" type="button" title="Select Background Bar">BG</button>
+                        <button id="btn-le-delete" class="le-mini-btn is-danger" type="button" title="Delete Selected">Delete</button>
                     </div>
                 </div>
                 <div id="legend-inspector-controls" class="le-inspector-controls"></div>
@@ -497,7 +492,7 @@ export function initLegendEditor() {
 
         <div class="le-footer">
             <button id="btn-reset-legend-default" class="basemap-reset-all-btn" type="button">
-                Reset Legend to Default
+                Reset Legend
             </button>
         </div>
     `;
@@ -507,7 +502,11 @@ export function initLegendEditor() {
     panelEl.querySelector('#btn-close-legend-editor')?.addEventListener('click', () => setLegendEditMode(false));
     panelEl.querySelector('#btn-legend-done-editing')?.addEventListener('click', () => setLegendEditMode(false));
     panelEl.querySelector('#btn-le-delete')?.addEventListener('click', () => deleteSelectedLegendElement());
-    panelEl.querySelector('#btn-le-select-box')?.addEventListener('click', () => selectLegendElement('__box__'));
+    panelEl.querySelector('#btn-le-select-bg')?.addEventListener('click', () => {
+        const deletedBg = getDeletedDefaultSections().some((s) => s.id === 'bg');
+        if (deletedBg) restoreLegendSection('bg');
+        else selectLegendElement('bg');
+    });
     panelEl.querySelector('#btn-reset-legend-default')?.addEventListener('click', () => {
         renderedKey = '';
         resetLegendToDefault();
