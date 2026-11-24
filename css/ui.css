@@ -2697,17 +2697,18 @@ body.light-mode .legend-ptype-bar {
     transform: translateX(0);
     pointer-events: auto;
 }
-
 @media (min-width: 1024px) {
     body.legend-editor-open #map,
     body.legend-editor-open #globe-container {
-        width: calc(100vw - 260px) !important;
-        right: 260px;
+        left: 0 !important;
+        right: 260px !important;
+        width: auto !important;
     }
 
     body.legend-editor-open .legend-dock-wrap {
-        width: calc(100vw - 260px);
+        left: 0;
         right: 260px;
+        width: auto;
         padding: 10px 14px 10px 176px;
     }
 
@@ -2724,9 +2725,9 @@ body.light-mode .legend-ptype-bar {
     }
 
     body.legend-editor-open #timeline-container {
-        width: calc(100vw - 260px) !important;
-        right: 260px !important;
         left: 0 !important;
+        right: 260px !important;
+        width: auto !important;
     }
 }
 
@@ -3055,7 +3056,11 @@ body.light-mode .legend-ptype-bar {
 }
 
 .le-slider-row .basemap-slider-label {
-    min-width: 66px;
+    min-width: 54px;
+}
+
+.le-slider-row .basemap-range-slider {
+    min-width: 0;
 }
 
 .le-footer {
