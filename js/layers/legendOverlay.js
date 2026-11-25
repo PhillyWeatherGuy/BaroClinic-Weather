@@ -21,12 +21,16 @@ const ELEMENT_LABELS = {
     colorbar: 'Color Key'
 };
 
+const DESKTOP_RAIL_W = 48;
+const DESKTOP_EDITOR_W = 420;
+
 let mapRef = null;
 let canvasRoot = null;
 let dockWrap = null;
 let editMode = false;
 let selectedId = null;
 let freeLayoutActive = false;
+let lastFreeWorkspace = null;
 
 let elementsMap = createDefaultElementsMap();
 let customOrder = [];
@@ -35,9 +39,6 @@ let customCounter = 0;
 let editToggleCallback = null;
 let selectionChangeCallback = null;
 
-/**
- * 🌟 Detects active CSS zoom factor (e.g. 0.75) so getBoundingClientRect() & pointer deltas map 1:1 to CSS px
- */
 function getCssZoomFactor() {
     if (canvasRoot && typeof canvasRoot.currentCSSZoom === 'number' && canvasRoot.currentCSSZoom > 0) {
         return canvasRoot.currentCSSZoom;
@@ -47,6 +48,14 @@ function getCssZoomFactor() {
     const z = (Number.isFinite(htmlZoom) && htmlZoom > 0 ? htmlZoom : 1) *
               (Number.isFinite(bodyZoom) && bodyZoom > 0 ? bodyZoom : 1);
     return z > 0 ? z : 1;
+}
+
+function getWorkspaceBounds(isEditing = editMode) {
+    const z = getCssZoomFactor();
+    const isDesktop = window.innerWidth >= 1024;
+    const left = isDesktop ? DESKTOP_RAIL_W : 0;
+    const right = (window.innerWidth / z) - (isDesktop && isEditing ? DESKTOP_EDITOR_W : 0);
+    return { left, right, span: Math.max(160, right - left) };
 }
 
 function createDefaultElementStyle(id) {
@@ -158,12 +167,52 @@ function getElementDom(id) {
     return canvasRoot?.querySelector(`.legend-item[data-element-id="${id}"]`) || null;
 }
 
+function rescaleFreeLayoutToCurrentWorkspace() {
+    if (!freeLayoutActive || !canvasRoot) return;
+    const nextBounds = getWorkspaceBounds(editMode);
+    if (!lastFreeWorkspace) {
+        lastFreeWorkspace = nextBounds;
+        return;
+    }
+
+    if (Math.abs(lastFreeWorkspace.span - nextBounds.span) < 2 && Math.abs(lastFreeWorkspace.left - nextBounds.left) < 2) {
+        return;
+    }
+
+    const scaleX = nextBounds.span / lastFreeWorkspace.span;
+    const allIds = [...DEFAULT_ELEMENT_ORDER, ...customOrder];
+
+    allIds.forEach((id) => {
+        const item = elementsMap[id];
+        const el = getElementDom(id);
+        if (!item || item.deleted || !el || !Number.isFinite(item.x)) return;
+
+        const relX = item.x - lastFreeWorkspace.left;
+        item.x = Math.round(nextBounds.left + relX * scaleX);
+
+        if (item.kind === 'box' || item.kind === 'colorbar' || item.kind === 'shape' || item.kind === 'image') {
+            const minW = item.kind === 'colorbar' ? 90 : 20;
+            item.w = Math.max(minW, Math.round(item.w * scaleX));
+            el.style.width = `${item.w}px`;
+        } else if (item.x + item.w > nextBounds.right) {
+            item.x = Math.max(nextBounds.left, Math.round(nextBounds.right - item.w));
+        }
+
+        el.style.left = `${item.x}px`;
+    });
+
+    lastFreeWorkspace = nextBounds;
+}
+
 export function setLegendEditMode(active) {
     editMode = Boolean(active);
     if (!canvasRoot) return;
 
     canvasRoot.classList.toggle('is-editing', editMode);
     document.body.classList.toggle('legend-editor-open', editMode);
+
+    // Proportionally map free-layout elements so editor left edge == full-screen right edge
+    rescaleFreeLayoutToCurrentWorkspace();
 
     if (!editMode) {
         selectedId = null;
@@ -240,6 +289,7 @@ export function restoreLegendSection(id) {
 
 export function resetLegendToDefault() {
     freeLayoutActive = false;
+    lastFreeWorkspace = null;
     elementsMap = createDefaultElementsMap();
     customOrder = [];
 
@@ -408,9 +458,9 @@ export function updateSelectedLegendText(newText) {
 
 function getWorkspaceCenter() {
     const z = getCssZoomFactor();
-    const editorAllowance = editMode && window.innerWidth >= 1024 ? 260 : 0;
+    const bounds = getWorkspaceBounds(editMode);
     return {
-        cx: Math.round(((window.innerWidth / z) - editorAllowance) / 2),
+        cx: Math.round((bounds.left + bounds.right) / 2),
         cy: Math.round(160 / z)
     };
 }
@@ -456,7 +506,7 @@ export function addLegendText(initialText = 'Custom Text') {
     node.style.height = `${elH}px`;
     node.innerHTML = `
         <div class="legend-section-content">${initialText}</div>
-        ${buildHandleHTML('legend-sec-handle', SEC_HANDLE_DIRS)}
+        ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
     `;
 
     node.addEventListener('dblclick', (e) => {
@@ -531,7 +581,7 @@ export function addLegendShape(shapeType = 'rect') {
     node.style.height = `${elH}px`;
     node.innerHTML = `
         <div class="legend-shape-node"></div>
-        ${buildHandleHTML('legend-sec-handle', SEC_HANDLE_DIRS)}
+        ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
     `;
 
     canvasRoot.appendChild(node);
@@ -576,7 +626,7 @@ export function addLegendImage(dataUrl) {
         node.style.height = `${elH}px`;
         node.innerHTML = `
             <img class="legend-custom-img" src="${dataUrl}" alt="Custom legend graphic" draggable="false" />
-            ${buildHandleHTML('legend-sec-handle', SEC_HANDLE_DIRS)}
+            ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
         `;
 
         canvasRoot.appendChild(node);
@@ -603,8 +653,8 @@ function activateFreeLayoutIfNeeded() {
     if (freeLayoutActive || !canvasRoot) return;
 
     const z = getCssZoomFactor();
+    lastFreeWorkspace = getWorkspaceBounds(editMode);
 
-    // 1. Measure every default element's exact CSS coordinates BEFORE moving it (compensating for CSS zoom!)
     const rects = {};
     DEFAULT_ELEMENT_ORDER.forEach((id) => {
         const el = getElementDom(id);
@@ -619,7 +669,6 @@ function activateFreeLayoutIfNeeded() {
         };
     });
 
-    // 2. Flip into free-floating screen canvas mode & promote each item directly into canvasRoot
     freeLayoutActive = true;
     canvasRoot.classList.add('is-free-layout');
 
@@ -1000,8 +1049,38 @@ export function updateLegendOverlay() {
 }
 
 /* =========================================================================
-   UNBOUNDED DRAG & RESIZE INTERACTIONS (Zoom-compensated 1:1!)
+   UNBOUNDED DRAG & RESIZE INTERACTIONS
+   (Moving/resizing 'bg' also moves & shapes elements inside 'bg'!)
    ========================================================================= */
+
+function captureBgChildrenSnapshot() {
+    const bg = elementsMap.bg;
+    if (!bg || bg.deleted) return [];
+
+    const children = [];
+    const allIds = [...DEFAULT_ELEMENT_ORDER, ...customOrder];
+    allIds.forEach((cid) => {
+        if (cid === 'bg') return;
+        const c = elementsMap[cid];
+        const cEl = getElementDom(cid);
+        if (!c || c.deleted || !cEl || !Number.isFinite(c.x)) return;
+
+        const cx = c.x + c.w / 2;
+        const cy = c.y + c.h / 2;
+        if (cx >= bg.x - 4 && cx <= bg.x + bg.w + 4 && cy >= bg.y - 4 && cy <= bg.y + bg.h + 4) {
+            children.push({
+                id: cid,
+                el: cEl,
+                kind: c.kind,
+                origX: c.x,
+                origY: c.y,
+                origW: c.w,
+                origH: c.h
+            });
+        }
+    });
+    return children;
+}
 
 function attachDragAndResizeHandlers() {
     let interaction = null;
@@ -1012,7 +1091,6 @@ function attachDragAndResizeHandlers() {
 
         const z = getCssZoomFactor();
 
-        // Only detach from docked layout if user actually moves pointer > 3px
         if (!interaction.detached) {
             if (Math.hypot(e.clientX - interaction.startX, e.clientY - interaction.startY) < 4 && interaction.kind === 'move') {
                 return;
@@ -1023,6 +1101,9 @@ function attachDragAndResizeHandlers() {
             interaction.origY = item.y;
             interaction.origW = item.w;
             interaction.origH = item.h;
+            if (interaction.id === 'bg') {
+                interaction.bgChildren = captureBgChildrenSnapshot();
+            }
             interaction.detached = true;
         }
 
@@ -1041,9 +1122,21 @@ function attachDragAndResizeHandlers() {
             item.y = Math.round(Math.max(0, Math.min(maxY, interaction.origY + dy)));
             el.style.left = `${item.x}px`;
             el.style.top = `${item.y}px`;
+
+            if (id === 'bg' && interaction.bgChildren?.length) {
+                const actualDx = item.x - interaction.origX;
+                const actualDy = item.y - interaction.origY;
+                interaction.bgChildren.forEach((child) => {
+                    const c = elementsMap[child.id];
+                    c.x = Math.round(child.origX + actualDx);
+                    c.y = Math.round(child.origY + actualDy);
+                    child.el.style.left = `${c.x}px`;
+                    child.el.style.top = `${c.y}px`;
+                });
+            }
         } else if (interaction.kind === 'resize') {
-            const minW = id === 'colorbar' ? 120 : 28;
-            const minH = id === 'colorbar' ? 24 : 12;
+            const minW = id === 'colorbar' ? 120 : (id === 'bg' ? 160 : 28);
+            const minH = id === 'colorbar' ? 24 : (id === 'bg' ? 32 : 12);
             let { origX: x, origY: y, origW: w, origH: h } = interaction;
             const dir = interaction.dir;
 
@@ -1070,7 +1163,36 @@ function attachDragAndResizeHandlers() {
             el.style.width = `${item.w}px`;
             el.style.height = `${item.h}px`;
 
-            if (id === 'colorbar') renderColorKeyCanvas();
+            if (id === 'bg' && interaction.bgChildren?.length) {
+                const sx = item.w / Math.max(1, interaction.origW);
+                const sy = item.h / Math.max(1, interaction.origH);
+                let touchesColorbar = false;
+
+                interaction.bgChildren.forEach((child) => {
+                    const c = elementsMap[child.id];
+                    const relX = child.origX - interaction.origX;
+                    const relY = child.origY - interaction.origY;
+
+                    c.x = Math.round(item.x + relX * sx);
+                    c.y = Math.round(item.y + relY * sy);
+
+                    const minCW = child.id === 'colorbar' ? 90 : 20;
+                    const minCH = child.id === 'colorbar' ? 20 : 12;
+                    c.w = Math.max(minCW, Math.round(child.origW * sx));
+                    c.h = Math.max(minCH, Math.round(child.origH * sy));
+
+                    child.el.style.left = `${c.x}px`;
+                    child.el.style.top = `${c.y}px`;
+                    child.el.style.width = `${c.w}px`;
+                    child.el.style.height = `${c.h}px`;
+
+                    if (child.id === 'colorbar') touchesColorbar = true;
+                });
+
+                if (touchesColorbar) renderColorKeyCanvas();
+            } else if (id === 'colorbar') {
+                renderColorKeyCanvas();
+            }
         }
     };
 
@@ -1109,12 +1231,13 @@ function attachDragAndResizeHandlers() {
                 origX: elementsMap[id].x,
                 origY: elementsMap[id].y,
                 origW: elementsMap[id].w,
-                origH: elementsMap[id].h
+                origH: elementsMap[id].h,
+                bgChildren: id === 'bg' ? captureBgChildrenSnapshot() : null
             };
             return;
         }
 
-        // 2. Check click/drag on any item (including Background Bar!)
+        // 2. Check click/drag on any item
         const itemEl = e.target.closest('.legend-item');
         if (itemEl) {
             e.stopPropagation();
@@ -1131,7 +1254,8 @@ function attachDragAndResizeHandlers() {
                 origX: elementsMap[id].x,
                 origY: elementsMap[id].y,
                 origW: elementsMap[id].w,
-                origH: elementsMap[id].h
+                origH: elementsMap[id].h,
+                bgChildren: (freeLayoutActive && id === 'bg') ? captureBgChildrenSnapshot() : null
             };
         }
     });
@@ -1228,6 +1352,9 @@ export function initLegendOverlay(map = null) {
     }
 
     attachDragAndResizeHandlers();
-    window.addEventListener('resize', () => renderColorKeyCanvas());
+    window.addEventListener('resize', () => {
+        rescaleFreeLayoutToCurrentWorkspace();
+        renderColorKeyCanvas();
+    });
     updateLegendOverlay();
 }
