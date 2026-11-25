@@ -3639,3 +3639,325 @@ body.light-mode .basemap-reset-all-btn:disabled {
     border-color: #cbd5e1;
     color: #94a3b8;
 }
+
+/* ==========================================
+   CANVA TEXT EFFECTS & CURVE CONTROLS
+   ========================================== */
+.legend-section-content {
+    position: relative;
+}
+
+.legend-section-content[data-effect-type="splice"]::before {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    padding: inherit;
+    color: var(--le-eff-color, #6b7280);
+    -webkit-text-fill-color: var(--le-eff-color, #6b7280);
+    -webkit-text-stroke: 0;
+    transform: translate(var(--le-dx, 2px), var(--le-dy, 2px));
+    z-index: -1;
+    pointer-events: none;
+    white-space: inherit;
+}
+
+.legend-section-content[data-effect-type="glitch"]::before,
+.legend-section-content[data-effect-type="glitch"]::after {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    padding: inherit;
+    z-index: -1;
+    pointer-events: none;
+    white-space: inherit;
+}
+
+.legend-section-content[data-effect-type="glitch"]::before {
+    color: var(--le-eff-color, #ff00ff);
+    transform: translate(var(--le-dx, 2px), var(--le-dy, 2px));
+}
+
+.legend-section-content[data-effect-type="glitch"]::after {
+    color: var(--le-eff-color2, #00ffff);
+    transform: translate(var(--le-dx2, -2px), var(--le-dy2, -2px));
+}
+
+.legend-curve-svg {
+    display: block;
+    overflow: visible;
+}
+
+/* Effects Grid inside Legend Editor */
+.le-effects-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #232b3c;
+}
+
+.le-effects-title {
+    font-family: 'Roboto', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+}
+
+.le-shape-title {
+    margin-top: 4px;
+}
+
+.le-effects-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+}
+
+.le-effect-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 4px;
+    background: #11151e;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    color: #cbd5e1;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.le-effect-card:hover {
+    background: #181d28;
+    border-color: #64748b;
+    color: #ffffff;
+}
+
+.le-effect-card.active {
+    border: 1.5px solid #3b82f6;
+    background: rgba(37, 99, 235, 0.16);
+    color: #ffffff;
+}
+
+.le-effect-name {
+    font-family: 'Roboto', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.le-effect-preview {
+    font-family: 'Roboto', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #a855f7;
+    position: relative;
+}
+
+.le-effect-preview.is-preview-none {
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.le-effect-preview.is-preview-drop {
+    text-shadow: 2px 2px 3px rgba(168, 85, 247, 0.65);
+}
+
+.le-effect-preview.is-preview-glow {
+    text-shadow: 0 0 8px rgba(168, 85, 247, 0.9), 0 0 14px rgba(168, 85, 247, 0.65);
+}
+
+.le-effect-preview.is-preview-echo {
+    text-shadow: 2px 2px 0 rgba(168, 85, 247, 0.5), 4px 4px 0 rgba(168, 85, 247, 0.25);
+}
+
+.le-effect-preview.is-preview-outline {
+    color: #d8b4fe;
+    -webkit-text-stroke: 1.2px #7e22ce;
+    paint-order: stroke fill;
+}
+
+.le-effect-preview.is-preview-background {
+    padding: 1px 7px;
+    background: rgba(168, 85, 247, 0.28);
+    border-radius: 4px;
+}
+
+.le-effect-preview.is-preview-splice {
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 1.2px #a855f7;
+    text-shadow: 2px 2px 0 rgba(168, 85, 247, 0.45);
+}
+
+.le-effect-preview.is-preview-hollow {
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 1.3px #a855f7;
+}
+
+.le-effect-preview.is-preview-neon {
+    color: #f3e8ff;
+    text-shadow: 0 0 4px #a855f7, 0 0 10px #a855f7, 0 0 16px #9333ea;
+}
+
+.le-effect-preview.is-preview-glitch {
+    text-shadow: -2px 0 0 #00ffff, 2px 0 0 #ff00ff;
+}
+
+.le-eff-params {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    background: #11151e;
+    border: 1px solid #232b3c;
+}
+
+.le-eff-control {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.le-eff-control-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.le-eff-control-label {
+    font-family: 'Roboto', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: #cbd5e1;
+}
+
+.le-stepper {
+    display: flex;
+    align-items: center;
+    background: #181d28;
+    border: 1px solid #2a3446;
+}
+
+.le-step-btn {
+    width: 22px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.le-step-btn:hover {
+    background: #232c3d;
+    color: #ffffff;
+}
+
+.le-step-val {
+    min-width: 32px;
+    text-align: center;
+    font-family: monospace;
+    font-size: 11px;
+    color: #f8fafc;
+}
+
+.le-eff-slider {
+    width: 100%;
+    min-width: 0;
+}
+
+.le-dual-colors {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.le-shape-curve-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.le-curve-card {
+    min-width: 78px;
+    flex-shrink: 0;
+}
+
+.le-curve-preview-svg {
+    color: #a855f7;
+    display: block;
+}
+
+.le-curve-slider-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 6px 8px;
+    background: #11151e;
+    border: 1px solid #232b3c;
+}
+
+/* Light Mode Overrides for Effects UI */
+body.light-mode .le-effects-section {
+    border-top-color: #cbd5e1;
+}
+
+body.light-mode .le-effects-title {
+    color: #64748b;
+}
+
+body.light-mode .le-effect-card {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-mode .le-effect-card:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+body.light-mode .le-effect-card.active {
+    border-color: #2563eb;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+body.light-mode .le-eff-params,
+body.light-mode .le-curve-slider-wrap {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
+body.light-mode .le-eff-control-label {
+    color: #334155;
+}
+
+body.light-mode .le-stepper {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+body.light-mode .le-step-btn {
+    color: #334155;
+}
+
+body.light-mode .le-step-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+body.light-mode .le-step-val {
+    color: #0f172a;
+}
