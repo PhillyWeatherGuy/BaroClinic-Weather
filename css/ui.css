@@ -2342,9 +2342,9 @@ body.light-mode .legend-canvas-root {
 .legend-dock-wrap {
     position: fixed;
     top: 50px;
-    left: 0;
+    left: 48px;
     right: 0;
-    width: 100%;
+    width: auto;
     height: 56px;
     box-sizing: border-box;
     display: flex;
@@ -2705,7 +2705,7 @@ body.light-mode .legend-ptype-bar {
     }
 
     body.legend-editor-open .legend-dock-wrap {
-        left: 0;
+        left: 48px;
         right: 260px;
         width: auto;
         padding: 10px 38px 10px 14px;
@@ -3108,7 +3108,7 @@ body.light-mode .legend-ptype-bar {
    ========================================== */
 .left-tool-rail {
     position: fixed;
-    top: 106px;
+    top: 50px;
     left: 0;
     bottom: 44px;
     width: 48px;
@@ -3121,12 +3121,14 @@ body.light-mode .legend-ptype-bar {
     box-sizing: border-box;
     background: rgba(19, 23, 34, 0.92);
     backdrop-filter: blur(10px);
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
     border-right: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 0;
 }
 
 body.light-mode .left-tool-rail {
     background: rgba(255, 255, 255, 0.94);
+    border-top-color: rgba(15, 23, 42, 0.12);
     border-right-color: rgba(15, 23, 42, 0.18);
 }
 
@@ -3142,9 +3144,25 @@ body.light-mode .left-tool-rail {
     box-shadow: none;
 }
 
+/* Opposite-theme contrast on the Basemap button so it pops out */
 .left-tool-rail .basemap-toggle-btn {
     width: 36px;
     height: 34px;
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+.left-tool-rail .basemap-toggle-btn:hover {
+    background: #ffffff;
+    border-color: #94a3b8;
+    color: #020617;
+}
+
+.left-tool-rail .basemap-toggle-btn.active {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
 }
 
 /* Vertical Light / Dark Toggle */
@@ -3373,8 +3391,6 @@ body.light-mode .left-tool-rail {
     background: rgba(255, 255, 255, 0.94);
     border-right-color: #cbd5e1;
 }
-
-body.light-mode .left-tool-rail .basemap-toggle-btn,
 body.light-mode .left-tool-rail .theme-toggle-pill,
 body.light-mode .left-tool-rail .unit-toggle-pill {
     background: #f1f5f9;
@@ -3382,12 +3398,23 @@ body.light-mode .left-tool-rail .unit-toggle-pill {
     color: #334155;
 }
 
-body.light-mode .left-tool-rail .basemap-toggle-btn:hover,
 body.light-mode .left-tool-rail .theme-toggle-pill:hover,
 body.light-mode .left-tool-rail .unit-toggle-pill:hover {
     background: #e2e8f0;
     border-color: #94a3b8;
     color: #0f172a;
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn {
+    background: #151a24;
+    border-color: #232b3c;
+    color: #f8fafc;
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn:hover {
+    background: #1e293b;
+    border-color: #475569;
+    color: #ffffff;
 }
 
 body.light-mode .left-tool-rail .basemap-toggle-btn.active {
