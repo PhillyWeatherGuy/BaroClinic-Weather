@@ -2624,6 +2624,7 @@ body.light-mode .legend-ptype-bar {
 }
 
 .legend-canvas-root:hover .legend-edit-pencil-btn,
+.legend-canvas-root.is-pencil-visible .legend-edit-pencil-btn,
 .legend-canvas-root.is-editing .legend-edit-pencil-btn {
     opacity: 1;
     pointer-events: auto;
