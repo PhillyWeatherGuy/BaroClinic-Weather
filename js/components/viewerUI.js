@@ -558,9 +558,12 @@ export function updateSliderTrackAndBounds() {
     const maxLoadedIdx = getMaxLoadedStepIndex();
     const loadedPercent = (maxLoadedIdx / totalSteps) * 100;
 
+    const isLight = document.body.classList.contains('light-mode') || stateManager.currentTheme === 'light';
+    const loadedColor = isLight ? 'rgba(15, 23, 42, 0.2)' : 'rgba(255, 255, 255, 0.15)';
+
     slider.style.background = `linear-gradient(to right, 
-        rgba(255, 255, 255, 0.15) 0%, 
-        rgba(255, 255, 255, 0.15) ${loadedPercent}%, 
+        ${loadedColor} 0%, 
+        ${loadedColor} ${loadedPercent}%, 
         rgba(239, 68, 68, 0.6) ${loadedPercent}%, 
         rgba(239, 68, 68, 0.6) 100%)`;
 }
