@@ -1257,6 +1257,7 @@ export function handleKeyboardZoom(direction, x, y) {
  */
 export async function applyTheme(theme) {
     document.body.classList.toggle('light-mode', theme === 'light');
+    updateSliderTrackAndBounds();
     syncBasemapEditorTheme(theme);
 
     if (stateManager.activeMode === 'radar') {
