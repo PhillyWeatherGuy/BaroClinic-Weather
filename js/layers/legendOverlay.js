@@ -21,6 +21,19 @@ const ELEMENT_LABELS = {
     colorbar: 'Color Key'
 };
 
+export const DEFAULT_EFFECT_PRESETS = {
+    none: {},
+    drop: { direction: -45, offset: 20, blur: 10, transparency: 50, color: '#000000' },
+    glow: { intensity: 40 },
+    echo: { direction: -52, offset: 13, color: '#000000' },
+    outline: { thickness: 50, color: '#000000' },
+    background: { roundness: 50, spread: 50, transparency: 100, color: '#facc15' },
+    splice: { thickness: 50, offset: 50, direction: -45, color: '#6b7280' },
+    hollow: { thickness: 50 },
+    neon: { intensity: 50 },
+    glitch: { direction: -55, offset: 9, color: '#ff00ff', color2: '#00ffff' }
+};
+
 const DESKTOP_RAIL_W = 48;
 const DESKTOP_EDITOR_W = 420;
 
@@ -38,6 +51,24 @@ let customCounter = 0;
 
 let editToggleCallback = null;
 let selectionChangeCallback = null;
+
+function createDefaultEffectState() {
+    return {
+        type: 'none',
+        direction: -45,
+        offset: 20,
+        blur: 10,
+        transparency: 50,
+        intensity: 40,
+        thickness: 50,
+        roundness: 50,
+        spread: 50,
+        color: '#000000',
+        color2: '#00ffff',
+        curveEnabled: false,
+        curveAmount: 19
+    };
+}
 
 function getCssZoomFactor() {
     if (canvasRoot && typeof canvasRoot.currentCSSZoom === 'number' && canvasRoot.currentCSSZoom > 0) {
@@ -77,7 +108,8 @@ function createDefaultElementStyle(id) {
             italic: false,
             underline: false,
             align: 'left',
-            opacity: 1
+            opacity: 1,
+            effect: createDefaultEffectState()
         };
     }
     if (id === 'fhr') {
@@ -89,7 +121,8 @@ function createDefaultElementStyle(id) {
             italic: false,
             underline: false,
             align: 'center',
-            opacity: 1
+            opacity: 1,
+            effect: createDefaultEffectState()
         };
     }
     if (id === 'init' || id === 'valid') {
@@ -101,7 +134,8 @@ function createDefaultElementStyle(id) {
             italic: false,
             underline: false,
             align: 'left',
-            opacity: 1
+            opacity: 1,
+            effect: createDefaultEffectState()
         };
     }
     if (id === 'colorbar') {
@@ -148,7 +182,13 @@ export function getSelectedLegendElement() {
     if (!selectedId) return null;
     const el = elementsMap[selectedId];
     if (!el || el.deleted) return null;
-    return { ...el, style: { ...el.style } };
+    return {
+        ...el,
+        style: {
+            ...el.style,
+            effect: el.style?.effect ? { ...el.style.effect } : undefined
+        }
+    };
 }
 
 export function getDeletedDefaultSections() {
@@ -211,7 +251,6 @@ export function setLegendEditMode(active) {
     canvasRoot.classList.toggle('is-editing', editMode);
     document.body.classList.toggle('legend-editor-open', editMode);
 
-    // Proportionally map free-layout elements so editor left edge == full-screen right edge
     rescaleFreeLayoutToCurrentWorkspace();
 
     if (!editMode) {
@@ -328,6 +367,7 @@ export function resetLegendToDefault() {
         });
     }
 
+    updateLegendOverlay();
     selectedId = editMode ? 'header' : null;
     updateSelectionClasses();
     requestAnimationFrame(() => renderColorKeyCanvas());
@@ -342,7 +382,7 @@ function updateSelectionClasses() {
 }
 
 /* =========================================================================
-   STYLE UPDATES (Text, Colorbar, Background Box, Shape, Image)
+   COLOR & CANVA TEXT EFFECTS ENGINE
    ========================================================================= */
 
 function hexToRgba(hex, alpha = 1) {
@@ -353,6 +393,224 @@ function hexToRgba(hex, alpha = 1) {
     const g = parseInt(clean.slice(2, 4), 16);
     const b = parseInt(clean.slice(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function mixWithWhite(hex, whiteRatio = 0.72) {
+    if (!hex || typeof hex !== 'string') return '#ffffff';
+    const clean = hex.replace('#', '').trim();
+    if (clean.length !== 6) return '#ffffff';
+    const r = Math.round(parseInt(clean.slice(0, 2), 16) * (1 - whiteRatio) + 255 * whiteRatio);
+    const g = Math.round(parseInt(clean.slice(2, 4), 16) * (1 - whiteRatio) + 255 * whiteRatio);
+    const b = Math.round(parseInt(clean.slice(4, 6), 16) * (1 - whiteRatio) + 255 * whiteRatio);
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+function getEffectiveTextColor(id, style) {
+    if (style?.color) return style.color;
+    const isLight = document.body.classList.contains('light-mode');
+    if (id === 'fhr') return isLight ? '#1d4ed8' : '#93c5fd';
+    if (id === 'init' || id === 'valid') return isLight ? '#334155' : '#cbd5e1';
+    return isLight ? '#0f172a' : '#f8fafc';
+}
+
+function escapeXml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function setElementContentText(id, text) {
+    const item = elementsMap[id];
+    const el = getElementDom(id);
+    if (!item || !el) return;
+    item.text = text;
+    const contentEl = el.querySelector('.legend-section-content');
+    if (!contentEl) return;
+
+    contentEl.dataset.text = text;
+    const eff = item.style?.effect;
+    if (eff?.curveEnabled && Math.abs(eff.curveAmount || 0) > 0) {
+        applyTextEffectsAndCurve(id, item, contentEl);
+    } else {
+        contentEl.textContent = text;
+    }
+}
+
+function getDirectionOffset(directionDeg, offsetVal, fontSize) {
+    const rad = (directionDeg || 0) * (Math.PI / 180);
+    const dist = (offsetVal / 100) * Math.max(8, fontSize * 0.65);
+    return {
+        dx: +(Math.cos(rad) * dist).toFixed(2),
+        dy: +(-Math.sin(rad) * dist).toFixed(2)
+    };
+}
+
+function applyTextEffectsAndCurve(id, item, contentEl) {
+    const s = item.style || {};
+    const eff = s.effect || createDefaultEffectState();
+    const fontSize = Number.isFinite(s.fontSize) ? s.fontSize : 13;
+    const resolvedColor = getEffectiveTextColor(id, s);
+    const textVal = item.text ?? contentEl.dataset.text ?? contentEl.textContent ?? '';
+
+    contentEl.dataset.text = textVal;
+    contentEl.dataset.effectType = eff.type || 'none';
+
+    // Reset effect properties cleanly
+    contentEl.style.textShadow = '';
+    contentEl.style.webkitTextStroke = '';
+    contentEl.style.webkitTextFillColor = '';
+    contentEl.style.paintOrder = '';
+    contentEl.style.filter = '';
+    contentEl.style.background = '';
+    contentEl.style.padding = '';
+    contentEl.style.borderRadius = '';
+    contentEl.style.removeProperty('--le-dx');
+    contentEl.style.removeProperty('--le-dy');
+    contentEl.style.removeProperty('--le-dx2');
+    contentEl.style.removeProperty('--le-dy2');
+    contentEl.style.removeProperty('--le-eff-color');
+    contentEl.style.removeProperty('--le-eff-color2');
+
+    const { dx, dy } = getDirectionOffset(eff.direction ?? -45, eff.offset ?? 20, fontSize);
+    const strokePx = Math.max(0.5, ((eff.thickness ?? 50) / 100) * Math.max(3, fontSize * 0.22));
+    const isCurved = Boolean(eff.curveEnabled && Math.abs(eff.curveAmount || 0) > 0 && contentEl.contentEditable !== 'true');
+
+    // 1. Apply Style Effect
+    if (eff.type === 'drop') {
+        const blurPx = ((eff.blur ?? 10) / 100) * Math.max(8, fontSize * 0.6);
+        const alpha = Math.max(0, Math.min(1, (eff.transparency ?? 50) / 100));
+        const shadowCss = `${dx}px ${dy}px ${blurPx.toFixed(1)}px ${hexToRgba(eff.color || '#000000', alpha)}`;
+        if (isCurved) contentEl.style.filter = `drop-shadow(${shadowCss})`;
+        else contentEl.style.textShadow = shadowCss;
+
+    } else if (eff.type === 'glow') {
+        const t = Math.max(0, Math.min(1, (eff.intensity ?? 40) / 100));
+        const r1 = (3 + t * 14).toFixed(1);
+        const r2 = (8 + t * 24).toFixed(1);
+        const glow1 = hexToRgba(resolvedColor, 0.35 + t * 0.6);
+        const glow2 = hexToRgba(resolvedColor, 0.2 + t * 0.5);
+        if (isCurved) {
+            contentEl.style.filter = `drop-shadow(0 0 ${r1}px ${glow1}) drop-shadow(0 0 ${r2}px ${glow2})`;
+        } else {
+            contentEl.style.textShadow = `0 0 ${r1}px ${glow1}, 0 0 ${r2}px ${glow2}`;
+        }
+
+    } else if (eff.type === 'echo') {
+        const echoColor = eff.color || resolvedColor;
+        const c1 = hexToRgba(echoColor, 0.55);
+        const c2 = hexToRgba(echoColor, 0.28);
+        if (isCurved) {
+            contentEl.style.filter = `drop-shadow(${dx}px ${dy}px 0 ${c1}) drop-shadow(${(dx * 2).toFixed(2)}px ${(dy * 2).toFixed(2)}px 0 ${c2})`;
+        } else {
+            contentEl.style.textShadow = `${dx}px ${dy}px 0 ${c1}, ${(dx * 2).toFixed(2)}px ${(dy * 2).toFixed(2)}px 0 ${c2}`;
+        }
+
+    } else if (eff.type === 'outline') {
+        contentEl.style.webkitTextStroke = `${strokePx.toFixed(2)}px ${eff.color || '#000000'}`;
+        contentEl.style.paintOrder = 'stroke fill';
+
+    } else if (eff.type === 'background') {
+        const bgAlpha = Math.max(0, Math.min(1, (eff.transparency ?? 100) / 100));
+        const padY = Math.round(((eff.spread ?? 50) / 100) * 7 + 2);
+        const padX = Math.round(((eff.spread ?? 50) / 100) * 14 + 4);
+        const radius = Math.round(((eff.roundness ?? 50) / 100) * 20);
+        contentEl.style.background = hexToRgba(eff.color || '#facc15', bgAlpha);
+        contentEl.style.padding = `${padY}px ${padX}px`;
+        contentEl.style.borderRadius = `${radius}px`;
+
+    } else if (eff.type === 'splice') {
+        contentEl.style.webkitTextStroke = `${strokePx.toFixed(2)}px ${resolvedColor}`;
+        contentEl.style.webkitTextFillColor = 'transparent';
+        contentEl.style.paintOrder = 'stroke fill';
+        contentEl.style.setProperty('--le-dx', `${dx}px`);
+        contentEl.style.setProperty('--le-dy', `${dy}px`);
+        contentEl.style.setProperty('--le-eff-color', eff.color || '#6b7280');
+
+    } else if (eff.type === 'hollow') {
+        contentEl.style.webkitTextStroke = `${strokePx.toFixed(2)}px ${resolvedColor}`;
+        contentEl.style.webkitTextFillColor = 'transparent';
+        contentEl.style.paintOrder = 'stroke fill';
+
+    } else if (eff.type === 'neon') {
+        const t = Math.max(0, Math.min(1, (eff.intensity ?? 50) / 100));
+        const coreColor = mixWithWhite(resolvedColor, 0.72);
+        contentEl.style.color = coreColor;
+        const g1 = (2 + t * 8).toFixed(1);
+        const g2 = (6 + t * 18).toFixed(1);
+        const g3 = (12 + t * 30).toFixed(1);
+        const c1 = hexToRgba(resolvedColor, 0.9);
+        const c2 = hexToRgba(resolvedColor, 0.7);
+        const c3 = hexToRgba(resolvedColor, 0.45);
+        if (isCurved) {
+            contentEl.style.filter = `drop-shadow(0 0 ${g1}px ${c1}) drop-shadow(0 0 ${g2}px ${c2})`;
+        } else {
+            contentEl.style.textShadow = `0 0 ${g1}px ${c1}, 0 0 ${g2}px ${c2}, 0 0 ${g3}px ${c3}`;
+        }
+
+    } else if (eff.type === 'glitch') {
+        contentEl.style.setProperty('--le-dx', `${dx}px`);
+        contentEl.style.setProperty('--le-dy', `${dy}px`);
+        contentEl.style.setProperty('--le-dx2', `${-dx}px`);
+        contentEl.style.setProperty('--le-dy2', `${-dy}px`);
+        contentEl.style.setProperty('--le-eff-color', eff.color || '#ff00ff');
+        contentEl.style.setProperty('--le-eff-color2', eff.color2 || '#00ffff');
+    }
+
+    // 2. Apply Shape -> Curve (SVG textPath) or standard text
+    if (isCurved) {
+        const curvePct = Math.max(-100, Math.min(100, Number(eff.curveAmount) || 0));
+        const charCount = Math.max(4, textVal.length);
+        const svgW = Math.max(120, Math.round(charCount * fontSize * 0.68 + 36));
+        const sag = Math.round((curvePct / 100) * (svgW * 0.32));
+        const svgH = Math.max(fontSize + 18, Math.round(Math.abs(sag) + fontSize * 1.9));
+
+        const baseY = sag >= 0 ? svgH - Math.round(fontSize * 0.55) : Math.round(fontSize * 1.15);
+        const ctrlY = baseY - sag * 1.35;
+        const padX = 16;
+        const pathId = `le_curve_${id}`;
+
+        const fillVal = (eff.type === 'hollow' || eff.type === 'splice')
+            ? 'transparent'
+            : (eff.type === 'neon' ? mixWithWhite(resolvedColor, 0.72) : resolvedColor);
+
+        let strokeAttr = '';
+        if (eff.type === 'outline') {
+            strokeAttr = `stroke="${eff.color || '#000000'}" stroke-width="${strokePx.toFixed(2)}" style="paint-order: stroke fill;"`;
+        } else if (eff.type === 'hollow' || eff.type === 'splice') {
+            strokeAttr = `stroke="${resolvedColor}" stroke-width="${strokePx.toFixed(2)}" style="paint-order: stroke fill;"`;
+        }
+
+        const fontWeight = s.bold ? '700' : '400';
+        const fontStyle = s.italic ? 'italic' : 'normal';
+        const textDec = s.underline ? 'underline' : 'none';
+        const fontFam = escapeXml(s.fontFamily || "'Roboto', sans-serif");
+
+        let backSvgText = '';
+        if (eff.type === 'splice') {
+            backSvgText = `<text fill="${eff.color || '#6b7280'}" transform="translate(${dx}, ${dy})" font-family="${fontFam}" font-size="${fontSize}" font-weight="${fontWeight}" font-style="${fontStyle}" text-decoration="${textDec}"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeXml(textVal)}</textPath></text>`;
+        } else if (eff.type === 'glitch') {
+            backSvgText = `
+                <text fill="${eff.color || '#ff00ff'}" transform="translate(${dx}, ${dy})" font-family="${fontFam}" font-size="${fontSize}" font-weight="${fontWeight}" font-style="${fontStyle}"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeXml(textVal)}</textPath></text>
+                <text fill="${eff.color2 || '#00ffff'}" transform="translate(${-dx}, ${-dy})" font-family="${fontFam}" font-size="${fontSize}" font-weight="${fontWeight}" font-style="${fontStyle}"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeXml(textVal)}</textPath></text>
+            `;
+        }
+
+        contentEl.innerHTML = `
+            <svg class="legend-curve-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}" overflow="visible">
+                <defs>
+                    <path id="${pathId}" d="M ${padX} ${baseY} Q ${svgW / 2} ${ctrlY} ${svgW - padX} ${baseY}" />
+                </defs>
+                ${backSvgText}
+                <text fill="${fillVal}" ${strokeAttr} font-family="${fontFam}" font-size="${fontSize}" font-weight="${fontWeight}" font-style="${fontStyle}" text-decoration="${textDec}">
+                    <textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeXml(textVal)}</textPath>
+                </text>
+            </svg>
+        `;
+    } else if (contentEl.querySelector('.legend-curve-svg')) {
+        contentEl.textContent = textVal;
+    }
 }
 
 export function applyElementVisualStyles(id) {
@@ -402,8 +660,13 @@ export function applyElementVisualStyles(id) {
         contentEl.style.textAlign = s.align || 'left';
 
         if (!item.isDefault && item.text !== undefined) {
-            contentEl.textContent = item.text;
+            contentEl.dataset.text = item.text;
+            if (!s.effect?.curveEnabled && contentEl.contentEditable !== 'true') {
+                contentEl.textContent = item.text;
+            }
         }
+
+        applyTextEffectsAndCurve(id, item, contentEl);
     } else if (item.kind === 'colorbar') {
         const canvas = el.querySelector('#legend-colorbar-canvas');
         if (canvas && Number.isFinite(s.barHeight)) {
@@ -444,11 +707,28 @@ export function updateSelectedLegendStyle(patch = {}) {
     notifySelectionChange();
 }
 
+export function updateSelectedLegendEffect(effectPatch = {}) {
+    if (!selectedId) return;
+    const item = elementsMap[selectedId];
+    if (!item || item.kind !== 'text') return;
+
+    const currentEff = item.style?.effect || createDefaultEffectState();
+    item.style = {
+        ...item.style,
+        effect: {
+            ...currentEff,
+            ...effectPatch
+        }
+    };
+    applyElementVisualStyles(selectedId);
+    notifySelectionChange();
+}
+
 export function updateSelectedLegendText(newText) {
     if (!selectedId) return;
     const item = elementsMap[selectedId];
     if (!item || item.kind !== 'text' || item.isDefault) return;
-    item.text = String(newText ?? '');
+    setElementContentText(selectedId, String(newText ?? ''));
     applyElementVisualStyles(selectedId);
 }
 
@@ -492,7 +772,8 @@ export function addLegendText(initialText = 'Custom Text') {
             italic: false,
             underline: false,
             align: 'center',
-            opacity: 1
+            opacity: 1,
+            effect: createDefaultEffectState()
         }
     };
     customOrder.push(id);
@@ -505,7 +786,7 @@ export function addLegendText(initialText = 'Custom Text') {
     node.style.width = `${elW}px`;
     node.style.height = `${elH}px`;
     node.innerHTML = `
-        <div class="legend-section-content">${initialText}</div>
+        <div class="legend-section-content" data-text="${escapeXml(initialText)}">${escapeXml(initialText)}</div>
         ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
     `;
 
@@ -514,6 +795,7 @@ export function addLegendText(initialText = 'Custom Text') {
         e.stopPropagation();
         const contentEl = node.querySelector('.legend-section-content');
         if (!contentEl) return;
+        contentEl.textContent = elementsMap[id].text || '';
         contentEl.contentEditable = 'true';
         contentEl.focus();
         const range = document.createRange();
@@ -525,6 +807,7 @@ export function addLegendText(initialText = 'Custom Text') {
         const finishEdit = () => {
             contentEl.contentEditable = 'false';
             elementsMap[id].text = contentEl.textContent || 'Text';
+            applyElementVisualStyles(id);
             notifySelectionChange();
         };
         contentEl.addEventListener('blur', finishEdit, { once: true });
@@ -646,7 +929,7 @@ export function replaceSelectedLegendImage(dataUrl) {
 }
 
 /* =========================================================================
-   DETACH TO INDEPENDENT FREE-FLOATING ELEMENTS (Zoom-compensated 1:1!)
+   DETACH TO INDEPENDENT FREE-FLOATING ELEMENTS
    ========================================================================= */
 
 function activateFreeLayoutIfNeeded() {
@@ -695,7 +978,7 @@ function activateFreeLayoutIfNeeded() {
 }
 
 /* =========================================================================
-   COLOR KEY & UNIT RESOLUTION (Zero interpolation exact colors)
+   COLOR KEY & UNIT RESOLUTION
    ========================================================================= */
 
 function byteForPhysicalValue(targetVal, scaling, minDefault = 0, maxDefault = 255) {
@@ -1016,41 +1299,33 @@ export function updateLegendOverlay() {
                       document.querySelector('#btn-param-menu span')?.textContent?.trim() || '2m Temperature';
     const unitLabel = getResolvedUnitLabel();
 
-    const headerEl = getElementDom('header')?.querySelector('.legend-section-content');
-    const initEl = getElementDom('init')?.querySelector('.legend-section-content');
-    const fhrEl = getElementDom('fhr')?.querySelector('.legend-section-content');
-    const validEl = getElementDom('valid')?.querySelector('.legend-section-content');
+    setElementContentText('header', unitLabel ? `${modelText} • ${paramName} (${unitLabel})` : `${modelText} • ${paramName}`);
 
-    if (headerEl) {
-        headerEl.textContent = unitLabel ? `${modelText} • ${paramName} (${unitLabel})` : `${modelText} • ${paramName}`;
+    if (stateManager.activeMode === 'radar') {
+        setElementContentText('init', 'Live NEXRAD');
+    } else {
+        const runText = document.querySelector('#current-run-label')?.textContent?.trim() ||
+                        document.querySelector('#btn-model-run span')?.textContent?.trim() || '--';
+        setElementContentText('init', `Init: ${runText}`);
     }
 
-    if (initEl) {
-        if (stateManager.activeMode === 'radar') {
-            initEl.textContent = 'Live NEXRAD';
-        } else {
-            const runText = document.querySelector('#btn-model-run span')?.textContent?.trim() || '--';
-            initEl.textContent = `Init: ${runText}`;
-        }
-    }
+    const stepText = document.getElementById('time-label')?.textContent?.trim() ||
+                     document.getElementById('step-readout')?.textContent?.trim() || 'F000';
+    setElementContentText('fhr', stateManager.activeMode === 'radar' ? `Frame ${stepText}` : stepText);
 
-    if (fhrEl) {
-        const stepText = document.getElementById('step-readout')?.textContent?.trim() || 'F000';
-        fhrEl.textContent = stateManager.activeMode === 'radar' ? `Frame ${stepText}` : stepText;
-    }
+    const validText = document.getElementById('app-clock')?.textContent?.trim() ||
+                      document.getElementById('header-valid-time')?.textContent?.trim() || '--';
+    setElementContentText('valid', `Valid: ${validText}`);
 
-    if (validEl) {
-        const validText = document.getElementById('header-valid-time')?.textContent?.trim() || '--';
-        validEl.textContent = `Valid: ${validText}`;
-    }
-
-    applyElementVisualStyles('bg');
+    // Re-apply theme-reactive text effects (e.g. Glow/Neon/Hollow when theme switches)
+    ['bg', 'header', 'init', 'fhr', 'valid', ...customOrder].forEach((id) => {
+        applyElementVisualStyles(id);
+    });
     requestAnimationFrame(() => renderColorKeyCanvas());
 }
 
 /* =========================================================================
    UNBOUNDED DRAG & RESIZE INTERACTIONS
-   (Moving/resizing 'bg' also moves & shapes elements inside 'bg'!)
    ========================================================================= */
 
 function captureBgChildrenSnapshot() {
@@ -1230,7 +1505,6 @@ function attachDragAndResizeHandlers() {
         if (e.target.closest('#btn-legend-edit-pencil')) return;
         if (e.target.isContentEditable) return;
 
-        // 1. Check resize handle on any item
         const handleEl = e.target.closest('.legend-sec-handle');
         if (handleEl) {
             const itemEl = handleEl.closest('.legend-item');
@@ -1257,7 +1531,6 @@ function attachDragAndResizeHandlers() {
             return;
         }
 
-        // 2. Check click/drag on any item
         const itemEl = e.target.closest('.legend-item');
         if (itemEl) {
             e.stopPropagation();
@@ -1317,20 +1590,20 @@ export function initLegendOverlay(map = null) {
 
             <div class="legend-meta-col">
                 <div class="legend-item legend-sec-header" data-element-id="header">
-                    <div class="legend-section-content">ECMWF-IFS • 2m Temperature (°F)</div>
+                    <div class="legend-section-content" data-text="ECMWF-IFS • 2m Temperature (°F)">ECMWF-IFS • 2m Temperature (°F)</div>
                     ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
                 </div>
                 <div class="legend-times-row">
                     <div class="legend-item legend-sec-time" data-element-id="init">
-                        <div class="legend-section-content">Init: --</div>
+                        <div class="legend-section-content" data-text="Init: --">Init: --</div>
                         ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
                     </div>
                     <div class="legend-item legend-sec-time legend-sec-fhr" data-element-id="fhr">
-                        <div class="legend-section-content">F000</div>
+                        <div class="legend-section-content" data-text="F000">F000</div>
                         ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
                     </div>
                     <div class="legend-item legend-sec-time" data-element-id="valid">
-                        <div class="legend-section-content">Valid: --</div>
+                        <div class="legend-section-content" data-text="Valid: --">Valid: --</div>
                         ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
                     </div>
                 </div>
