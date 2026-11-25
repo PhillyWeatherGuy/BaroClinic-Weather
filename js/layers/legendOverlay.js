@@ -1205,6 +1205,26 @@ function attachDragAndResizeHandlers() {
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
 
+    window.addEventListener('pointermove', (e) => {
+        if (!canvasRoot) return;
+        if (e.target?.closest?.('#basemap-editor-panel, #legend-editor-panel')) {
+            canvasRoot.classList.remove('is-pencil-visible');
+            return;
+        }
+        const z = getCssZoomFactor();
+        const cssX = e.clientX / z;
+        const cssY = e.clientY / z;
+        const bounds = getWorkspaceBounds(editMode);
+        const topLimit = window.innerWidth >= 1024 ? 50 : 96;
+        const nearTopOfMap = cssY >= topLimit && cssY <= topLimit + 95 && cssX >= bounds.left && cssX <= bounds.right;
+        const overLegendItem = Boolean(e.target?.closest?.('.legend-item, #btn-legend-edit-pencil'));
+        canvasRoot.classList.toggle('is-pencil-visible', nearTopOfMap || overLegendItem);
+    });
+
+    document.addEventListener('mouseleave', () => {
+        canvasRoot?.classList.remove('is-pencil-visible');
+    });
+
     canvasRoot.addEventListener('pointerdown', (e) => {
         if (!editMode) return;
         if (e.target.closest('#btn-legend-edit-pencil')) return;
