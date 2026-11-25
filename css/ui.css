@@ -2674,7 +2674,7 @@ body.light-mode .legend-ptype-bar {
     top: 50px;
     right: 0;
     bottom: 0;
-    width: 260px;
+    width: 420px;
     z-index: 28;
     background: #131722;
     border-left: 1px solid rgba(255, 255, 255, 0.24);
@@ -2700,13 +2700,13 @@ body.light-mode .legend-ptype-bar {
     body.legend-editor-open #map,
     body.legend-editor-open #globe-container {
         left: 0 !important;
-        right: 260px !important;
+        right: 420px !important;
         width: auto !important;
     }
 
     body.legend-editor-open .legend-dock-wrap {
         left: 48px;
-        right: 260px;
+        right: 420px;
         width: auto;
         padding: 10px 38px 10px 14px;
     }
@@ -2716,12 +2716,12 @@ body.light-mode .legend-ptype-bar {
     }
 
     body.legend-editor-open .legend-canvas-root.is-free-layout .legend-edit-pencil-btn {
-        right: 268px;
+        right: 428px;
     }
 
     body.legend-editor-open #timeline-container {
         left: 0 !important;
-        right: 260px !important;
+        right: 420px !important;
         width: auto !important;
     }
 }
@@ -3051,7 +3051,7 @@ body.light-mode .legend-ptype-bar {
 }
 
 .le-slider-row .basemap-slider-label {
-    min-width: 54px;
+    min-width: 76px;
 }
 
 .le-slider-row .basemap-range-slider {
