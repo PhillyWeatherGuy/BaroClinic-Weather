@@ -1,5 +1,6 @@
 // js/components/legendEditor.js
 import {
+    DEFAULT_EFFECT_PRESETS,
     setLegendCallbacks,
     setLegendEditMode,
     selectLegendElement,
@@ -9,6 +10,7 @@ import {
     getSelectedLegendElement,
     getDeletedDefaultSections,
     updateSelectedLegendStyle,
+    updateSelectedLegendEffect,
     updateSelectedLegendText,
     addLegendText,
     addLegendShape,
@@ -31,6 +33,19 @@ const FONT_OPTIONS = [
     { label: 'Monospace', value: "SFMono-Regular, Menlo, Monaco, Consolas, monospace" },
     { label: 'Merriweather', value: "'Merriweather', Georgia, serif" },
     { label: 'Georgia', value: "Georgia, 'Times New Roman', serif" }
+];
+
+const EFFECT_CARDS = [
+    { id: 'none', label: 'None' },
+    { id: 'drop', label: 'Drop' },
+    { id: 'glow', label: 'Glow' },
+    { id: 'echo', label: 'Echo' },
+    { id: 'outline', label: 'Outline' },
+    { id: 'background', label: 'Background' },
+    { id: 'splice', label: 'Splice' },
+    { id: 'hollow', label: 'Hollow' },
+    { id: 'neon', label: 'Neon' },
+    { id: 'glitch', label: 'Glitch' }
 ];
 
 let panelEl = null;
@@ -95,6 +110,152 @@ function syncRestoreStrip() {
     });
 }
 
+function buildEffectSliderHTML(prop, label, min, max, val, step = 1) {
+    return `
+        <div class="le-eff-control" data-eff-prop="${prop}">
+            <div class="le-eff-control-top">
+                <span class="le-eff-control-label">${label}</span>
+                <div class="le-stepper">
+                    <button type="button" class="le-step-btn" data-step-dir="-1" data-prop="${prop}" data-min="${min}" data-max="${max}" data-step="${step}">−</button>
+                    <span class="le-step-val" id="le-eff-val-${prop}">${val}</span>
+                    <button type="button" class="le-step-btn" data-step-dir="1" data-prop="${prop}" data-min="${min}" data-max="${max}" data-step="${step}">+</button>
+                </div>
+            </div>
+            <input id="le-eff-slider-${prop}" class="basemap-range-slider le-eff-slider" type="range" min="${min}" max="${max}" step="${step}" value="${val}" data-prop="${prop}" />
+        </div>
+    `;
+}
+
+function buildActiveEffectParamsHTML(eff) {
+    const type = eff.type || 'none';
+    if (type === 'none') return '';
+
+    let html = '';
+    if (type === 'drop') {
+        html += buildEffectSliderHTML('direction', 'Direction', -180, 180, eff.direction ?? -45, 1);
+        html += buildEffectSliderHTML('offset', 'Offset', 0, 100, eff.offset ?? 20, 1);
+        html += buildEffectSliderHTML('blur', 'Blur', 0, 100, eff.blur ?? 10, 1);
+        html += buildEffectSliderHTML('transparency', 'Transparency', 0, 100, eff.transparency ?? 50, 1);
+        html += `
+            <div class="le-row le-space-between">
+                <span class="basemap-control-label">Color</span>
+                <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#000000'}" />
+            </div>
+        `;
+    } else if (type === 'glow') {
+        html += buildEffectSliderHTML('intensity', 'Intensity', 0, 100, eff.intensity ?? 40, 1);
+    } else if (type === 'echo') {
+        html += buildEffectSliderHTML('direction', 'Direction', -180, 180, eff.direction ?? -52, 1);
+        html += buildEffectSliderHTML('offset', 'Offset', 0, 100, eff.offset ?? 13, 1);
+        html += `
+            <div class="le-row le-space-between">
+                <span class="basemap-control-label">Color</span>
+                <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#000000'}" />
+            </div>
+        `;
+    } else if (type === 'outline') {
+        html += buildEffectSliderHTML('thickness', 'Thickness', 0, 100, eff.thickness ?? 50, 1);
+        html += `
+            <div class="le-row le-space-between">
+                <span class="basemap-control-label">Color</span>
+                <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#000000'}" />
+            </div>
+        `;
+    } else if (type === 'background') {
+        html += buildEffectSliderHTML('roundness', 'Roundness', 0, 100, eff.roundness ?? 50, 1);
+        html += buildEffectSliderHTML('spread', 'Spread', 0, 100, eff.spread ?? 50, 1);
+        html += buildEffectSliderHTML('transparency', 'Transparency', 0, 100, eff.transparency ?? 100, 1);
+        html += `
+            <div class="le-row le-space-between">
+                <span class="basemap-control-label">Color</span>
+                <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#facc15'}" />
+            </div>
+        `;
+    } else if (type === 'splice') {
+        html += buildEffectSliderHTML('thickness', 'Thickness', 0, 100, eff.thickness ?? 50, 1);
+        html += buildEffectSliderHTML('offset', 'Offset', 0, 100, eff.offset ?? 50, 1);
+        html += buildEffectSliderHTML('direction', 'Direction', -180, 180, eff.direction ?? -45, 1);
+        html += `
+            <div class="le-row le-space-between">
+                <span class="basemap-control-label">Color</span>
+                <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#6b7280'}" />
+            </div>
+        `;
+    } else if (type === 'hollow') {
+        html += buildEffectSliderHTML('thickness', 'Thickness', 0, 100, eff.thickness ?? 50, 1);
+    } else if (type === 'neon') {
+        html += buildEffectSliderHTML('intensity', 'Intensity', 0, 100, eff.intensity ?? 50, 1);
+    } else if (type === 'glitch') {
+        html += buildEffectSliderHTML('direction', 'Direction', -180, 180, eff.direction ?? -55, 1);
+        html += buildEffectSliderHTML('offset', 'Offset', 0, 100, eff.offset ?? 9, 1);
+        html += `
+            <div class="le-row le-space-between">
+                <span class="basemap-control-label">Colors</span>
+                <div class="le-dual-colors">
+                    <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#ff00ff'}" title="Primary Glitch Color" />
+                    <input id="le-eff-color2" class="basemap-color-input" type="color" value="${eff.color2 || '#00ffff'}" title="Secondary Glitch Color" />
+                </div>
+            </div>
+        `;
+    }
+
+    return `<div class="le-eff-params">${html}</div>`;
+}
+
+function bindEffectControls(host) {
+    host.querySelectorAll('.le-effect-card').forEach((card) => {
+        card.addEventListener('click', () => {
+            const type = card.dataset.effectType;
+            const cur = getSelectedLegendElement()?.style?.effect || {};
+            const nextType = (cur.type === type && type !== 'none') ? 'none' : type;
+            const preset = DEFAULT_EFFECT_PRESETS[nextType] || {};
+            updateSelectedLegendEffect({ type: nextType, ...preset });
+        });
+    });
+
+    host.querySelector('#btn-le-curve-toggle')?.addEventListener('click', () => {
+        const cur = getSelectedLegendElement()?.style?.effect || {};
+        updateSelectedLegendEffect({
+            curveEnabled: !cur.curveEnabled,
+            curveAmount: cur.curveAmount ?? 19
+        });
+    });
+
+    host.querySelectorAll('.le-eff-slider').forEach((slider) => {
+        slider.addEventListener('input', (e) => {
+            const prop = e.target.dataset.prop;
+            const val = parseFloat(e.target.value);
+            if (prop && Number.isFinite(val)) {
+                updateSelectedLegendEffect({ [prop]: val });
+            }
+        });
+    });
+
+    host.querySelectorAll('.le-step-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const prop = btn.dataset.prop;
+            const dir = parseFloat(btn.dataset.stepDir);
+            const min = parseFloat(btn.dataset.min);
+            const max = parseFloat(btn.dataset.max);
+            const step = parseFloat(btn.dataset.step) || 1;
+            const curEff = getSelectedLegendElement()?.style?.effect || {};
+            const curVal = Number(curEff[prop] ?? 0);
+            const nextVal = Math.max(min, Math.min(max, curVal + dir * step));
+            const slider = host.querySelector(`#le-eff-slider-${prop}`);
+            if (slider) slider.value = String(nextVal);
+            updateSelectedLegendEffect({ [prop]: nextVal });
+        });
+    });
+
+    host.querySelector('#le-eff-color')?.addEventListener('input', (e) => {
+        updateSelectedLegendEffect({ color: e.target.value });
+    });
+
+    host.querySelector('#le-eff-color2')?.addEventListener('input', (e) => {
+        updateSelectedLegendEffect({ color2: e.target.value });
+    });
+}
+
 function renderInspectorForSelection(selected) {
     const host = panelEl?.querySelector('#legend-inspector-controls');
     const titleEl = panelEl?.querySelector('#legend-active-target-name');
@@ -118,11 +279,12 @@ function renderInspectorForSelection(selected) {
         return;
     }
 
-    const nextKey = `${selected.id}:${selected.kind}:${selected.shapeType || ''}`;
     const s = selected.style || {};
+    const eff = s.effect || { type: 'none', curveEnabled: false, curveAmount: 19 };
+    const nextKey = `${selected.id}:${selected.kind}:${selected.shapeType || ''}:${eff.type || 'none'}:${Boolean(eff.curveEnabled)}`;
 
     if (nextKey === renderedKey) {
-        syncExistingControlValues(selected, s);
+        syncExistingControlValues(selected, s, eff);
         return;
     }
     renderedKey = nextKey;
@@ -163,9 +325,49 @@ function renderInspectorForSelection(selected) {
             </div>
 
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Opacity</span>
+                <span class="basemap-slider-label">Transparency</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
+            </div>
+
+            <div class="le-effects-section">
+                <div class="le-effects-title">Effects</div>
+                <div class="le-effects-grid">
+                    ${EFFECT_CARDS.map((card) => `
+                        <button
+                            type="button"
+                            class="le-effect-card ${(eff.type || 'none') === card.id ? 'active' : ''}"
+                            data-effect-type="${card.id}"
+                        >
+                            <span class="le-effect-preview is-preview-${card.id}">${card.id === 'none' ? 'Ag' : 'Ag'}</span>
+                            <span class="le-effect-name">${card.label}</span>
+                        </button>
+                    `).join('')}
+                </div>
+
+                ${buildActiveEffectParamsHTML(eff)}
+
+                <div class="le-effects-title le-shape-title">Shape</div>
+                <div class="le-shape-curve-row">
+                    <button
+                        type="button"
+                        id="btn-le-curve-toggle"
+                        class="le-effect-card le-curve-card ${eff.curveEnabled ? 'active' : ''}"
+                    >
+                        <svg class="le-curve-preview-svg" width="44" height="22" viewBox="0 0 60 28">
+                            <defs><path id="le_preview_arc" d="M 6 22 Q 30 6 54 22" /></defs>
+                            <text font-size="11" font-weight="800" fill="currentColor">
+                                <textPath href="#le_preview_arc" startOffset="50%" text-anchor="middle">ABCD</textPath>
+                            </text>
+                        </svg>
+                        <span class="le-effect-name">Curve</span>
+                    </button>
+                    ${eff.curveEnabled ? `
+                        <div class="le-curve-slider-wrap">
+                            ${buildEffectSliderHTML('curveAmount', 'Curve', -100, 100, eff.curveAmount ?? 19, 1)}
+                        </div>
+                    ` : ''}
+                </div>
             </div>
         `;
 
@@ -211,6 +413,8 @@ function renderInspectorForSelection(selected) {
             if (Number.isFinite(pct)) updateSelectedLegendStyle({ opacity: pct / 100 });
         });
 
+        bindEffectControls(host);
+
     } else if (selected.kind === 'colorbar') {
         const isLight = document.body.classList.contains('light-mode');
         const tickColor = s.tickColor || (isLight ? '#1e293b' : '#e2e8f0');
@@ -239,7 +443,7 @@ function renderInspectorForSelection(selected) {
             </div>
 
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Opacity</span>
+                <span class="basemap-slider-label">Transparency</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
             </div>
@@ -292,7 +496,7 @@ function renderInspectorForSelection(selected) {
                 </div>
             ` : ''}
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Opacity</span>
+                <span class="basemap-slider-label">Transparency</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
             </div>
@@ -324,7 +528,7 @@ function renderInspectorForSelection(selected) {
                 <button id="btn-le-replace-img" class="basemap-highlight-btn" type="button" style="justify-content:center;">Replace Image</button>
             </div>
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Opacity</span>
+                <span class="basemap-slider-label">Transparency</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
             </div>
@@ -360,7 +564,7 @@ function renderInspectorForSelection(selected) {
                 <input id="le-box-border" class="basemap-color-input" type="color" value="${borderHex}" />
             </div>
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Border W</span>
+                <span class="basemap-slider-label">Border Width</span>
                 <input id="le-box-bw" class="basemap-range-slider" type="range" min="0" max="4" step="0.5" value="${s.borderWidth ?? 1}" />
                 <span id="le-box-bw-val" class="basemap-slider-value">${(s.borderWidth ?? 1).toFixed(1)}px</span>
             </div>
@@ -383,7 +587,7 @@ function renderInspectorForSelection(selected) {
     }
 }
 
-function syncExistingControlValues(selected, s) {
+function syncExistingControlValues(selected, s, eff) {
     const host = panelEl?.querySelector('#legend-inspector-controls');
     if (!host) return;
 
@@ -396,6 +600,13 @@ function syncExistingControlValues(selected, s) {
         host.querySelector('#le-btn-underline')?.classList.toggle('active', Boolean(s.underline));
         host.querySelectorAll('.le-align-btn').forEach((b) => {
             b.classList.toggle('active', (s.align || 'left') === b.dataset.align);
+        });
+
+        ['direction', 'offset', 'blur', 'transparency', 'intensity', 'thickness', 'roundness', 'spread', 'curveAmount'].forEach((prop) => {
+            const span = host.querySelector(`#le-eff-val-${prop}`);
+            if (span && eff[prop] !== undefined) {
+                span.textContent = String(eff[prop]);
+            }
         });
     } else if (selected.kind === 'colorbar') {
         const hVal = host.querySelector('#le-cb-height-val');
