@@ -15,7 +15,11 @@ import {
     addLegendText,
     addLegendShape,
     addLegendImage,
-    replaceSelectedLegendImage
+    replaceSelectedLegendImage,
+    undoLegend,
+    redoLegend,
+    canUndoLegend,
+    canRedoLegend
 } from '../layers/legendOverlay.js';
 
 const FONT_OPTIONS = [
@@ -35,7 +39,7 @@ const FONT_OPTIONS = [
     { label: 'Georgia', value: "Georgia, 'Times New Roman', serif" }
 ];
 
-const EFFECT_CARDS = [
+const TEXT_EFFECT_CARDS = [
     { id: 'none', label: 'None' },
     { id: 'drop', label: 'Drop' },
     { id: 'glow', label: 'Glow' },
@@ -46,6 +50,13 @@ const EFFECT_CARDS = [
     { id: 'hollow', label: 'Hollow' },
     { id: 'neon', label: 'Neon' },
     { id: 'glitch', label: 'Glitch' }
+];
+
+const OBJECT_EFFECT_CARDS = [
+    { id: 'none', label: 'None' },
+    { id: 'drop', label: 'Drop' },
+    { id: 'glow', label: 'Glow' },
+    { id: 'echo', label: 'Echo' }
 ];
 
 let panelEl = null;
@@ -77,6 +88,14 @@ function setPanelOpen(isOpen) {
     }
     panelEl.classList.toggle('open', isOpen);
     panelEl.setAttribute('aria-hidden', String(!isOpen));
+}
+
+function syncHistoryButtons() {
+    if (!panelEl) return;
+    const undoBtn = panelEl.querySelector('#btn-legend-undo');
+    const redoBtn = panelEl.querySelector('#btn-legend-redo');
+    if (undoBtn) undoBtn.disabled = !canUndoLegend();
+    if (redoBtn) redoBtn.disabled = !canRedoLegend();
 }
 
 function getDefaultColorHexForElement(selected) {
@@ -126,7 +145,7 @@ function buildEffectSliderHTML(prop, label, min, max, val, step = 1) {
     `;
 }
 
-function buildActiveEffectParamsHTML(eff) {
+function buildActiveEffectParamsHTML(eff, isText = true) {
     const type = eff.type || 'none';
     if (type === 'none') return '';
 
@@ -144,13 +163,21 @@ function buildActiveEffectParamsHTML(eff) {
         `;
     } else if (type === 'glow') {
         html += buildEffectSliderHTML('intensity', 'Intensity', 0, 100, eff.intensity ?? 40, 1);
+        if (!isText) {
+            html += `
+                <div class="le-row le-space-between">
+                    <span class="basemap-control-label">Color</span>
+                    <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#3b82f6'}" />
+                </div>
+            `;
+        }
     } else if (type === 'echo') {
         html += buildEffectSliderHTML('direction', 'Direction', -180, 180, eff.direction ?? -52, 1);
         html += buildEffectSliderHTML('offset', 'Offset', 0, 100, eff.offset ?? 13, 1);
         html += `
             <div class="le-row le-space-between">
                 <span class="basemap-control-label">Color</span>
-                <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || '#000000'}" />
+                <input id="le-eff-color" class="basemap-color-input" type="color" value="${eff.color || (isText ? '#000000' : '#3b82f6')}" />
             </div>
         `;
     } else if (type === 'outline') {
@@ -202,13 +229,36 @@ function buildActiveEffectParamsHTML(eff) {
     return `<div class="le-eff-params">${html}</div>`;
 }
 
-function bindEffectControls(host) {
-    host.querySelectorAll('.le-effect-card').forEach((card) => {
+function buildObjectEffectsSectionHTML(eff) {
+    return `
+        <div class="le-effects-section">
+            <div class="le-effects-title">Effects</div>
+            <div class="le-effects-grid is-object-grid">
+                ${OBJECT_EFFECT_CARDS.map((card) => `
+                    <button
+                        type="button"
+                        class="le-effect-card ${(eff.type || 'none') === card.id ? 'active' : ''}"
+                        data-effect-type="${card.id}"
+                    >
+                        <span class="le-obj-preview is-obj-${card.id}"></span>
+                        <span class="le-effect-name">${card.label}</span>
+                    </button>
+                `).join('')}
+            </div>
+            ${buildActiveEffectParamsHTML(eff, false)}
+        </div>
+    `;
+}
+
+function bindEffectControls(host, isText = true) {
+    host.querySelectorAll('.le-effect-card[data-effect-type]').forEach((card) => {
         card.addEventListener('click', () => {
             const type = card.dataset.effectType;
             const cur = getSelectedLegendElement()?.style?.effect || {};
             const nextType = (cur.type === type && type !== 'none') ? 'none' : type;
-            const preset = DEFAULT_EFFECT_PRESETS[nextType] || {};
+            const preset = { ...(DEFAULT_EFFECT_PRESETS[nextType] || {}) };
+            if (!isText && nextType === 'echo' && !cur.color) preset.color = '#3b82f6';
+            if (isText && nextType === 'echo' && !cur.color) preset.color = '#000000';
             updateSelectedLegendEffect({ type: nextType, ...preset });
         });
     });
@@ -257,6 +307,8 @@ function bindEffectControls(host) {
 }
 
 function renderInspectorForSelection(selected) {
+    syncHistoryButtons();
+
     const host = panelEl?.querySelector('#legend-inspector-controls');
     const titleEl = panelEl?.querySelector('#legend-active-target-name');
     const deleteBtn = panelEl?.querySelector('#btn-le-delete');
@@ -341,19 +393,19 @@ function renderInspectorForSelection(selected) {
             <div class="le-effects-section">
                 <div class="le-effects-title">Effects</div>
                 <div class="le-effects-grid">
-                    ${EFFECT_CARDS.map((card) => `
+                    ${TEXT_EFFECT_CARDS.map((card) => `
                         <button
                             type="button"
                             class="le-effect-card ${(eff.type || 'none') === card.id ? 'active' : ''}"
                             data-effect-type="${card.id}"
                         >
-                            <span class="le-effect-preview is-preview-${card.id}">Ag</span>
+                            <span class="le-effect-preview is-preview-${card.id}">Aa</span>
                             <span class="le-effect-name">${card.label}</span>
                         </button>
                     `).join('')}
                 </div>
 
-                ${buildActiveEffectParamsHTML(eff)}
+                ${buildActiveEffectParamsHTML(eff, true)}
 
                 <div class="le-effects-title le-shape-title">Shape</div>
                 <div class="le-shape-curve-row">
@@ -428,7 +480,7 @@ function renderInspectorForSelection(selected) {
             updateSelectedLegendStyle({ rotation: 0 });
         });
 
-        bindEffectControls(host);
+        bindEffectControls(host, true);
 
     } else if (selected.kind === 'colorbar') {
         const isLight = document.body.classList.contains('light-mode');
@@ -470,6 +522,8 @@ function renderInspectorForSelection(selected) {
                 <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
                 <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
+
+            ${buildObjectEffectsSectionHTML(eff)}
         `;
 
         host.querySelector('#le-cb-height')?.addEventListener('input', (e) => {
@@ -497,6 +551,8 @@ function renderInspectorForSelection(selected) {
         host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
             updateSelectedLegendStyle({ rotation: 0 });
         });
+
+        bindEffectControls(host, false);
 
     } else if (selected.kind === 'shape') {
         const opacityPct = Math.round((s.opacity ?? 0.9) * 100);
@@ -537,6 +593,8 @@ function renderInspectorForSelection(selected) {
                 <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
                 <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
+
+            ${buildObjectEffectsSectionHTML(eff)}
         `;
 
         host.querySelector('#le-shape-fill')?.addEventListener('input', (e) => {
@@ -565,6 +623,8 @@ function renderInspectorForSelection(selected) {
             updateSelectedLegendStyle({ rotation: 0 });
         });
 
+        bindEffectControls(host, false);
+
     } else if (selected.kind === 'image') {
         const opacityPct = Math.round((s.opacity ?? 1) * 100);
         const rotVal = Number.isFinite(s.rotation) ? s.rotation : 0;
@@ -584,6 +644,8 @@ function renderInspectorForSelection(selected) {
                 <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
                 <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
+
+            ${buildObjectEffectsSectionHTML(eff)}
         `;
 
         host.querySelector('#btn-le-replace-img')?.addEventListener('click', () => {
@@ -601,6 +663,8 @@ function renderInspectorForSelection(selected) {
         host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
             updateSelectedLegendStyle({ rotation: 0 });
         });
+
+        bindEffectControls(host, false);
 
     } else if (selected.kind === 'box') {
         const isLight = document.body.classList.contains('light-mode');
@@ -634,6 +698,8 @@ function renderInspectorForSelection(selected) {
                 <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
                 <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
+
+            ${buildObjectEffectsSectionHTML(eff)}
         `;
 
         host.querySelector('#le-box-bg')?.addEventListener('input', (e) => {
@@ -657,6 +723,8 @@ function renderInspectorForSelection(selected) {
         host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
             updateSelectedLegendStyle({ rotation: 0 });
         });
+
+        bindEffectControls(host, false);
     }
 }
 
@@ -666,6 +734,10 @@ function syncExistingControlValues(selected, s, eff) {
 
     const opVal = host.querySelector('#le-opacity-val');
     if (opVal) opVal.textContent = `${Math.round((s.opacity ?? 1) * 100)}%`;
+    const opSlider = host.querySelector('#le-opacity');
+    if (opSlider && document.activeElement !== opSlider) {
+        opSlider.value = String(Math.round((s.opacity ?? 1) * 100));
+    }
 
     const rotVal = host.querySelector('#le-rotation-val');
     if (rotVal) rotVal.textContent = `${Number.isFinite(s.rotation) ? s.rotation : 0}°`;
@@ -674,10 +746,35 @@ function syncExistingControlValues(selected, s, eff) {
         rotSlider.value = String(s.rotation || 0);
     }
 
+    ['direction', 'offset', 'blur', 'transparency', 'intensity', 'thickness', 'roundness', 'spread', 'curveAmount'].forEach((prop) => {
+        const span = host.querySelector(`#le-eff-val-${prop}`);
+        if (span && eff[prop] !== undefined) {
+            span.textContent = String(eff[prop]);
+        }
+        const slider = host.querySelector(`#le-eff-slider-${prop}`);
+        if (slider && document.activeElement !== slider && eff[prop] !== undefined) {
+            slider.value = String(eff[prop]);
+        }
+    });
+
+    const effCol = host.querySelector('#le-eff-color');
+    if (effCol && document.activeElement !== effCol && eff.color) effCol.value = eff.color;
+    const effCol2 = host.querySelector('#le-eff-color2');
+    if (effCol2 && document.activeElement !== effCol2 && eff.color2) effCol2.value = eff.color2;
+
     if (selected.kind === 'text') {
+        const textInput = host.querySelector('#le-text-content');
+        if (textInput && document.activeElement !== textInput) textInput.value = selected.text || '';
+
+        const fontSelect = host.querySelector('#le-font-family');
+        if (fontSelect && document.activeElement !== fontSelect && s.fontFamily) fontSelect.value = s.fontFamily;
+
         const fontSizeInput = host.querySelector('#le-font-size');
-        if (fontSizeInput && document.activeElement !== fontSizeInput) {
-            fontSizeInput.value = String(s.fontSize || 13);
+        if (fontSizeInput && document.activeElement !== fontSizeInput) fontSizeInput.value = String(s.fontSize || 13);
+
+        const colorInput = host.querySelector('#le-text-color');
+        if (colorInput && document.activeElement !== colorInput) {
+            colorInput.value = s.color || getDefaultColorHexForElement(selected);
         }
 
         host.querySelector('#le-btn-bold')?.classList.toggle('active', Boolean(s.bold));
@@ -686,24 +783,13 @@ function syncExistingControlValues(selected, s, eff) {
         host.querySelectorAll('.le-align-btn').forEach((b) => {
             b.classList.toggle('active', (s.align || 'left') === b.dataset.align);
         });
-
-        ['direction', 'offset', 'blur', 'transparency', 'intensity', 'thickness', 'roundness', 'spread', 'curveAmount'].forEach((prop) => {
-            const span = host.querySelector(`#le-eff-val-${prop}`);
-            if (span && eff[prop] !== undefined) {
-                span.textContent = String(eff[prop]);
-            }
-            const slider = host.querySelector(`#le-eff-slider-${prop}`);
-            if (slider && document.activeElement !== slider && eff[prop] !== undefined) {
-                slider.value = String(eff[prop]);
-            }
-        });
     } else if (selected.kind === 'colorbar') {
         const hVal = host.querySelector('#le-cb-height-val');
         if (hVal) hVal.textContent = `${s.barHeight ?? 13}px`;
+        const hSlider = host.querySelector('#le-cb-height');
+        if (hSlider && document.activeElement !== hSlider) hSlider.value = String(s.barHeight ?? 13);
         const cbSizeInput = host.querySelector('#le-cb-size');
-        if (cbSizeInput && document.activeElement !== cbSizeInput) {
-            cbSizeInput.value = String(s.tickFontSize || 10);
-        }
+        if (cbSizeInput && document.activeElement !== cbSizeInput) cbSizeInput.value = String(s.tickFontSize || 10);
     } else if (selected.kind === 'shape') {
         const bwVal = host.querySelector('#le-shape-bw-val');
         if (bwVal) bwVal.textContent = `${(s.borderWidth ?? 1.5).toFixed(1)}px`;
@@ -712,6 +798,8 @@ function syncExistingControlValues(selected, s, eff) {
     } else if (selected.kind === 'box') {
         const aVal = host.querySelector('#le-box-alpha-val');
         if (aVal) aVal.textContent = `${Math.round((s.bgOpacity ?? 0.92) * 100)}%`;
+        const aSlider = host.querySelector('#le-box-alpha');
+        if (aSlider && document.activeElement !== aSlider) aSlider.value = String(Math.round((s.bgOpacity ?? 0.92) * 100));
         const bwVal = host.querySelector('#le-box-bw-val');
         if (bwVal) bwVal.textContent = `${(s.borderWidth ?? 1).toFixed(1)}px`;
     }
@@ -726,7 +814,13 @@ export function initLegendEditor() {
     panelEl.setAttribute('aria-hidden', 'true');
     panelEl.innerHTML = `
         <div class="basemap-editor-header">
-            <span class="basemap-editor-title">Legend Editor</span>
+            <div class="le-title-undo-group">
+                <span class="basemap-editor-title">Legend Editor</span>
+                <div class="le-history-btns">
+                    <button id="btn-legend-undo" class="le-history-btn" type="button" title="Undo (Cmd/Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+                    <button id="btn-legend-redo" class="le-history-btn" type="button" title="Redo (Cmd/Ctrl+Shift+Z)" aria-label="Redo" disabled>↷</button>
+                </div>
+            </div>
             <div class="basemap-header-actions">
                 <button id="btn-legend-done-editing" class="legend-editor-done-btn" type="button">Done</button>
                 <button id="btn-close-legend-editor" class="ctrl-btn close-btn" type="button" aria-label="Close Legend Editor">✕</button>
@@ -803,6 +897,8 @@ export function initLegendEditor() {
 
     document.body.appendChild(panelEl);
 
+    panelEl.querySelector('#btn-legend-undo')?.addEventListener('click', () => undoLegend());
+    panelEl.querySelector('#btn-legend-redo')?.addEventListener('click', () => redoLegend());
     panelEl.querySelector('#btn-close-legend-editor')?.addEventListener('click', () => setLegendEditMode(false));
     panelEl.querySelector('#btn-legend-done-editing')?.addEventListener('click', () => setLegendEditMode(false));
     panelEl.querySelector('#btn-le-delete')?.addEventListener('click', () => deleteSelectedLegendElement());
@@ -882,6 +978,7 @@ export function initLegendEditor() {
 
     window.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && panelEl?.classList.contains('open')) {
+            if (document.activeElement?.isContentEditable) return;
             setLegendEditMode(false);
         }
     });
