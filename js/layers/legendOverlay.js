@@ -24,8 +24,8 @@ const ELEMENT_LABELS = {
 export const DEFAULT_EFFECT_PRESETS = {
     none: {},
     drop: { direction: -45, offset: 20, blur: 10, transparency: 50, color: '#000000' },
-    glow: { intensity: 40 },
-    echo: { direction: -52, offset: 13, color: '#000000' },
+    glow: { intensity: 40, color: '#3b82f6' },
+    echo: { direction: -52, offset: 13, color: '#3b82f6' },
     outline: { thickness: 50, color: '#000000' },
     background: { roundness: 50, spread: 50, transparency: 100, color: '#facc15' },
     splice: { thickness: 50, offset: 50, direction: -45, color: '#6b7280' },
@@ -36,10 +36,12 @@ export const DEFAULT_EFFECT_PRESETS = {
 
 const DESKTOP_RAIL_W = 48;
 const DESKTOP_EDITOR_W = 420;
+const MAX_HISTORY = 50;
 
 let mapRef = null;
 let canvasRoot = null;
 let dockWrap = null;
+let snapGuideLayer = null;
 let editMode = false;
 let selectedId = null;
 let freeLayoutActive = false;
@@ -49,10 +51,14 @@ let elementsMap = createDefaultElementsMap();
 let customOrder = [];
 let customCounter = 0;
 
+let historyStack = [];
+let historyIndex = -1;
+let debouncedHistoryTimer = null;
+
 let editToggleCallback = null;
 let selectionChangeCallback = null;
 
-function createDefaultEffectState() {
+function createDefaultEffectState(isBoxOrShape = false) {
     return {
         type: 'none',
         direction: -45,
@@ -63,7 +69,7 @@ function createDefaultEffectState() {
         thickness: 50,
         roundness: 50,
         spread: 50,
-        color: '#000000',
+        color: isBoxOrShape ? '#3b82f6' : '#000000',
         color2: '#00ffff',
         curveEnabled: false,
         curveAmount: 19
@@ -97,7 +103,8 @@ function createDefaultElementStyle(id) {
             borderColor: null,
             borderWidth: 1,
             opacity: 1,
-            rotation: 0
+            rotation: 0,
+            effect: createDefaultEffectState(true)
         };
     }
     if (id === 'header') {
@@ -111,7 +118,7 @@ function createDefaultElementStyle(id) {
             align: 'left',
             opacity: 1,
             rotation: 0,
-            effect: createDefaultEffectState()
+            effect: createDefaultEffectState(false)
         };
     }
     if (id === 'fhr') {
@@ -125,7 +132,7 @@ function createDefaultElementStyle(id) {
             align: 'center',
             opacity: 1,
             rotation: 0,
-            effect: createDefaultEffectState()
+            effect: createDefaultEffectState(false)
         };
     }
     if (id === 'init' || id === 'valid') {
@@ -139,7 +146,7 @@ function createDefaultElementStyle(id) {
             align: 'left',
             opacity: 1,
             rotation: 0,
-            effect: createDefaultEffectState()
+            effect: createDefaultEffectState(false)
         };
     }
     if (id === 'colorbar') {
@@ -149,7 +156,8 @@ function createDefaultElementStyle(id) {
             tickFontSize: 10,
             tickColor: null,
             opacity: 1,
-            rotation: 0
+            rotation: 0,
+            effect: createDefaultEffectState(true)
         };
     }
     return {};
@@ -173,6 +181,157 @@ function createDefaultElementsMap() {
     });
     return out;
 }
+
+/* =========================================================================
+   UNDO / REDO HISTORY STACK
+   ========================================================================= */
+
+function cloneSnapshot() {
+    return JSON.stringify({
+        freeLayoutActive,
+        lastFreeWorkspace,
+        selectedId,
+        customOrder,
+        customCounter,
+        elementsMap
+    });
+}
+
+function initHistoryIfEmpty() {
+    if (historyStack.length === 0) {
+        historyStack = [cloneSnapshot()];
+        historyIndex = 0;
+    }
+}
+
+function commitHistorySnapshot() {
+    clearTimeout(debouncedHistoryTimer);
+    initHistoryIfEmpty();
+    const snap = cloneSnapshot();
+    if (historyStack[historyIndex] === snap) return;
+
+    historyStack = historyStack.slice(0, historyIndex + 1);
+    historyStack.push(snap);
+    if (historyStack.length > MAX_HISTORY) {
+        historyStack.shift();
+    }
+    historyIndex = historyStack.length - 1;
+    notifySelectionChange();
+}
+
+function scheduleHistorySnapshot() {
+    clearTimeout(debouncedHistoryTimer);
+    debouncedHistoryTimer = setTimeout(() => {
+        commitHistorySnapshot();
+    }, 320);
+}
+
+export function canUndoLegend() {
+    return historyIndex > 0;
+}
+
+export function canRedoLegend() {
+    return historyIndex >= 0 && historyIndex < historyStack.length - 1;
+}
+
+function applySnapshot(snapJson) {
+    if (!snapJson || !canvasRoot || !dockWrap) return;
+    const snap = JSON.parse(snapJson);
+
+    freeLayoutActive = Boolean(snap.freeLayoutActive);
+    lastFreeWorkspace = snap.lastFreeWorkspace || null;
+    customOrder = Array.isArray(snap.customOrder) ? snap.customOrder : [];
+    customCounter = Number.isFinite(snap.customCounter) ? snap.customCounter : customCounter;
+    elementsMap = snap.elementsMap || createDefaultElementsMap();
+    selectedId = snap.selectedId || null;
+
+    // Remove all existing custom elements so DOM matches snapshot cleanly
+    canvasRoot.querySelectorAll('.legend-item.is-custom-element').forEach((el) => el.remove());
+
+    if (!freeLayoutActive) {
+        canvasRoot.classList.remove('is-free-layout');
+
+        const bgEl = getElementDom('bg');
+        const headerEl = getElementDom('header');
+        const initEl = getElementDom('init');
+        const fhrEl = getElementDom('fhr');
+        const validEl = getElementDom('valid');
+        const cbEl = getElementDom('colorbar');
+
+        const metaCol = dockWrap.querySelector('.legend-meta-col');
+        const timesRow = dockWrap.querySelector('.legend-times-row');
+
+        if (bgEl) dockWrap.insertBefore(bgEl, dockWrap.firstChild);
+        if (metaCol && headerEl) metaCol.insertBefore(headerEl, timesRow);
+        if (timesRow) {
+            if (initEl) timesRow.appendChild(initEl);
+            if (fhrEl) timesRow.appendChild(fhrEl);
+            if (validEl) timesRow.appendChild(validEl);
+        }
+        if (cbEl) dockWrap.appendChild(cbEl);
+
+        DEFAULT_ELEMENT_ORDER.forEach((id) => {
+            const el = getElementDom(id);
+            const item = elementsMap[id];
+            if (!el || !item) return;
+            el.style.display = item.deleted ? 'none' : '';
+            el.style.left = '';
+            el.style.top = '';
+            el.style.width = '';
+            el.style.height = '';
+            applyElementVisualStyles(id);
+        });
+    } else {
+        canvasRoot.classList.add('is-free-layout');
+
+        DEFAULT_ELEMENT_ORDER.forEach((id) => {
+            const el = getElementDom(id);
+            const item = elementsMap[id];
+            if (!el || !item) return;
+            canvasRoot.appendChild(el);
+            el.style.display = item.deleted ? 'none' : '';
+            if (Number.isFinite(item.x)) {
+                el.style.left = `${item.x}px`;
+                el.style.top = `${item.y}px`;
+                el.style.width = `${item.w}px`;
+                el.style.height = `${item.h}px`;
+            }
+            applyElementVisualStyles(id);
+        });
+
+        customOrder.forEach((cid) => {
+            const item = elementsMap[cid];
+            if (!item || item.deleted) return;
+            mountCustomElementDom(item);
+            applyElementVisualStyles(cid);
+        });
+
+        rescaleFreeLayoutToCurrentWorkspace();
+    }
+
+    updateLegendOverlay();
+    updateSelectionClasses();
+    requestAnimationFrame(() => renderColorKeyCanvas());
+    notifySelectionChange();
+}
+
+export function undoLegend() {
+    clearTimeout(debouncedHistoryTimer);
+    if (!canUndoLegend()) return;
+    historyIndex--;
+    applySnapshot(historyStack[historyIndex]);
+}
+
+export function redoLegend() {
+    clearTimeout(debouncedHistoryTimer);
+    if (!canRedoLegend()) return;
+    historyIndex++;
+    applySnapshot(historyStack[historyIndex]);
+}
+
+/* =========================================================================
+   PUBLIC STATE & CALLBACKS
+   ========================================================================= */
 
 export function setLegendCallbacks({ onEditToggle = null, onSelectionChange = null } = {}) {
     if (onEditToggle) editToggleCallback = onEditToggle;
@@ -253,6 +412,7 @@ export function setLegendEditMode(active) {
     editMode = Boolean(active);
     if (!canvasRoot) return;
 
+    initHistoryIfEmpty();
     canvasRoot.classList.toggle('is-editing', editMode);
     document.body.classList.toggle('legend-editor-open', editMode);
 
@@ -260,6 +420,7 @@ export function setLegendEditMode(active) {
 
     if (!editMode) {
         selectedId = null;
+        clearSnapGuides();
         updateSelectionClasses();
     } else if (!selectedId) {
         const firstVisible = ['header', 'init', 'fhr', 'valid', 'colorbar', 'bg']
@@ -314,7 +475,7 @@ export function deleteSelectedLegendElement() {
         .find((id) => !elementsMap[id].deleted) || customOrder[0] || null;
     selectedId = nextVisible;
     updateSelectionClasses();
-    notifySelectionChange();
+    commitHistorySnapshot();
 }
 
 export function restoreLegendSection(id) {
@@ -328,7 +489,7 @@ export function restoreLegendSection(id) {
     selectedId = id;
     updateSelectionClasses();
     requestAnimationFrame(() => renderColorKeyCanvas());
-    notifySelectionChange();
+    commitHistorySnapshot();
 }
 
 export function resetLegendToDefault() {
@@ -376,7 +537,7 @@ export function resetLegendToDefault() {
     selectedId = editMode ? 'header' : null;
     updateSelectionClasses();
     requestAnimationFrame(() => renderColorKeyCanvas());
-    notifySelectionChange();
+    commitHistorySnapshot();
 }
 
 function updateSelectionClasses() {
@@ -387,7 +548,7 @@ function updateSelectionClasses() {
 }
 
 /* =========================================================================
-   CANVA TEXT EFFECTS & STYLING
+   TEXT + BOX / SHAPE / IMAGE EFFECTS ENGINE
    ========================================================================= */
 
 function hexToRgba(hex, alpha = 1) {
@@ -438,23 +599,50 @@ function setElementContentText(id, text) {
     const eff = item.style?.effect;
     if (eff?.curveEnabled && Math.abs(eff.curveAmount || 0) > 0) {
         applyTextEffectsAndCurve(id, item, contentEl);
-    } else {
+    } else if (contentEl.contentEditable !== 'true') {
         contentEl.textContent = text;
     }
 }
 
-function getDirectionOffset(directionDeg, offsetVal, fontSize) {
+function getDirectionOffset(directionDeg, offsetVal, baseSize = 20) {
     const rad = (directionDeg || 0) * (Math.PI / 180);
-    const dist = (offsetVal / 100) * Math.max(8, fontSize * 0.65);
+    const dist = (offsetVal / 100) * Math.max(8, baseSize * 0.65);
     return {
         dx: +(Math.cos(rad) * dist).toFixed(2),
         dy: +(-Math.sin(rad) * dist).toFixed(2)
     };
 }
 
+function applyBoxOrObjectEffect(targetEl, eff, fallbackColor = '#3b82f6') {
+    if (!targetEl) return;
+    const type = eff?.type || 'none';
+    targetEl.style.filter = '';
+
+    if (type === 'none') return;
+
+    const { dx, dy } = getDirectionOffset(eff.direction ?? -45, eff.offset ?? 20, 26);
+
+    if (type === 'drop') {
+        const blurPx = ((eff.blur ?? 10) / 100) * 18;
+        const alpha = Math.max(0, Math.min(1, (eff.transparency ?? 50) / 100));
+        targetEl.style.filter = `drop-shadow(${dx}px ${dy}px ${blurPx.toFixed(1)}px ${hexToRgba(eff.color || '#000000', alpha)})`;
+    } else if (type === 'glow') {
+        const t = Math.max(0, Math.min(1, (eff.intensity ?? 40) / 100));
+        const glowCol = eff.color || fallbackColor;
+        const r1 = (4 + t * 14).toFixed(1);
+        const r2 = (10 + t * 24).toFixed(1);
+        targetEl.style.filter = `drop-shadow(0 0 ${r1}px ${hexToRgba(glowCol, 0.4 + t * 0.55)}) drop-shadow(0 0 ${r2}px ${hexToRgba(glowCol, 0.25 + t * 0.45)})`;
+    } else if (type === 'echo') {
+        const echoCol = eff.color || fallbackColor;
+        const c1 = hexToRgba(echoCol, 0.55);
+        const c2 = hexToRgba(echoCol, 0.28);
+        targetEl.style.filter = `drop-shadow(${dx}px ${dy}px 0 ${c1}) drop-shadow(${(dx * 2).toFixed(2)}px ${(dy * 2).toFixed(2)}px 0 ${c2})`;
+    }
+}
+
 function applyTextEffectsAndCurve(id, item, contentEl) {
     const s = item.style || {};
-    const eff = s.effect || createDefaultEffectState();
+    const eff = s.effect || createDefaultEffectState(false);
     const fontSize = Number.isFinite(s.fontSize) ? s.fontSize : 13;
     const resolvedColor = getEffectiveTextColor(id, s);
     const textVal = item.text ?? contentEl.dataset.text ?? contentEl.textContent ?? '';
@@ -622,7 +810,6 @@ export function applyElementVisualStyles(id) {
     if (!item || !el) return;
 
     const s = item.style || {};
-
     const rot = Number.isFinite(s.rotation) ? s.rotation : 0;
     el.style.transform = rot !== 0 ? `rotate(${rot}deg)` : '';
 
@@ -647,6 +834,8 @@ export function applyElementVisualStyles(id) {
             el.style.borderWidth = '';
             el.style.borderStyle = '';
         }
+
+        applyBoxOrObjectEffect(el, s.effect, '#3b82f6');
         return;
     }
 
@@ -682,6 +871,7 @@ export function applyElementVisualStyles(id) {
             lbl.style.fontSize = Number.isFinite(s.tickFontSize) ? `${s.tickFontSize}px` : '';
             lbl.style.color = s.tickColor || '';
         });
+        applyBoxOrObjectEffect(el.querySelector('#legend-gradient-wrap') || el, s.effect, '#3b82f6');
         renderColorKeyCanvas();
     } else if (item.kind === 'shape') {
         const shapeBox = el.querySelector('.legend-shape-node');
@@ -699,6 +889,10 @@ export function applyElementVisualStyles(id) {
                 ? '50%'
                 : `${s.borderRadius ?? 0}px`;
         }
+        applyBoxOrObjectEffect(shapeBox, s.effect, s.fillColor || '#3b82f6');
+    } else if (item.kind === 'image') {
+        const imgEl = el.querySelector('.legend-custom-img');
+        applyBoxOrObjectEffect(imgEl || el, s.effect, '#3b82f6');
     }
 }
 
@@ -709,15 +903,16 @@ export function updateSelectedLegendStyle(patch = {}) {
 
     item.style = { ...item.style, ...patch };
     applyElementVisualStyles(selectedId);
+    scheduleHistorySnapshot();
     notifySelectionChange();
 }
 
 export function updateSelectedLegendEffect(effectPatch = {}) {
     if (!selectedId) return;
     const item = elementsMap[selectedId];
-    if (!item || item.kind !== 'text') return;
+    if (!item) return;
 
-    const currentEff = item.style?.effect || createDefaultEffectState();
+    const currentEff = item.style?.effect || createDefaultEffectState(item.kind !== 'text');
     item.style = {
         ...item.style,
         effect: {
@@ -726,6 +921,7 @@ export function updateSelectedLegendEffect(effectPatch = {}) {
         }
     };
     applyElementVisualStyles(selectedId);
+    scheduleHistorySnapshot();
     notifySelectionChange();
 }
 
@@ -735,11 +931,50 @@ export function updateSelectedLegendText(newText) {
     if (!item || item.kind !== 'text' || item.isDefault) return;
     setElementContentText(selectedId, String(newText ?? ''));
     applyElementVisualStyles(selectedId);
+    scheduleHistorySnapshot();
 }
 
 /* =========================================================================
-   ADD CUSTOM ELEMENTS: TEXT, SHAPES, UPLOAD IMAGE
+   ADD & MOUNT CUSTOM ELEMENTS: TEXT, SHAPES, UPLOAD IMAGE
    ========================================================================= */
+
+function mountCustomElementDom(item) {
+    if (!canvasRoot || !item) return null;
+    const existing = getElementDom(item.id);
+    if (existing) existing.remove();
+
+    const node = document.createElement('div');
+    node.dataset.elementId = item.id;
+    node.style.left = `${item.x}px`;
+    node.style.top = `${item.y}px`;
+    node.style.width = `${item.w}px`;
+    node.style.height = `${item.h}px`;
+
+    if (item.kind === 'text') {
+        node.className = 'legend-item is-custom-element legend-sec-custom-text';
+        const txt = item.text || 'Text';
+        node.innerHTML = `
+            <div class="legend-section-content" data-text="${escapeXml(txt)}">${escapeXml(txt)}</div>
+            ${buildCanvaHandlesHTML('text')}
+        `;
+        bindInlineTextEdit(node, item.id);
+    } else if (item.kind === 'shape') {
+        node.className = 'legend-item is-custom-element legend-sec-custom-shape';
+        node.innerHTML = `
+            <div class="legend-shape-node"></div>
+            ${buildCanvaHandlesHTML('shape')}
+        `;
+    } else if (item.kind === 'image') {
+        node.className = 'legend-item is-custom-element legend-sec-custom-image';
+        node.innerHTML = `
+            <img class="legend-custom-img" src="${item.src}" alt="Custom legend graphic" draggable="false" />
+            ${buildCanvaHandlesHTML('image')}
+        `;
+    }
+
+    canvasRoot.appendChild(node);
+    return node;
+}
 
 function getWorkspaceCenter() {
     const z = getCssZoomFactor();
@@ -779,27 +1014,15 @@ export function addLegendText(initialText = 'Custom Text') {
             align: 'center',
             opacity: 1,
             rotation: 0,
-            effect: createDefaultEffectState()
+            effect: createDefaultEffectState(false)
         }
     };
     customOrder.push(id);
 
-    const node = document.createElement('div');
-    node.className = 'legend-item is-custom-element legend-sec-custom-text';
-    node.dataset.elementId = id;
-    node.style.left = `${x}px`;
-    node.style.top = `${y}px`;
-    node.style.width = `${elW}px`;
-    node.style.height = `${elH}px`;
-    node.innerHTML = `
-        <div class="legend-section-content" data-text="${escapeXml(initialText)}">${escapeXml(initialText)}</div>
-        ${buildCanvaHandlesHTML('text')}
-    `;
-
-    bindInlineTextEdit(node, id);
-    canvasRoot.appendChild(node);
+    mountCustomElementDom(elementsMap[id]);
     applyElementVisualStyles(id);
     selectLegendElement(id);
+    commitHistorySnapshot();
 }
 
 export function addLegendShape(shapeType = 'rect') {
@@ -829,26 +1052,16 @@ export function addLegendShape(shapeType = 'rect') {
             borderWidth: shapeType === 'line' ? 3 : 1.5,
             borderRadius: 0,
             opacity: 0.9,
-            rotation: 0
+            rotation: 0,
+            effect: createDefaultEffectState(true)
         }
     };
     customOrder.push(id);
 
-    const node = document.createElement('div');
-    node.className = 'legend-item is-custom-element legend-sec-custom-shape';
-    node.dataset.elementId = id;
-    node.style.left = `${x}px`;
-    node.style.top = `${y}px`;
-    node.style.width = `${elW}px`;
-    node.style.height = `${elH}px`;
-    node.innerHTML = `
-        <div class="legend-shape-node"></div>
-        ${buildCanvaHandlesHTML('shape')}
-    `;
-
-    canvasRoot.appendChild(node);
+    mountCustomElementDom(elementsMap[id]);
     applyElementVisualStyles(id);
     selectLegendElement(id);
+    commitHistorySnapshot();
 }
 
 export function addLegendImage(dataUrl) {
@@ -875,26 +1088,16 @@ export function addLegendImage(dataUrl) {
             x, y, w: elW, h: elH,
             style: {
                 opacity: 1,
-                rotation: 0
+                rotation: 0,
+                effect: createDefaultEffectState(true)
             }
         };
         customOrder.push(id);
 
-        const node = document.createElement('div');
-        node.className = 'legend-item is-custom-element legend-sec-custom-image';
-        node.dataset.elementId = id;
-        node.style.left = `${x}px`;
-        node.style.top = `${y}px`;
-        node.style.width = `${elW}px`;
-        node.style.height = `${elH}px`;
-        node.innerHTML = `
-            <img class="legend-custom-img" src="${dataUrl}" alt="Custom legend graphic" draggable="false" />
-            ${buildCanvaHandlesHTML('image')}
-        `;
-
-        canvasRoot.appendChild(node);
+        mountCustomElementDom(elementsMap[id]);
         applyElementVisualStyles(id);
         selectLegendElement(id);
+        commitHistorySnapshot();
     };
     img.src = dataUrl;
 }
@@ -906,6 +1109,7 @@ export function replaceSelectedLegendImage(dataUrl) {
     item.src = dataUrl;
     const imgEl = getElementDom(selectedId)?.querySelector('.legend-custom-img');
     if (imgEl) imgEl.src = dataUrl;
+    commitHistorySnapshot();
 }
 
 /* =========================================================================
@@ -1304,7 +1508,126 @@ export function updateLegendOverlay() {
 }
 
 /* =========================================================================
-   CANVA-STYLE SELECTION, RESIZE, ROTATE, & LIVE BADGE
+   SMART ALIGNMENT & SNAPPING GUIDES (Dotted lines + 6px magnetic snap)
+   ========================================================================= */
+
+function clearSnapGuides() {
+    if (snapGuideLayer) snapGuideLayer.innerHTML = '';
+}
+
+function renderSnapGuides(vLines = [], hLines = []) {
+    if (!snapGuideLayer) return;
+    let html = '';
+    vLines.forEach((line) => {
+        html += `<div class="legend-snap-line is-v" style="left: ${line.pos}px; top: ${line.start}px; height: ${Math.max(10, line.end - line.start)}px;"></div>`;
+    });
+    hLines.forEach((line) => {
+        html += `<div class="legend-snap-line is-h" style="top: ${line.pos}px; left: ${line.start}px; width: ${Math.max(10, line.end - line.start)}px;"></div>`;
+    });
+    snapGuideLayer.innerHTML = html;
+}
+
+function collectSnapTargets(excludeIds = new Set()) {
+    const z = getCssZoomFactor();
+    const bounds = getWorkspaceBounds(editMode);
+    const topLimit = window.innerWidth >= 1024 ? 50 : 96;
+    const bottomLimit = (window.innerHeight / z) - 46;
+
+    const xTargets = [
+        { val: bounds.left, start: topLimit, end: bottomLimit },
+        { val: (bounds.left + bounds.right) / 2, start: topLimit, end: bottomLimit },
+        { val: bounds.right, start: topLimit, end: bottomLimit }
+    ];
+    const yTargets = [
+        { val: topLimit, start: bounds.left, end: bounds.right },
+        { val: (topLimit + bottomLimit) / 2, start: bounds.left, end: bounds.right },
+        { val: bottomLimit, start: bounds.left, end: bounds.right }
+    ];
+
+    const allIds = [...DEFAULT_ELEMENT_ORDER, ...customOrder];
+    allIds.forEach((oid) => {
+        if (excludeIds.has(oid)) return;
+        const o = elementsMap[oid];
+        if (!o || o.deleted || !Number.isFinite(o.x)) return;
+
+        xTargets.push(
+            { val: o.x, top: o.y, bottom: o.y + o.h },
+            { val: o.x + o.w / 2, top: o.y, bottom: o.y + o.h },
+            { val: o.x + o.w, top: o.y, bottom: o.y + o.h }
+        );
+        yTargets.push(
+            { val: o.y, left: o.x, right: o.x + o.w },
+            { val: o.y + o.h / 2, left: o.x, right: o.x + o.w },
+            { val: o.y + o.h, left: o.x, right: o.x + o.w }
+        );
+    });
+
+    return { xTargets, yTargets };
+}
+
+function applySmartMoveSnap(id, candX, candY, w, h, excludeIds) {
+    const SNAP_TOL = 6;
+    const { xTargets, yTargets } = collectSnapTargets(excludeIds);
+
+    const candXs = [
+        { pos: candX, offset: 0 },
+        { pos: candX + w / 2, offset: w / 2 },
+        { pos: candX + w, offset: w }
+    ];
+    const candYs = [
+        { pos: candY, offset: 0 },
+        { pos: candY + h / 2, offset: h / 2 },
+        { pos: candY + h, offset: h }
+    ];
+
+    let bestX = null;
+    let bestDx = SNAP_TOL + 1;
+    candXs.forEach((cx) => {
+        xTargets.forEach((t) => {
+            const d = Math.abs(cx.pos - t.val);
+            if (d < bestDx) {
+                bestDx = d;
+                bestX = { snappedLeft: t.val - cx.offset, target: t };
+            }
+        });
+    });
+
+    let bestY = null;
+    let bestDy = SNAP_TOL + 1;
+    candYs.forEach((cy) => {
+        yTargets.forEach((t) => {
+            const d = Math.abs(cy.pos - t.val);
+            if (d < bestDy) {
+                bestDy = d;
+                bestY = { snappedTop: t.val - cy.offset, target: t };
+            }
+        });
+    });
+
+    const finalX = bestX ? Math.round(bestX.snappedLeft) : Math.round(candX);
+    const finalY = bestY ? Math.round(bestY.snappedTop) : Math.round(candY);
+
+    const vLines = [];
+    const hLines = [];
+    if (bestX) {
+        const t = bestX.target;
+        const start = t.start !== undefined ? t.start : Math.min(finalY, t.top) - 10;
+        const end = t.end !== undefined ? t.end : Math.max(finalY + h, t.bottom) + 10;
+        vLines.push({ pos: Math.round(t.val), start: Math.round(start), end: Math.round(end) });
+    }
+    if (bestY) {
+        const t = bestY.target;
+        const start = t.start !== undefined ? t.start : Math.min(finalX, t.left) - 10;
+        const end = t.end !== undefined ? t.end : Math.max(finalX + w, t.right) + 10;
+        hLines.push({ pos: Math.round(t.val), start: Math.round(start), end: Math.round(end) });
+    }
+
+    renderSnapGuides(vLines, hLines);
+    return { x: finalX, y: finalY };
+}
+
+/* =========================================================================
+   SELECTION, RESIZE, ROTATE, BADGE & KEYBOARD ISOLATION
    ========================================================================= */
 
 function updateCanvaBadge(text, targetEl) {
@@ -1380,11 +1703,12 @@ function bindInlineTextEdit(node, id) {
             contentEl.contentEditable = 'false';
             elementsMap[id].text = contentEl.textContent || '';
             applyElementVisualStyles(id);
-            notifySelectionChange();
+            commitHistorySnapshot();
         };
 
         contentEl.addEventListener('blur', finishEdit, { once: true });
         contentEl.addEventListener('keydown', (ke) => {
+            ke.stopPropagation();
             if (ke.key === 'Enter') {
                 ke.preventDefault();
                 contentEl.blur();
@@ -1426,12 +1750,27 @@ function attachDragAndResizeHandlers() {
         const item = elementsMap[id];
 
         if (interaction.kind === 'move') {
+            interaction.didMutate = true;
             const viewW = window.innerWidth / z;
             const viewH = window.innerHeight / z;
             const maxX = Math.max(0, viewW - interaction.origW);
             const maxY = Math.max(0, viewH - interaction.origH);
-            item.x = Math.round(Math.max(0, Math.min(maxX, interaction.origX + dx)));
-            item.y = Math.round(Math.max(0, Math.min(maxY, interaction.origY + dy)));
+
+            let candX = Math.max(0, Math.min(maxX, interaction.origX + dx));
+            let candY = Math.max(0, Math.min(maxY, interaction.origY + dy));
+
+            if (!e.altKey) {
+                const exclude = new Set([id]);
+                (interaction.bgChildren || []).forEach((ch) => exclude.add(ch.id));
+                const snapped = applySmartMoveSnap(id, candX, candY, interaction.origW, interaction.origH, exclude);
+                candX = Math.max(0, Math.min(maxX, snapped.x));
+                candY = Math.max(0, Math.min(maxY, snapped.y));
+            } else {
+                clearSnapGuides();
+            }
+
+            item.x = Math.round(candX);
+            item.y = Math.round(candY);
             el.style.left = `${item.x}px`;
             el.style.top = `${item.y}px`;
 
@@ -1449,6 +1788,7 @@ function attachDragAndResizeHandlers() {
             updateCanvaBadge(`X: ${item.x}  Y: ${item.y}`, el);
 
         } else if (interaction.kind === 'rotate') {
+            interaction.didMutate = true;
             const r = el.getBoundingClientRect();
             const centerX = r.left + r.width / 2;
             const centerY = r.top + r.height / 2;
@@ -1458,7 +1798,6 @@ function attachDragAndResizeHandlers() {
             angleDeg = ((angleDeg % 360) + 360) % 360;
             if (angleDeg > 180) angleDeg -= 360;
 
-            // Canva-style snap to 0°, 90°, -90°, 180°
             if (Math.abs(angleDeg) <= 3) angleDeg = 0;
             else if (Math.abs(angleDeg - 90) <= 3) angleDeg = 90;
             else if (Math.abs(angleDeg + 90) <= 3) angleDeg = -90;
@@ -1470,14 +1809,13 @@ function attachDragAndResizeHandlers() {
             notifySelectionChange();
 
         } else if (interaction.kind === 'resize') {
+            interaction.didMutate = true;
             const isText = item.kind === 'text';
             const isCorner = ['nw', 'ne', 'se', 'sw'].includes(interaction.dir);
-            const isSidePill = ['w', 'e'].includes(interaction.dir);
 
             let { origX: x, origY: y, origW: w, origH: h, origFontSize } = interaction;
             const dir = interaction.dir;
 
-            // 🌟 CANVA CORNER DRAG ON TEXT: Proportional Font Size Scaling!
             if (isText && isCorner) {
                 let scale = 1;
                 if (dir === 'se') {
@@ -1502,7 +1840,6 @@ function attachDragAndResizeHandlers() {
                 updateCanvaBadge(`${nextFontSize} px`, el);
 
             } else {
-                // Standard dimension stretching
                 const minW = id === 'colorbar' ? 120 : (id === 'bg' ? 160 : 28);
                 const minH = id === 'colorbar' ? 24 : (id === 'bg' ? 32 : 12);
 
@@ -1518,6 +1855,25 @@ function attachDragAndResizeHandlers() {
                     y += (h - nextH);
                     h = nextH;
                 }
+
+                // Smart-snap resized edge to other elements
+                if (!e.altKey) {
+                    const exclude = new Set([id]);
+                    (interaction.bgChildren || []).forEach((ch) => exclude.add(ch.id));
+                    const { xTargets, yTargets } = collectSnapTargets(exclude);
+                    const vLines = [];
+                    const hLines = [];
+                    if (dir.includes('e')) {
+                        const hit = xTargets.find(t => Math.abs((x + w) - t.val) <= 6);
+                        if (hit) { w = Math.max(minW, hit.val - x); vLines.push({ pos: Math.round(hit.val), start: Math.round(y - 8), end: Math.round(y + h + 8) }); }
+                    }
+                    if (dir.includes('s')) {
+                        const hit = yTargets.find(t => Math.abs((y + h) - t.val) <= 6);
+                        if (hit) { h = Math.max(minH, hit.val - y); hLines.push({ pos: Math.round(hit.val), start: Math.round(x - 8), end: Math.round(x + w + 8) }); }
+                    }
+                    renderSnapGuides(vLines, hLines);
+                }
+
                 updateCanvaBadge(`W: ${Math.round(w)}  H: ${Math.round(h)}`, el);
             }
 
@@ -1568,9 +1924,14 @@ function attachDragAndResizeHandlers() {
 
     const onPointerUp = () => {
         if (!interaction) return;
+        const didMutate = interaction.didMutate;
         interaction = null;
+        clearSnapGuides();
         updateCanvaBadge(null);
         document.body.style.userSelect = '';
+        if (didMutate) {
+            commitHistorySnapshot();
+        }
     };
 
     window.addEventListener('pointermove', onPointerMove);
@@ -1601,7 +1962,6 @@ function attachDragAndResizeHandlers() {
         if (e.target.closest('#btn-legend-edit-pencil')) return;
         if (e.target.isContentEditable) return;
 
-        // 1. Check Canva Rotation Handle
         const rotHandle = e.target.closest('.legend-canva-rot-handle');
         if (rotHandle) {
             const itemEl = rotHandle.closest('.legend-item');
@@ -1614,6 +1974,7 @@ function attachDragAndResizeHandlers() {
             interaction = {
                 kind: 'rotate',
                 detached: true,
+                didMutate: false,
                 id,
                 el: itemEl,
                 startX: e.clientX,
@@ -1622,7 +1983,6 @@ function attachDragAndResizeHandlers() {
             return;
         }
 
-        // 2. Check Canva Resize Handle (Corner circle or Side pill)
         const handleEl = e.target.closest('.legend-canva-handle');
         if (handleEl) {
             const itemEl = handleEl.closest('.legend-item');
@@ -1635,6 +1995,7 @@ function attachDragAndResizeHandlers() {
             interaction = {
                 kind: 'resize',
                 detached: true,
+                didMutate: false,
                 id,
                 el: itemEl,
                 dir: handleEl.dataset.dir,
@@ -1650,7 +2011,6 @@ function attachDragAndResizeHandlers() {
             return;
         }
 
-        // 3. Click / Drag any element
         const itemEl = e.target.closest('.legend-item');
         if (itemEl) {
             e.stopPropagation();
@@ -1660,6 +2020,7 @@ function attachDragAndResizeHandlers() {
             interaction = {
                 kind: 'move',
                 detached: freeLayoutActive,
+                didMutate: false,
                 id,
                 el: itemEl,
                 startX: e.clientX,
@@ -1674,20 +2035,89 @@ function attachDragAndResizeHandlers() {
         }
     });
 
+    // 🌟 CAPTURE-PHASE KEYBOARD GUARD & SHORTCUTS
+    // Blocks map/timeline shortcuts whenever typing inside text boxes OR editor inputs!
     window.addEventListener('keydown', (e) => {
-        if (!editMode || !selectedId) return;
-        if (document.activeElement?.isContentEditable) return;
-        const tag = document.activeElement?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        const active = document.activeElement;
+        const isInlineEditing = Boolean(active?.isContentEditable);
+        const isEditorInput = Boolean(
+            active &&
+            active.closest('#legend-editor-panel, #basemap-editor-panel') &&
+            ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)
+        );
+
+        if (isInlineEditing || isEditorInput) {
+            if (e.key === 'Escape') {
+                active.blur();
+            }
+            e.stopPropagation();
+            return;
+        }
+
+        if (!editMode) return;
+
+        const isMod = e.metaKey || e.ctrlKey;
+
+        // Undo / Redo shortcuts
+        if (isMod && e.key.toLowerCase() === 'z') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.shiftKey) redoLegend();
+            else undoLegend();
+            return;
+        }
+        if (isMod && e.key.toLowerCase() === 'y') {
+            e.preventDefault();
+            e.stopPropagation();
+            redoLegend();
+            return;
+        }
+
+        if (!selectedId) return;
+
+        // Delete selected element
         if (e.key === 'Delete' || e.key === 'Backspace') {
             e.preventDefault();
+            e.stopPropagation();
             deleteSelectedLegendElement();
+            return;
         }
-    });
+
+        // Arrow-key nudge (1px, or 10px with Shift) without moving map/timeline
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+            activateFreeLayoutIfNeeded();
+
+            const item = elementsMap[selectedId];
+            const el = getElementDom(selectedId);
+            if (!item || !el) return;
+
+            const step = e.shiftKey ? 10 : 1;
+            const dx = e.key === 'ArrowLeft' ? -step : (e.key === 'ArrowRight' ? step : 0);
+            const dy = e.key === 'ArrowUp' ? -step : (e.key === 'ArrowDown' ? step : 0);
+
+            const bgChildren = selectedId === 'bg' ? captureBgChildrenSnapshot() : [];
+            item.x = Math.round(item.x + dx);
+            item.y = Math.round(item.y + dy);
+            el.style.left = `${item.x}px`;
+            el.style.top = `${item.y}px`;
+
+            bgChildren.forEach((child) => {
+                const c = elementsMap[child.id];
+                c.x = Math.round(child.origX + dx);
+                c.y = Math.round(child.origY + dy);
+                child.el.style.left = `${c.x}px`;
+                child.el.style.top = `${c.y}px`;
+            });
+
+            scheduleHistorySnapshot();
+        }
+    }, true);
 }
 
 /* =========================================================================
-   CANVA HANDLES BUILDER: Corner Circles, Side Pills & Rotation Stalk
+   CANVA-RULE HANDLES BUILDER (Workstation look)
    ========================================================================= */
 
 function buildCanvaHandlesHTML(kind = 'text') {
@@ -1695,20 +2125,16 @@ function buildCanvaHandlesHTML(kind = 'text') {
     const sidePills = isText ? ['w', 'e'] : ['n', 'e', 's', 'w'];
 
     return `
-        <!-- Canva Frame Outline is rendered via CSS border -->
-        <!-- Corner White Circles -->
         <span class="legend-canva-handle handle-corner dir-nw" data-dir="nw"></span>
         <span class="legend-canva-handle handle-corner dir-ne" data-dir="ne"></span>
         <span class="legend-canva-handle handle-corner dir-se" data-dir="se"></span>
         <span class="legend-canva-handle handle-corner dir-sw" data-dir="sw"></span>
 
-        <!-- Side Rounded White Pills -->
         ${sidePills.map((d) => `<span class="legend-canva-handle handle-pill dir-${d}" data-dir="${d}"></span>`).join('')}
 
-        <!-- Rotation Stalk & Button -->
         <div class="legend-canva-rot-stalk">
             <button type="button" class="legend-canva-rot-handle" title="Rotate" aria-label="Rotate">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21.5 2v6h-6"></path>
                     <path d="M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
                 </svg>
@@ -1725,6 +2151,7 @@ export function initLegendOverlay(map = null) {
     canvasRoot.id = 'legend-canvas-root';
     canvasRoot.className = 'legend-canvas-root';
     canvasRoot.innerHTML = `
+        <div id="legend-snap-guides" class="legend-snap-guides"></div>
         <div id="legend-dock-wrap" class="legend-dock-wrap">
             <div class="legend-item legend-bg-bar" data-element-id="bg">
                 ${buildCanvaHandlesHTML('box')}
@@ -1777,8 +2204,8 @@ export function initLegendOverlay(map = null) {
 
     document.body.appendChild(canvasRoot);
     dockWrap = document.getElementById('legend-dock-wrap');
+    snapGuideLayer = document.getElementById('legend-snap-guides');
 
-    // Bind inline double-click editing on all default text sections
     ['header', 'init', 'fhr', 'valid'].forEach((id) => {
         const dom = getElementDom(id);
         if (dom) bindInlineTextEdit(dom, id);
@@ -1798,4 +2225,5 @@ export function initLegendOverlay(map = null) {
         renderColorKeyCanvas();
     });
     updateLegendOverlay();
+    initHistoryIfEmpty();
 }
