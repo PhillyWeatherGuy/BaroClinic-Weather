@@ -3768,8 +3768,95 @@ body.light-mode .basemap-reset-all-btn:disabled {
 }
 
 /* ==========================================
-   CANVA TEXT EFFECTS & CURVE CONTROLS
+   LEGEND SMART GUIDES, UNDO/REDO & WORKSTATION EFFECTS
    ========================================== */
+.legend-snap-guides {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 25;
+}
+
+.legend-snap-line {
+    position: fixed;
+    pointer-events: none;
+}
+
+.legend-snap-line.is-v {
+    width: 0;
+    border-left: 1.5px dashed #38bdf8;
+    box-shadow: 0 0 6px rgba(56, 189, 248, 0.55);
+}
+
+.legend-snap-line.is-h {
+    height: 0;
+    border-top: 1.5px dashed #38bdf8;
+    box-shadow: 0 0 6px rgba(56, 189, 248, 0.55);
+}
+
+body.light-mode .legend-snap-line.is-v {
+    border-left-color: #2563eb;
+    box-shadow: 0 0 4px rgba(37, 99, 235, 0.35);
+}
+
+body.light-mode .legend-snap-line.is-h {
+    border-top-color: #2563eb;
+    box-shadow: 0 0 4px rgba(37, 99, 235, 0.35);
+}
+
+/* Header Undo / Redo */
+.le-title-undo-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.le-history-btns {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.le-history-btn {
+    width: 24px;
+    height: 22px;
+    padding: 0;
+    background: #181d28;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    color: #cbd5e1;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.le-history-btn:hover:not(:disabled) {
+    background: #232c3d;
+    border-color: #64748b;
+    color: #ffffff;
+}
+
+.le-history-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+body.light-mode .le-history-btn {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-mode .le-history-btn:hover:not(:disabled) {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+/* Splice & Glitch Pseudo-Layers on Map Legend */
 .legend-section-content {
     position: relative;
 }
@@ -3814,7 +3901,7 @@ body.light-mode .basemap-reset-all-btn:disabled {
     overflow: visible;
 }
 
-/* Effects Grid inside Legend Editor */
+/* BaroClinic Workstation Effects Grid */
 .le-effects-section {
     display: flex;
     flex-direction: column;
@@ -3842,12 +3929,16 @@ body.light-mode .basemap-reset-all-btn:disabled {
     gap: 6px;
 }
 
+.le-effects-grid.is-object-grid {
+    grid-template-columns: repeat(4, 1fr);
+}
+
 .le-effect-card {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 5px;
     padding: 8px 4px;
     background: #11151e;
     border: 1px solid #2a3446;
@@ -3864,7 +3955,7 @@ body.light-mode .basemap-reset-all-btn:disabled {
 }
 
 .le-effect-card.active {
-    border: 1.5px solid #3b82f6;
+    border: 1.5px solid #2563eb;
     background: rgba(37, 99, 235, 0.16);
     color: #ffffff;
 }
@@ -3873,14 +3964,16 @@ body.light-mode .basemap-reset-all-btn:disabled {
     font-family: 'Roboto', sans-serif;
     font-size: 10px;
     font-weight: 600;
+    letter-spacing: 0.2px;
 }
 
+/* Native BaroClinic Blue/Slate Text Effect Previews */
 .le-effect-preview {
     font-family: 'Roboto', sans-serif;
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 800;
     line-height: 1.1;
-    color: #a855f7;
+    color: #93c5fd;
     position: relative;
 }
 
@@ -3890,49 +3983,82 @@ body.light-mode .basemap-reset-all-btn:disabled {
 }
 
 .le-effect-preview.is-preview-drop {
-    text-shadow: 2px 2px 3px rgba(168, 85, 247, 0.65);
+    color: #f8fafc;
+    text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.9);
 }
 
 .le-effect-preview.is-preview-glow {
-    text-shadow: 0 0 8px rgba(168, 85, 247, 0.9), 0 0 14px rgba(168, 85, 247, 0.65);
+    color: #e0f2fe;
+    text-shadow: 0 0 8px rgba(59, 130, 246, 0.95), 0 0 14px rgba(96, 165, 250, 0.75);
 }
 
 .le-effect-preview.is-preview-echo {
-    text-shadow: 2px 2px 0 rgba(168, 85, 247, 0.5), 4px 4px 0 rgba(168, 85, 247, 0.25);
+    color: #93c5fd;
+    text-shadow: 2px 2px 0 rgba(59, 130, 246, 0.55), 4px 4px 0 rgba(59, 130, 246, 0.25);
 }
 
 .le-effect-preview.is-preview-outline {
-    color: #d8b4fe;
-    -webkit-text-stroke: 1.2px #7e22ce;
+    color: #f8fafc;
+    -webkit-text-stroke: 1.4px #1d4ed8;
     paint-order: stroke fill;
 }
 
 .le-effect-preview.is-preview-background {
+    color: #ffffff;
     padding: 1px 7px;
-    background: rgba(168, 85, 247, 0.28);
-    border-radius: 4px;
+    background: #1d4ed8;
+    border-radius: 0;
 }
 
 .le-effect-preview.is-preview-splice {
     -webkit-text-fill-color: transparent;
-    -webkit-text-stroke: 1.2px #a855f7;
-    text-shadow: 2px 2px 0 rgba(168, 85, 247, 0.45);
+    -webkit-text-stroke: 1.2px #f8fafc;
+    text-shadow: 2px 2px 0 rgba(59, 130, 246, 0.65);
 }
 
 .le-effect-preview.is-preview-hollow {
     -webkit-text-fill-color: transparent;
-    -webkit-text-stroke: 1.3px #a855f7;
+    -webkit-text-stroke: 1.3px #60a5fa;
 }
 
 .le-effect-preview.is-preview-neon {
-    color: #f3e8ff;
-    text-shadow: 0 0 4px #a855f7, 0 0 10px #a855f7, 0 0 16px #9333ea;
+    color: #eff6ff;
+    text-shadow: 0 0 4px #38bdf8, 0 0 10px #3b82f6, 0 0 16px #2563eb;
 }
 
 .le-effect-preview.is-preview-glitch {
+    color: #ffffff;
     text-shadow: -2px 0 0 #00ffff, 2px 0 0 #ff00ff;
 }
 
+/* Native BaroClinic Box / Shape / Object Effect Previews */
+.le-obj-preview {
+    width: 18px;
+    height: 18px;
+    background: #2563eb;
+    border: 1px solid #93c5fd;
+    border-radius: 0;
+    display: block;
+}
+
+.le-obj-preview.is-obj-none {
+    background: #1e293b;
+    border-color: #64748b;
+}
+
+.le-obj-preview.is-obj-drop {
+    box-shadow: 3px 3px 4px rgba(0, 0, 0, 0.85);
+}
+
+.le-obj-preview.is-obj-glow {
+    box-shadow: 0 0 7px rgba(59, 130, 246, 0.95), 0 0 12px rgba(96, 165, 250, 0.7);
+}
+
+.le-obj-preview.is-obj-echo {
+    box-shadow: 3px 3px 0 rgba(59, 130, 246, 0.55), 6px 6px 0 rgba(59, 130, 246, 0.25);
+}
+
+/* Effect Parameter Sliders & Steppers */
 .le-eff-params {
     display: flex;
     flex-direction: column;
@@ -4020,7 +4146,7 @@ body.light-mode .basemap-reset-all-btn:disabled {
 }
 
 .le-curve-preview-svg {
-    color: #a855f7;
+    color: #60a5fa;
     display: block;
 }
 
@@ -4035,7 +4161,7 @@ body.light-mode .basemap-reset-all-btn:disabled {
     border: 1px solid #232b3c;
 }
 
-/* Light Mode Overrides for Effects UI */
+/* Light Mode Overrides */
 body.light-mode .le-effects-section {
     border-top-color: #cbd5e1;
 }
@@ -4059,6 +4185,59 @@ body.light-mode .le-effect-card.active {
     border-color: #2563eb;
     background: #eff6ff;
     color: #1d4ed8;
+}
+
+body.light-mode .le-effect-preview {
+    color: #1e293b;
+}
+
+body.light-mode .le-effect-preview.is-preview-drop {
+    color: #0f172a;
+    text-shadow: 2px 2px 3px rgba(15, 23, 42, 0.4);
+}
+
+body.light-mode .le-effect-preview.is-preview-glow {
+    color: #1d4ed8;
+    text-shadow: 0 0 8px rgba(37, 99, 235, 0.7), 0 0 14px rgba(59, 130, 246, 0.45);
+}
+
+body.light-mode .le-effect-preview.is-preview-echo {
+    color: #1d4ed8;
+}
+
+body.light-mode .le-effect-preview.is-preview-outline {
+    color: #ffffff;
+    -webkit-text-stroke: 1.4px #1d4ed8;
+}
+
+body.light-mode .le-effect-preview.is-preview-splice {
+    -webkit-text-stroke: 1.2px #0f172a;
+}
+
+body.light-mode .le-effect-preview.is-preview-hollow {
+    -webkit-text-stroke: 1.3px #1d4ed8;
+}
+
+body.light-mode .le-effect-preview.is-preview-neon {
+    color: #ffffff;
+    text-shadow: 0 0 3px #1d4ed8, 0 0 8px #3b82f6;
+}
+
+body.light-mode .le-effect-preview.is-preview-glitch {
+    color: #0f172a;
+}
+
+body.light-mode .le-obj-preview.is-obj-none {
+    background: #cbd5e1;
+    border-color: #64748b;
+}
+
+body.light-mode .le-obj-preview.is-obj-drop {
+    box-shadow: 3px 3px 4px rgba(15, 23, 42, 0.45);
+}
+
+body.light-mode .le-curve-preview-svg {
+    color: #2563eb;
 }
 
 body.light-mode .le-eff-params,
