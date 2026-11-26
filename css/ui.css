@@ -2323,7 +2323,7 @@ body.light-mode .map-card {
     text-align: center;
 }
 /* ==========================================
-   LEGEND OVERLAY & 260px SPLIT-SCREEN EDITOR
+   LEGEND OVERLAY & SPLIT-SCREEN WORKSPACE
    ========================================== */
 .legend-canvas-root {
     position: fixed;
@@ -2368,17 +2368,29 @@ body.light-mode .legend-canvas-root {
 .legend-canvas-root.is-editing .legend-item {
     pointer-events: auto;
     cursor: grab;
-    outline: 1px dashed rgba(96, 165, 250, 0.55);
+    outline: 1px solid rgba(59, 130, 246, 0.35);
+    outline-offset: 1px;
+    transition: outline-color 0.1s ease;
 }
 
 .legend-canvas-root.is-editing .legend-item:hover {
-    outline-color: #60a5fa;
+    outline: 1px solid #60a5fa;
+    outline-offset: 1px;
 }
 
 .legend-canvas-root.is-editing .legend-item.is-selected {
-    outline: 1.5px solid #3b82f6;
-    background: rgba(59, 130, 246, 0.14);
-    z-index: 4;
+    outline: 1.5px solid #2563eb;
+    outline-offset: 1px;
+    background: rgba(37, 99, 235, 0.08);
+    z-index: 10;
+}
+
+/* Inline text editing state */
+.legend-section-content[contenteditable="true"] {
+    outline: 1.5px solid #3b82f6 !important;
+    background: rgba(59, 130, 246, 0.14) !important;
+    cursor: text !important;
+    border-radius: 0;
 }
 
 /* Independent Background Bar */
@@ -2642,30 +2654,145 @@ body.light-mode .legend-ptype-bar {
     color: #ffffff;
 }
 
-/* 8-point Canva Resize Handles */
-.legend-sec-handle {
+/* ==========================================
+   WORKSTATION HANDLES, ROTATION & BADGE
+   ========================================== */
+.legend-canva-handle,
+.legend-canva-rot-stalk {
     display: none;
-    position: absolute;
-    width: 8px;
-    height: 8px;
-    background: #ffffff;
-    border: 1.5px solid #2563eb;
-    border-radius: 0;
-    z-index: 6;
 }
 
-.legend-canvas-root.is-editing .legend-item.is-selected > .legend-sec-handle {
+.legend-canvas-root.is-editing .legend-item.is-selected > .legend-canva-handle {
     display: block;
 }
 
-.legend-sec-handle.dir-nw { top: -4px; left: -4px; cursor: nwse-resize; }
-.legend-sec-handle.dir-ne { top: -4px; right: -4px; cursor: nesw-resize; }
-.legend-sec-handle.dir-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
-.legend-sec-handle.dir-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
-.legend-sec-handle.dir-n { top: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
-.legend-sec-handle.dir-s { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
-.legend-sec-handle.dir-e { right: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
-.legend-sec-handle.dir-w { left: -4px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.legend-canvas-root.is-editing .legend-item.is-selected > .legend-canva-rot-stalk {
+    display: flex;
+}
+
+/* 1. Corner Precision Nubs (Clean, compact, sharp) */
+.legend-canva-handle.handle-corner {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: #ffffff;
+    border: 1.5px solid #2563eb;
+    border-radius: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box;
+    z-index: 12;
+}
+
+.legend-canva-handle.handle-corner.dir-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.legend-canva-handle.handle-corner.dir-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.legend-canva-handle.handle-corner.dir-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+.legend-canva-handle.handle-corner.dir-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+
+/* 2. Side Grab Bars */
+.legend-canva-handle.handle-pill {
+    position: absolute;
+    background: #ffffff;
+    border: 1.5px solid #2563eb;
+    border-radius: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    box-sizing: border-box;
+    z-index: 12;
+}
+
+.legend-canva-handle.handle-pill.dir-w,
+.legend-canva-handle.handle-pill.dir-e {
+    width: 4px;
+    height: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: ew-resize;
+}
+.legend-canva-handle.handle-pill.dir-w { left: -2px; }
+.legend-canva-handle.handle-pill.dir-e { right: -2px; }
+
+.legend-canva-handle.handle-pill.dir-n,
+.legend-canva-handle.handle-pill.dir-s {
+    width: 14px;
+    height: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    cursor: ns-resize;
+}
+.legend-canva-handle.handle-pill.dir-n { top: -2px; }
+.legend-canva-handle.handle-pill.dir-s { bottom: -2px; }
+
+/* 3. Sleek Rotation Stalk & Button */
+.legend-canva-rot-stalk {
+    position: absolute;
+    left: 50%;
+    bottom: -28px;
+    transform: translateX(-50%);
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+    z-index: 12;
+}
+
+.legend-canva-rot-stalk::before {
+    content: '';
+    width: 1.5px;
+    height: 10px;
+    background: #2563eb;
+    margin-bottom: 2px;
+}
+
+.legend-canva-rot-handle {
+    width: 20px;
+    height: 20px;
+    background: #181d28;
+    border: 1.5px solid #2563eb;
+    border-radius: 0;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #93c5fd;
+    cursor: grab;
+    pointer-events: auto;
+    padding: 0;
+    transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.legend-canva-rot-handle:hover {
+    transform: scale(1.12);
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.legend-canva-rot-handle:active {
+    cursor: grabbing;
+}
+
+/* 4. Live Floating Tech Badge (Dark slate monospace readout) */
+.legend-canva-badge {
+    position: fixed;
+    z-index: 9999;
+    transform: translate(-50%, 0);
+    background: #11151e;
+    color: #93c5fd;
+    border: 1px solid #2a3446;
+    border-radius: 0;
+    padding: 2px 7px;
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+body.light-mode .legend-canva-badge {
+    background: #ffffff;
+    color: #1d4ed8;
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+}
 
 /* ==========================================
    DOCKED 260px LEGEND EDITOR + WORKSPACE SPLIT
