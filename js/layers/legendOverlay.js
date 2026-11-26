@@ -96,7 +96,8 @@ function createDefaultElementStyle(id) {
             bgOpacity: 0.92,
             borderColor: null,
             borderWidth: 1,
-            opacity: 1
+            opacity: 1,
+            rotation: 0
         };
     }
     if (id === 'header') {
@@ -109,6 +110,7 @@ function createDefaultElementStyle(id) {
             underline: false,
             align: 'left',
             opacity: 1,
+            rotation: 0,
             effect: createDefaultEffectState()
         };
     }
@@ -122,6 +124,7 @@ function createDefaultElementStyle(id) {
             underline: false,
             align: 'center',
             opacity: 1,
+            rotation: 0,
             effect: createDefaultEffectState()
         };
     }
@@ -135,6 +138,7 @@ function createDefaultElementStyle(id) {
             underline: false,
             align: 'left',
             opacity: 1,
+            rotation: 0,
             effect: createDefaultEffectState()
         };
     }
@@ -144,7 +148,8 @@ function createDefaultElementStyle(id) {
             tickFontFamily: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
             tickFontSize: 10,
             tickColor: null,
-            opacity: 1
+            opacity: 1,
+            rotation: 0
         };
     }
     return {};
@@ -382,7 +387,7 @@ function updateSelectionClasses() {
 }
 
 /* =========================================================================
-   COLOR & CANVA TEXT EFFECTS ENGINE
+   CANVA TEXT EFFECTS & STYLING
    ========================================================================= */
 
 function hexToRgba(hex, alpha = 1) {
@@ -457,7 +462,6 @@ function applyTextEffectsAndCurve(id, item, contentEl) {
     contentEl.dataset.text = textVal;
     contentEl.dataset.effectType = eff.type || 'none';
 
-    // Reset effect properties cleanly
     contentEl.style.textShadow = '';
     contentEl.style.webkitTextStroke = '';
     contentEl.style.webkitTextFillColor = '';
@@ -477,7 +481,6 @@ function applyTextEffectsAndCurve(id, item, contentEl) {
     const strokePx = Math.max(0.5, ((eff.thickness ?? 50) / 100) * Math.max(3, fontSize * 0.22));
     const isCurved = Boolean(eff.curveEnabled && Math.abs(eff.curveAmount || 0) > 0 && contentEl.contentEditable !== 'true');
 
-    // 1. Apply Style Effect
     if (eff.type === 'drop') {
         const blurPx = ((eff.blur ?? 10) / 100) * Math.max(8, fontSize * 0.6);
         const alpha = Math.max(0, Math.min(1, (eff.transparency ?? 50) / 100));
@@ -558,7 +561,6 @@ function applyTextEffectsAndCurve(id, item, contentEl) {
         contentEl.style.setProperty('--le-eff-color2', eff.color2 || '#00ffff');
     }
 
-    // 2. Apply Shape -> Curve (SVG textPath) or standard text
     if (isCurved) {
         const curvePct = Math.max(-100, Math.min(100, Number(eff.curveAmount) || 0));
         const charCount = Math.max(4, textVal.length);
@@ -620,6 +622,9 @@ export function applyElementVisualStyles(id) {
     if (!item || !el) return;
 
     const s = item.style || {};
+
+    const rot = Number.isFinite(s.rotation) ? s.rotation : 0;
+    el.style.transform = rot !== 0 ? `rotate(${rot}deg)` : '';
 
     if (item.kind === 'box') {
         el.style.opacity = Number.isFinite(s.opacity) ? String(s.opacity) : '1';
@@ -773,6 +778,7 @@ export function addLegendText(initialText = 'Custom Text') {
             underline: false,
             align: 'center',
             opacity: 1,
+            rotation: 0,
             effect: createDefaultEffectState()
         }
     };
@@ -787,38 +793,10 @@ export function addLegendText(initialText = 'Custom Text') {
     node.style.height = `${elH}px`;
     node.innerHTML = `
         <div class="legend-section-content" data-text="${escapeXml(initialText)}">${escapeXml(initialText)}</div>
-        ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+        ${buildCanvaHandlesHTML('text')}
     `;
 
-    node.addEventListener('dblclick', (e) => {
-        if (!editMode) return;
-        e.stopPropagation();
-        const contentEl = node.querySelector('.legend-section-content');
-        if (!contentEl) return;
-        contentEl.textContent = elementsMap[id].text || '';
-        contentEl.contentEditable = 'true';
-        contentEl.focus();
-        const range = document.createRange();
-        range.selectNodeContents(contentEl);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-
-        const finishEdit = () => {
-            contentEl.contentEditable = 'false';
-            elementsMap[id].text = contentEl.textContent || 'Text';
-            applyElementVisualStyles(id);
-            notifySelectionChange();
-        };
-        contentEl.addEventListener('blur', finishEdit, { once: true });
-        contentEl.addEventListener('keydown', (ke) => {
-            if (ke.key === 'Enter') {
-                ke.preventDefault();
-                contentEl.blur();
-            }
-        });
-    });
-
+    bindInlineTextEdit(node, id);
     canvasRoot.appendChild(node);
     applyElementVisualStyles(id);
     selectLegendElement(id);
@@ -850,7 +828,8 @@ export function addLegendShape(shapeType = 'rect') {
             borderColor: '#ffffff',
             borderWidth: shapeType === 'line' ? 3 : 1.5,
             borderRadius: 0,
-            opacity: 0.9
+            opacity: 0.9,
+            rotation: 0
         }
     };
     customOrder.push(id);
@@ -864,7 +843,7 @@ export function addLegendShape(shapeType = 'rect') {
     node.style.height = `${elH}px`;
     node.innerHTML = `
         <div class="legend-shape-node"></div>
-        ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+        ${buildCanvaHandlesHTML('shape')}
     `;
 
     canvasRoot.appendChild(node);
@@ -895,7 +874,8 @@ export function addLegendImage(dataUrl) {
             deleted: false,
             x, y, w: elW, h: elH,
             style: {
-                opacity: 1
+                opacity: 1,
+                rotation: 0
             }
         };
         customOrder.push(id);
@@ -909,7 +889,7 @@ export function addLegendImage(dataUrl) {
         node.style.height = `${elH}px`;
         node.innerHTML = `
             <img class="legend-custom-img" src="${dataUrl}" alt="Custom legend graphic" draggable="false" />
-            ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+            ${buildCanvaHandlesHTML('image')}
         `;
 
         canvasRoot.appendChild(node);
@@ -1317,7 +1297,6 @@ export function updateLegendOverlay() {
                       document.getElementById('header-valid-time')?.textContent?.trim() || '--';
     setElementContentText('valid', `Valid: ${validText}`);
 
-    // Re-apply theme-reactive text effects (e.g. Glow/Neon/Hollow when theme switches)
     ['bg', 'header', 'init', 'fhr', 'valid', ...customOrder].forEach((id) => {
         applyElementVisualStyles(id);
     });
@@ -1325,8 +1304,30 @@ export function updateLegendOverlay() {
 }
 
 /* =========================================================================
-   UNBOUNDED DRAG & RESIZE INTERACTIONS
+   CANVA-STYLE SELECTION, RESIZE, ROTATE, & LIVE BADGE
    ========================================================================= */
+
+function updateCanvaBadge(text, targetEl) {
+    let badge = document.getElementById('legend-canva-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'legend-canva-badge';
+        badge.className = 'legend-canva-badge';
+        document.body.appendChild(badge);
+    }
+
+    if (!text || !targetEl) {
+        badge.style.display = 'none';
+        return;
+    }
+
+    const r = targetEl.getBoundingClientRect();
+    const z = getCssZoomFactor();
+    badge.textContent = text;
+    badge.style.display = 'block';
+    badge.style.left = `${Math.round((r.left + r.width / 2) / z)}px`;
+    badge.style.top = `${Math.round((r.bottom / z) + 16)}px`;
+}
 
 function captureBgChildrenSnapshot() {
     const bg = elementsMap.bg;
@@ -1357,6 +1358,41 @@ function captureBgChildrenSnapshot() {
     return children;
 }
 
+function bindInlineTextEdit(node, id) {
+    node.addEventListener('dblclick', (e) => {
+        if (!editMode) return;
+        e.stopPropagation();
+        const contentEl = node.querySelector('.legend-section-content');
+        if (!contentEl) return;
+
+        const currentText = elementsMap[id]?.text || contentEl.dataset.text || contentEl.textContent || '';
+        contentEl.textContent = currentText;
+        contentEl.contentEditable = 'true';
+        contentEl.focus();
+
+        const range = document.createRange();
+        range.selectNodeContents(contentEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finishEdit = () => {
+            contentEl.contentEditable = 'false';
+            elementsMap[id].text = contentEl.textContent || '';
+            applyElementVisualStyles(id);
+            notifySelectionChange();
+        };
+
+        contentEl.addEventListener('blur', finishEdit, { once: true });
+        contentEl.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter') {
+                ke.preventDefault();
+                contentEl.blur();
+            }
+        });
+    });
+}
+
 function attachDragAndResizeHandlers() {
     let interaction = null;
 
@@ -1367,7 +1403,7 @@ function attachDragAndResizeHandlers() {
         const z = getCssZoomFactor();
 
         if (!interaction.detached) {
-            if (Math.hypot(e.clientX - interaction.startX, e.clientY - interaction.startY) < 4 && interaction.kind === 'move') {
+            if (Math.hypot(e.clientX - interaction.startX, e.clientY - interaction.startY) < 3 && interaction.kind === 'move') {
                 return;
             }
             activateFreeLayoutIfNeeded();
@@ -1376,6 +1412,7 @@ function attachDragAndResizeHandlers() {
             interaction.origY = item.y;
             interaction.origW = item.w;
             interaction.origH = item.h;
+            interaction.origFontSize = item.style?.fontSize || 13;
             if (interaction.id === 'bg') {
                 interaction.bgChildren = captureBgChildrenSnapshot();
             }
@@ -1409,23 +1446,79 @@ function attachDragAndResizeHandlers() {
                     child.el.style.top = `${c.y}px`;
                 });
             }
+            updateCanvaBadge(`X: ${item.x}  Y: ${item.y}`, el);
+
+        } else if (interaction.kind === 'rotate') {
+            const r = el.getBoundingClientRect();
+            const centerX = r.left + r.width / 2;
+            const centerY = r.top + r.height / 2;
+            const angleRad = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+            let angleDeg = Math.round((angleRad * (180 / Math.PI)) - 90);
+
+            angleDeg = ((angleDeg % 360) + 360) % 360;
+            if (angleDeg > 180) angleDeg -= 360;
+
+            // Canva-style snap to 0°, 90°, -90°, 180°
+            if (Math.abs(angleDeg) <= 3) angleDeg = 0;
+            else if (Math.abs(angleDeg - 90) <= 3) angleDeg = 90;
+            else if (Math.abs(angleDeg + 90) <= 3) angleDeg = -90;
+            else if (Math.abs(Math.abs(angleDeg) - 180) <= 3) angleDeg = 180;
+
+            item.style.rotation = angleDeg;
+            el.style.transform = angleDeg !== 0 ? `rotate(${angleDeg}deg)` : '';
+            updateCanvaBadge(`${angleDeg}°`, el);
+            notifySelectionChange();
+
         } else if (interaction.kind === 'resize') {
-            const minW = id === 'colorbar' ? 120 : (id === 'bg' ? 160 : 28);
-            const minH = id === 'colorbar' ? 24 : (id === 'bg' ? 32 : 12);
-            let { origX: x, origY: y, origW: w, origH: h } = interaction;
+            const isText = item.kind === 'text';
+            const isCorner = ['nw', 'ne', 'se', 'sw'].includes(interaction.dir);
+            const isSidePill = ['w', 'e'].includes(interaction.dir);
+
+            let { origX: x, origY: y, origW: w, origH: h, origFontSize } = interaction;
             const dir = interaction.dir;
 
-            if (dir.includes('e')) w = Math.max(minW, w + dx);
-            if (dir.includes('s')) h = Math.max(minH, h + dy);
-            if (dir.includes('w')) {
-                const nextW = Math.max(minW, w - dx);
-                x += (w - nextW);
-                w = nextW;
-            }
-            if (dir.includes('n')) {
-                const nextH = Math.max(minH, h - dy);
-                y += (h - nextH);
-                h = nextH;
+            // 🌟 CANVA CORNER DRAG ON TEXT: Proportional Font Size Scaling!
+            if (isText && isCorner) {
+                let scale = 1;
+                if (dir === 'se') {
+                    scale = Math.max(0.3, Math.max((w + dx) / w, (h + dy) / h));
+                } else if (dir === 'sw') {
+                    scale = Math.max(0.3, Math.max((w - dx) / w, (h + dy) / h));
+                    x += (w - w * scale);
+                } else if (dir === 'ne') {
+                    scale = Math.max(0.3, Math.max((w + dx) / w, (h - dy) / h));
+                    y += (h - h * scale);
+                } else if (dir === 'nw') {
+                    scale = Math.max(0.3, Math.max((w - dx) / w, (h - dy) / h));
+                    x += (w - w * scale);
+                    y += (h - h * scale);
+                }
+
+                w = Math.round(w * scale);
+                h = Math.round(h * scale);
+                const nextFontSize = Math.max(8, Math.min(96, Math.round(origFontSize * scale)));
+                item.style.fontSize = nextFontSize;
+                applyElementVisualStyles(id);
+                updateCanvaBadge(`${nextFontSize} px`, el);
+
+            } else {
+                // Standard dimension stretching
+                const minW = id === 'colorbar' ? 120 : (id === 'bg' ? 160 : 28);
+                const minH = id === 'colorbar' ? 24 : (id === 'bg' ? 32 : 12);
+
+                if (dir.includes('e')) w = Math.max(minW, w + dx);
+                if (dir.includes('s')) h = Math.max(minH, h + dy);
+                if (dir.includes('w')) {
+                    const nextW = Math.max(minW, w - dx);
+                    x += (w - nextW);
+                    w = nextW;
+                }
+                if (dir.includes('n')) {
+                    const nextH = Math.max(minH, h - dy);
+                    y += (h - nextH);
+                    h = nextH;
+                }
+                updateCanvaBadge(`W: ${Math.round(w)}  H: ${Math.round(h)}`, el);
             }
 
             item.x = Math.round(x);
@@ -1468,12 +1561,15 @@ function attachDragAndResizeHandlers() {
             } else if (id === 'colorbar') {
                 renderColorKeyCanvas();
             }
+
+            notifySelectionChange();
         }
     };
 
     const onPointerUp = () => {
         if (!interaction) return;
         interaction = null;
+        updateCanvaBadge(null);
         document.body.style.userSelect = '';
     };
 
@@ -1505,7 +1601,29 @@ function attachDragAndResizeHandlers() {
         if (e.target.closest('#btn-legend-edit-pencil')) return;
         if (e.target.isContentEditable) return;
 
-        const handleEl = e.target.closest('.legend-sec-handle');
+        // 1. Check Canva Rotation Handle
+        const rotHandle = e.target.closest('.legend-canva-rot-handle');
+        if (rotHandle) {
+            const itemEl = rotHandle.closest('.legend-item');
+            if (!itemEl) return;
+            e.stopPropagation();
+            const id = itemEl.dataset.elementId;
+            activateFreeLayoutIfNeeded();
+            selectLegendElement(id);
+            document.body.style.userSelect = 'none';
+            interaction = {
+                kind: 'rotate',
+                detached: true,
+                id,
+                el: itemEl,
+                startX: e.clientX,
+                startY: e.clientY
+            };
+            return;
+        }
+
+        // 2. Check Canva Resize Handle (Corner circle or Side pill)
+        const handleEl = e.target.closest('.legend-canva-handle');
         if (handleEl) {
             const itemEl = handleEl.closest('.legend-item');
             if (!itemEl) return;
@@ -1526,11 +1644,13 @@ function attachDragAndResizeHandlers() {
                 origY: elementsMap[id].y,
                 origW: elementsMap[id].w,
                 origH: elementsMap[id].h,
+                origFontSize: elementsMap[id].style?.fontSize || 13,
                 bgChildren: id === 'bg' ? captureBgChildrenSnapshot() : null
             };
             return;
         }
 
+        // 3. Click / Drag any element
         const itemEl = e.target.closest('.legend-item');
         if (itemEl) {
             e.stopPropagation();
@@ -1548,6 +1668,7 @@ function attachDragAndResizeHandlers() {
                 origY: elementsMap[id].y,
                 origW: elementsMap[id].w,
                 origH: elementsMap[id].h,
+                origFontSize: elementsMap[id].style?.fontSize || 13,
                 bgChildren: (freeLayoutActive && id === 'bg') ? captureBgChildrenSnapshot() : null
             };
         }
@@ -1566,13 +1687,34 @@ function attachDragAndResizeHandlers() {
 }
 
 /* =========================================================================
-   DOM MOUNTING
+   CANVA HANDLES BUILDER: Corner Circles, Side Pills & Rotation Stalk
    ========================================================================= */
 
-const HANDLE_DIRS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+function buildCanvaHandlesHTML(kind = 'text') {
+    const isText = kind === 'text';
+    const sidePills = isText ? ['w', 'e'] : ['n', 'e', 's', 'w'];
 
-function buildHandleHTML(cls, dirs) {
-    return dirs.map((d) => `<span class="${cls} dir-${d}" data-dir="${d}"></span>`).join('');
+    return `
+        <!-- Canva Frame Outline is rendered via CSS border -->
+        <!-- Corner White Circles -->
+        <span class="legend-canva-handle handle-corner dir-nw" data-dir="nw"></span>
+        <span class="legend-canva-handle handle-corner dir-ne" data-dir="ne"></span>
+        <span class="legend-canva-handle handle-corner dir-se" data-dir="se"></span>
+        <span class="legend-canva-handle handle-corner dir-sw" data-dir="sw"></span>
+
+        <!-- Side Rounded White Pills -->
+        ${sidePills.map((d) => `<span class="legend-canva-handle handle-pill dir-${d}" data-dir="${d}"></span>`).join('')}
+
+        <!-- Rotation Stalk & Button -->
+        <div class="legend-canva-rot-stalk">
+            <button type="button" class="legend-canva-rot-handle" title="Rotate" aria-label="Rotate">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6"></path>
+                    <path d="M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                </svg>
+            </button>
+        </div>
+    `;
 }
 
 export function initLegendOverlay(map = null) {
@@ -1585,26 +1727,26 @@ export function initLegendOverlay(map = null) {
     canvasRoot.innerHTML = `
         <div id="legend-dock-wrap" class="legend-dock-wrap">
             <div class="legend-item legend-bg-bar" data-element-id="bg">
-                ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+                ${buildCanvaHandlesHTML('box')}
             </div>
 
             <div class="legend-meta-col">
                 <div class="legend-item legend-sec-header" data-element-id="header">
                     <div class="legend-section-content" data-text="ECMWF-IFS • 2m Temperature (°F)">ECMWF-IFS • 2m Temperature (°F)</div>
-                    ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+                    ${buildCanvaHandlesHTML('text')}
                 </div>
                 <div class="legend-times-row">
                     <div class="legend-item legend-sec-time" data-element-id="init">
                         <div class="legend-section-content" data-text="Init: --">Init: --</div>
-                        ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+                        ${buildCanvaHandlesHTML('text')}
                     </div>
                     <div class="legend-item legend-sec-time legend-sec-fhr" data-element-id="fhr">
                         <div class="legend-section-content" data-text="F000">F000</div>
-                        ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+                        ${buildCanvaHandlesHTML('text')}
                     </div>
                     <div class="legend-item legend-sec-time" data-element-id="valid">
                         <div class="legend-section-content" data-text="Valid: --">Valid: --</div>
-                        ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+                        ${buildCanvaHandlesHTML('text')}
                     </div>
                 </div>
             </div>
@@ -1615,7 +1757,7 @@ export function initLegendOverlay(map = null) {
                     <div id="legend-colorbar-labels" class="legend-colorbar-labels"></div>
                 </div>
                 <div id="legend-ptype-wrap" class="legend-ptype-wrap" style="display: none;"></div>
-                ${buildHandleHTML('legend-sec-handle', HANDLE_DIRS)}
+                ${buildCanvaHandlesHTML('colorbar')}
             </div>
 
             <button
@@ -1635,6 +1777,12 @@ export function initLegendOverlay(map = null) {
 
     document.body.appendChild(canvasRoot);
     dockWrap = document.getElementById('legend-dock-wrap');
+
+    // Bind inline double-click editing on all default text sections
+    ['header', 'init', 'fhr', 'valid'].forEach((id) => {
+        const dom = getElementDom(id);
+        if (dom) bindInlineTextEdit(dom, id);
+    });
 
     const pencilBtn = document.getElementById('btn-legend-edit-pencil');
     if (pencilBtn) {
