@@ -820,9 +820,12 @@ function syncExistingControlValues(selected, s, eff) {
         if (fontSizeInput && document.activeElement !== fontSizeInput) fontSizeInput.value = String(s.fontSize || 13);
 
         const colorInput = host.querySelector('#le-text-color');
+        const resolvedHex = s.color || getDefaultColorHexForElement(selected);
         if (colorInput && document.activeElement !== colorInput) {
-            colorInput.value = s.color || getDefaultColorHexForElement(selected);
+            colorInput.value = resolvedHex;
         }
+        const hexSpan = host.querySelector('#le-text-hex');
+        if (hexSpan) hexSpan.textContent = resolvedHex.replace('#', '').toUpperCase();
 
         host.querySelector('#le-btn-bold')?.classList.toggle('active', Boolean(s.bold));
         host.querySelector('#le-btn-italic')?.classList.toggle('active', Boolean(s.italic));
@@ -860,36 +863,31 @@ export function initLegendEditor() {
     panelEl.className = 'legend-editor-panel';
     panelEl.setAttribute('aria-hidden', 'true');
     panelEl.innerHTML = `
-        <div class="basemap-editor-header">
+        <div class="le-header">
             <div class="le-title-undo-group">
-                <span class="basemap-editor-title">Legend Editor</span>
+                <span class="le-header-title">Legend Editor</span>
                 <div class="le-history-btns">
                     <button id="btn-legend-undo" class="le-history-btn" type="button" title="Undo (Cmd/Ctrl+Z)" aria-label="Undo" disabled>↶</button>
                     <button id="btn-legend-redo" class="le-history-btn" type="button" title="Redo (Cmd/Ctrl+Shift+Z)" aria-label="Redo" disabled>↷</button>
                 </div>
             </div>
-            <div class="basemap-header-actions">
+            <div class="le-header-actions">
+                <button id="btn-legend-cancel" class="le-cancel-btn" type="button">Cancel</button>
                 <button id="btn-legend-done-editing" class="legend-editor-done-btn" type="button">Done</button>
-                <button id="btn-close-legend-editor" class="ctrl-btn close-btn" type="button" aria-label="Close Legend Editor">✕</button>
             </div>
         </div>
 
         <div class="le-body">
-            <div class="le-presets-row">
-                <span class="basemap-slider-label">Presets</span>
-                <span class="le-presets-empty">—</span>
-            </div>
-
             <div class="le-tools-wrap">
-                <div class="legend-tools-bar">
+                <div class="legend-tools-bar is-segmented">
                     <button type="button" class="legend-tool-btn active" data-tool="select" title="Select & Move">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
                         </svg>
                         <span>Select</span>
                     </button>
                     <button type="button" class="legend-tool-btn" data-tool="text" title="Add Text">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="4 7 4 4 20 4 20 7"></polyline>
                             <line x1="9" y1="20" x2="15" y2="20"></line>
                             <line x1="12" y1="4" x2="12" y2="20"></line>
@@ -897,14 +895,14 @@ export function initLegendEditor() {
                         <span>Text</span>
                     </button>
                     <button type="button" class="legend-tool-btn" data-tool="shape" title="Add Shape">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="11" height="11"></rect>
                             <circle cx="16.5" cy="16.5" r="4.5"></circle>
                         </svg>
-                        <span>Shapes</span>
+                        <span>Shape</span>
                     </button>
                     <button type="button" class="legend-tool-btn" data-tool="image" title="Upload Image">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="18" height="18"></rect>
                             <circle cx="8.5" cy="8.5" r="1.5"></circle>
                             <polyline points="21 15 16 10 5 21"></polyline>
@@ -921,18 +919,23 @@ export function initLegendEditor() {
                 <input id="le-hidden-file-input" type="file" accept="image/*" style="display: none;" />
             </div>
 
+            <div class="le-editing-row">
+                <span class="le-editing-label">Editing</span>
+                <select id="legend-editing-select" class="le-editing-select" aria-label="Editing element"></select>
+                <button id="btn-le-delete" class="le-trash-btn" type="button" title="Delete Selected" aria-label="Delete Selected">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6l-1 14H6L5 6"></path>
+                        <path d="M10 11v6"></path>
+                        <path d="M14 11v6"></path>
+                        <path d="M9 6V4h6v2"></path>
+                    </svg>
+                </button>
+            </div>
+
             <div id="legend-restore-strip" class="le-restore-strip" style="display: none;"></div>
 
-            <div class="le-inspector-card">
-                <div class="le-inspector-head">
-                    <span id="legend-active-target-name" class="le-target-name">Header</span>
-                    <div class="le-head-actions">
-                        <button id="btn-le-select-bg" class="le-mini-btn" type="button" title="Select Background Bar">BG</button>
-                        <button id="btn-le-delete" class="le-mini-btn is-danger" type="button" title="Delete Selected">Delete</button>
-                    </div>
-                </div>
-                <div id="legend-inspector-controls" class="le-inspector-controls"></div>
-            </div>
+            <div id="legend-inspector-controls" class="le-inspector-controls le-flat-inspector"></div>
         </div>
 
         <div class="le-footer">
@@ -946,13 +949,11 @@ export function initLegendEditor() {
 
     panelEl.querySelector('#btn-legend-undo')?.addEventListener('click', () => undoLegend());
     panelEl.querySelector('#btn-legend-redo')?.addEventListener('click', () => redoLegend());
-    panelEl.querySelector('#btn-close-legend-editor')?.addEventListener('click', () => setLegendEditMode(false));
+    panelEl.querySelector('#btn-legend-cancel')?.addEventListener('click', () => cancelLegendEditMode());
     panelEl.querySelector('#btn-legend-done-editing')?.addEventListener('click', () => setLegendEditMode(false));
     panelEl.querySelector('#btn-le-delete')?.addEventListener('click', () => deleteSelectedLegendElement());
-    panelEl.querySelector('#btn-le-select-bg')?.addEventListener('click', () => {
-        const deletedBg = getDeletedDefaultSections().some((s) => s.id === 'bg');
-        if (deletedBg) restoreLegendSection('bg');
-        else selectLegendElement('bg');
+    panelEl.querySelector('#legend-editing-select')?.addEventListener('change', (e) => {
+        if (e.target.value) selectLegendElement(e.target.value);
     });
     panelEl.querySelector('#btn-reset-legend-default')?.addEventListener('click', () => {
         renderedKey = '';
