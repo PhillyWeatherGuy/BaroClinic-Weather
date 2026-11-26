@@ -19,7 +19,9 @@ import {
     undoLegend,
     redoLegend,
     canUndoLegend,
-    canRedoLegend
+    canRedoLegend,
+    cancelLegendEditMode,
+    getLegendElementsList
 } from '../layers/legendOverlay.js';
 
 const FONT_OPTIONS = [
@@ -39,18 +41,34 @@ const FONT_OPTIONS = [
     { label: 'Georgia', value: "Georgia, 'Times New Roman', serif" }
 ];
 
-const TEXT_EFFECT_CARDS = [
+const LEGIBILITY_EFFECT_CARDS = [
     { id: 'none', label: 'None' },
     { id: 'drop', label: 'Drop' },
+    { id: 'outline', label: 'Outline' },
+    { id: 'background', label: 'Highlight' }
+];
+
+const STYLIZED_EFFECT_CARDS = [
     { id: 'glow', label: 'Glow' },
     { id: 'echo', label: 'Echo' },
-    { id: 'outline', label: 'Outline' },
-    { id: 'background', label: 'Background' },
     { id: 'splice', label: 'Splice' },
     { id: 'hollow', label: 'Hollow' },
     { id: 'neon', label: 'Neon' },
     { id: 'glitch', label: 'Glitch' }
 ];
+
+const EFFECT_DISPLAY_NAMES = {
+    none: 'None',
+    drop: 'Drop',
+    outline: 'Outline',
+    background: 'Highlight',
+    glow: 'Glow',
+    echo: 'Echo',
+    splice: 'Splice',
+    hollow: 'Hollow',
+    neon: 'Neon',
+    glitch: 'Glitch'
+};
 
 const OBJECT_EFFECT_CARDS = [
     { id: 'none', label: 'None' },
@@ -306,23 +324,26 @@ function bindEffectControls(host, isText = true) {
     });
 }
 
+function syncEditingDropdown(selected) {
+    const selEl = panelEl?.querySelector('#legend-editing-select');
+    if (!selEl) return;
+    const list = getLegendElementsList();
+    selEl.innerHTML = list.map((item) =>
+        `<option value="${item.id}" ${selected?.id === item.id ? 'selected' : ''}>${item.displayLabel}</option>`
+    ).join('');
+    if (selected?.id) selEl.value = selected.id;
+}
+
 function renderInspectorForSelection(selected) {
     syncHistoryButtons();
+    syncEditingDropdown(selected);
 
     const host = panelEl?.querySelector('#legend-inspector-controls');
-    const titleEl = panelEl?.querySelector('#legend-active-target-name');
     const deleteBtn = panelEl?.querySelector('#btn-le-delete');
-    const bgBtn = panelEl?.querySelector('#btn-le-select-bg');
     if (!host) return;
 
-    if (titleEl) {
-        titleEl.textContent = selected ? selected.label : 'None';
-    }
     if (deleteBtn) {
         deleteBtn.disabled = !selected;
-    }
-    if (bgBtn) {
-        bgBtn.classList.toggle('active', selected?.id === 'bg');
     }
 
     if (!selected) {
@@ -345,8 +366,22 @@ function renderInspectorForSelection(selected) {
         const activeColor = s.color || getDefaultColorHexForElement(selected);
         const opacityPct = Math.round((s.opacity ?? 1) * 100);
         const rotVal = Number.isFinite(s.rotation) ? s.rotation : 0;
+        const activeEffName = EFFECT_DISPLAY_NAMES[eff.type || 'none'] || 'None';
+
+        const renderCard = (card) => `
+            <button
+                type="button"
+                class="le-effect-card ${(eff.type || 'none') === card.id ? 'active' : ''} ${card.id === 'neon' ? 'is-neon-tile' : ''}"
+                data-effect-type="${card.id}"
+            >
+                <span class="le-effect-preview is-preview-${card.id}">Aa</span>
+                <span class="le-effect-name">${card.label}</span>
+            </button>
+        `;
 
         host.innerHTML = `
+            <div class="le-section-kicker">TEXT</div>
+
             ${!selected.isDefault ? `
                 <div class="le-row">
                     <input id="le-text-content" class="le-text-input" type="text" value="${(selected.text || '').replace(/"/g, '&quot;')}" placeholder="Enter text..." />
@@ -354,26 +389,37 @@ function renderInspectorForSelection(selected) {
             ` : ''}
 
             <div class="le-row le-font-row">
-                <select id="le-font-family" class="basemap-font-select" aria-label="Font family">
+                <select id="le-font-family" class="basemap-font-select le-select-clean" aria-label="Font family">
                     ${FONT_OPTIONS.map((f) => `<option value="${f.value}" ${s.fontFamily === f.value ? 'selected' : ''}>${f.label}</option>`).join('')}
                 </select>
-                <div class="basemap-font-size-wrap">
+                <div class="basemap-font-size-wrap le-size-clean">
                     <input id="le-font-size" class="basemap-font-size-input" type="number" min="8" max="96" step="1" value="${s.fontSize || 13}" aria-label="Font size" />
                     <span class="basemap-font-size-unit">px</span>
                 </div>
             </div>
 
             <div class="le-row le-style-toolbar">
-                <input id="le-text-color" class="basemap-color-input" type="color" value="${activeColor}" aria-label="Text color" title="Text Color" />
-                <div class="le-btn-group">
+                <label class="le-color-capsule" title="Text Color">
+                    <input id="le-text-color" class="le-color-dot-input" type="color" value="${activeColor}" aria-label="Text color" />
+                    <span id="le-text-hex" class="le-color-hex">${activeColor.replace('#', '').toUpperCase()}</span>
+                </label>
+
+                <div class="le-seg-group">
                     <button id="le-btn-bold" type="button" class="le-fmt-btn ${s.bold ? 'active' : ''}" title="Bold"><b>B</b></button>
                     <button id="le-btn-italic" type="button" class="le-fmt-btn ${s.italic ? 'active' : ''}" title="Italic"><i>I</i></button>
                     <button id="le-btn-underline" type="button" class="le-fmt-btn ${s.underline ? 'active' : ''}" title="Underline"><u>U</u></button>
                 </div>
-                <div class="le-btn-group">
-                    <button type="button" class="le-align-btn ${(s.align || 'left') === 'left' ? 'active' : ''}" data-align="left" title="Align Left">L</button>
-                    <button type="button" class="le-align-btn ${s.align === 'center' ? 'active' : ''}" data-align="center" title="Align Center">C</button>
-                    <button type="button" class="le-align-btn ${s.align === 'right' ? 'active' : ''}" data-align="right" title="Align Right">R</button>
+
+                <div class="le-seg-group">
+                    <button type="button" class="le-align-btn ${(s.align || 'left') === 'left' ? 'active' : ''}" data-align="left" title="Align Left">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
+                    </button>
+                    <button type="button" class="le-align-btn ${s.align === 'center' ? 'active' : ''}" data-align="center" title="Align Center">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+                    </button>
+                    <button type="button" class="le-align-btn ${s.align === 'right' ? 'active' : ''}" data-align="right" title="Align Right">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
+                    </button>
                 </div>
             </div>
 
@@ -391,18 +437,19 @@ function renderInspectorForSelection(selected) {
             </div>
 
             <div class="le-effects-section">
-                <div class="le-effects-title">Effects</div>
-                <div class="le-effects-grid">
-                    ${TEXT_EFFECT_CARDS.map((card) => `
-                        <button
-                            type="button"
-                            class="le-effect-card ${(eff.type || 'none') === card.id ? 'active' : ''}"
-                            data-effect-type="${card.id}"
-                        >
-                            <span class="le-effect-preview is-preview-${card.id}">Aa</span>
-                            <span class="le-effect-name">${card.label}</span>
-                        </button>
-                    `).join('')}
+                <div class="le-effects-header-row">
+                    <span class="le-effects-title">EFFECTS</span>
+                    <span id="le-eff-active-name" class="le-effects-active-label">${activeEffName}</span>
+                </div>
+
+                <div class="le-effects-sublabel">Legibility</div>
+                <div class="le-effects-grid is-four-col">
+                    ${LEGIBILITY_EFFECT_CARDS.map(renderCard).join('')}
+                </div>
+
+                <div class="le-effects-sublabel">Stylized</div>
+                <div class="le-effects-grid is-four-col">
+                    ${STYLIZED_EFFECT_CARDS.map(renderCard).join('')}
                 </div>
 
                 ${buildActiveEffectParamsHTML(eff, true)}
