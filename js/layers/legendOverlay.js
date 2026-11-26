@@ -54,6 +54,7 @@ let customCounter = 0;
 let historyStack = [];
 let historyIndex = -1;
 let debouncedHistoryTimer = null;
+let editSessionStartSnapshot = null;
 
 let editToggleCallback = null;
 let selectionChangeCallback = null;
@@ -408,11 +409,44 @@ function rescaleFreeLayoutToCurrentWorkspace() {
     lastFreeWorkspace = nextBounds;
 }
 
+export function getLegendElementsList() {
+    const allIds = [...DEFAULT_ELEMENT_ORDER, ...customOrder];
+    return allIds
+        .map((id) => elementsMap[id])
+        .filter((item) => item && !item.deleted)
+        .map((item) => {
+            const rawText = item.kind === 'text'
+                ? (item.text || getElementDom(item.id)?.querySelector('.legend-section-content')?.textContent || '').trim()
+                : '';
+            const shortText = rawText.length > 26 ? `${rawText.slice(0, 26)}…` : rawText;
+            return {
+                id: item.id,
+                label: item.label,
+                displayLabel: shortText ? `${item.label} — “${shortText}”` : item.label
+            };
+        });
+}
+
+export function cancelLegendEditMode() {
+    clearTimeout(debouncedHistoryTimer);
+    if (editSessionStartSnapshot) {
+        applySnapshot(editSessionStartSnapshot);
+        editSessionStartSnapshot = null;
+    }
+    setLegendEditMode(false);
+}
+
 export function setLegendEditMode(active) {
     editMode = Boolean(active);
     if (!canvasRoot) return;
 
     initHistoryIfEmpty();
+    if (editMode) {
+        editSessionStartSnapshot = cloneSnapshot();
+    } else {
+        editSessionStartSnapshot = null;
+    }
+
     canvasRoot.classList.toggle('is-editing', editMode);
     document.body.classList.toggle('legend-editor-open', editMode);
 
