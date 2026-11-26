@@ -292,6 +292,7 @@ function renderInspectorForSelection(selected) {
     if (selected.kind === 'text') {
         const activeColor = s.color || getDefaultColorHexForElement(selected);
         const opacityPct = Math.round((s.opacity ?? 1) * 100);
+        const rotVal = Number.isFinite(s.rotation) ? s.rotation : 0;
 
         host.innerHTML = `
             ${!selected.isDefault ? `
@@ -305,7 +306,7 @@ function renderInspectorForSelection(selected) {
                     ${FONT_OPTIONS.map((f) => `<option value="${f.value}" ${s.fontFamily === f.value ? 'selected' : ''}>${f.label}</option>`).join('')}
                 </select>
                 <div class="basemap-font-size-wrap">
-                    <input id="le-font-size" class="basemap-font-size-input" type="number" min="8" max="64" step="1" value="${s.fontSize || 13}" aria-label="Font size" />
+                    <input id="le-font-size" class="basemap-font-size-input" type="number" min="8" max="96" step="1" value="${s.fontSize || 13}" aria-label="Font size" />
                     <span class="basemap-font-size-unit">px</span>
                 </div>
             </div>
@@ -325,9 +326,16 @@ function renderInspectorForSelection(selected) {
             </div>
 
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
+            </div>
+
+            <div class="le-row le-slider-row">
+                <span class="basemap-slider-label">Angle</span>
+                <input id="le-rotation-slider" class="basemap-range-slider" type="range" min="-180" max="180" step="1" value="${rotVal}" />
+                <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
+                <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
 
             <div class="le-effects-section">
@@ -339,7 +347,7 @@ function renderInspectorForSelection(selected) {
                             class="le-effect-card ${(eff.type || 'none') === card.id ? 'active' : ''}"
                             data-effect-type="${card.id}"
                         >
-                            <span class="le-effect-preview is-preview-${card.id}">${card.id === 'none' ? 'Ag' : 'Ag'}</span>
+                            <span class="le-effect-preview is-preview-${card.id}">Ag</span>
                             <span class="le-effect-name">${card.label}</span>
                         </button>
                     `).join('')}
@@ -380,11 +388,11 @@ function renderInspectorForSelection(selected) {
         const sizeEl = host.querySelector('#le-font-size');
         sizeEl?.addEventListener('input', (e) => {
             const v = parseFloat(e.target.value);
-            if (Number.isFinite(v) && v >= 8 && v <= 64) updateSelectedLegendStyle({ fontSize: Math.round(v) });
+            if (Number.isFinite(v) && v >= 8 && v <= 96) updateSelectedLegendStyle({ fontSize: Math.round(v) });
         });
         sizeEl?.addEventListener('change', (e) => {
             const raw = parseFloat(e.target.value);
-            const clamped = Number.isFinite(raw) ? Math.min(64, Math.max(8, Math.round(raw))) : 13;
+            const clamped = Number.isFinite(raw) ? Math.min(96, Math.max(8, Math.round(raw))) : 13;
             e.target.value = String(clamped);
             updateSelectedLegendStyle({ fontSize: clamped });
         });
@@ -412,6 +420,13 @@ function renderInspectorForSelection(selected) {
             const pct = parseFloat(e.target.value);
             if (Number.isFinite(pct)) updateSelectedLegendStyle({ opacity: pct / 100 });
         });
+        host.querySelector('#le-rotation-slider')?.addEventListener('input', (e) => {
+            const ang = parseFloat(e.target.value);
+            if (Number.isFinite(ang)) updateSelectedLegendStyle({ rotation: ang });
+        });
+        host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
+            updateSelectedLegendStyle({ rotation: 0 });
+        });
 
         bindEffectControls(host);
 
@@ -419,6 +434,7 @@ function renderInspectorForSelection(selected) {
         const isLight = document.body.classList.contains('light-mode');
         const tickColor = s.tickColor || (isLight ? '#1e293b' : '#e2e8f0');
         const opacityPct = Math.round((s.opacity ?? 1) * 100);
+        const rotVal = Number.isFinite(s.rotation) ? s.rotation : 0;
 
         host.innerHTML = `
             <div class="le-row le-slider-row">
@@ -443,9 +459,16 @@ function renderInspectorForSelection(selected) {
             </div>
 
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
+            </div>
+
+            <div class="le-row le-slider-row">
+                <span class="basemap-slider-label">Angle</span>
+                <input id="le-rotation-slider" class="basemap-range-slider" type="range" min="-180" max="180" step="1" value="${rotVal}" />
+                <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
+                <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
         `;
 
@@ -467,9 +490,17 @@ function renderInspectorForSelection(selected) {
             const pct = parseFloat(e.target.value);
             if (Number.isFinite(pct)) updateSelectedLegendStyle({ opacity: pct / 100 });
         });
+        host.querySelector('#le-rotation-slider')?.addEventListener('input', (e) => {
+            const ang = parseFloat(e.target.value);
+            if (Number.isFinite(ang)) updateSelectedLegendStyle({ rotation: ang });
+        });
+        host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
+            updateSelectedLegendStyle({ rotation: 0 });
+        });
 
     } else if (selected.kind === 'shape') {
         const opacityPct = Math.round((s.opacity ?? 0.9) * 100);
+        const rotVal = Number.isFinite(s.rotation) ? s.rotation : 0;
         const isLine = selected.shapeType === 'line';
 
         host.innerHTML = `
@@ -496,9 +527,15 @@ function renderInspectorForSelection(selected) {
                 </div>
             ` : ''}
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
+            </div>
+            <div class="le-row le-slider-row">
+                <span class="basemap-slider-label">Angle</span>
+                <input id="le-rotation-slider" class="basemap-range-slider" type="range" min="-180" max="180" step="1" value="${rotVal}" />
+                <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
+                <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
         `;
 
@@ -520,17 +557,32 @@ function renderInspectorForSelection(selected) {
             const pct = parseFloat(e.target.value);
             if (Number.isFinite(pct)) updateSelectedLegendStyle({ opacity: pct / 100 });
         });
+        host.querySelector('#le-rotation-slider')?.addEventListener('input', (e) => {
+            const ang = parseFloat(e.target.value);
+            if (Number.isFinite(ang)) updateSelectedLegendStyle({ rotation: ang });
+        });
+        host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
+            updateSelectedLegendStyle({ rotation: 0 });
+        });
 
     } else if (selected.kind === 'image') {
         const opacityPct = Math.round((s.opacity ?? 1) * 100);
+        const rotVal = Number.isFinite(s.rotation) ? s.rotation : 0;
+
         host.innerHTML = `
             <div class="le-row">
                 <button id="btn-le-replace-img" class="basemap-highlight-btn" type="button" style="justify-content:center;">Replace Image</button>
             </div>
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Transparency</span>
+                <span class="basemap-slider-label">Opacity</span>
                 <input id="le-opacity" class="basemap-range-slider" type="range" min="0" max="100" step="1" value="${opacityPct}" />
                 <span id="le-opacity-val" class="basemap-slider-value">${opacityPct}%</span>
+            </div>
+            <div class="le-row le-slider-row">
+                <span class="basemap-slider-label">Angle</span>
+                <input id="le-rotation-slider" class="basemap-range-slider" type="range" min="-180" max="180" step="1" value="${rotVal}" />
+                <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
+                <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
         `;
 
@@ -542,12 +594,20 @@ function renderInspectorForSelection(selected) {
             const pct = parseFloat(e.target.value);
             if (Number.isFinite(pct)) updateSelectedLegendStyle({ opacity: pct / 100 });
         });
+        host.querySelector('#le-rotation-slider')?.addEventListener('input', (e) => {
+            const ang = parseFloat(e.target.value);
+            if (Number.isFinite(ang)) updateSelectedLegendStyle({ rotation: ang });
+        });
+        host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
+            updateSelectedLegendStyle({ rotation: 0 });
+        });
 
     } else if (selected.kind === 'box') {
         const isLight = document.body.classList.contains('light-mode');
         const bgHex = s.bgColor || (isLight ? '#ffffff' : '#131722');
         const borderHex = s.borderColor || (isLight ? '#cbd5e1' : '#334155');
         const bgPct = Math.round((s.bgOpacity ?? 0.92) * 100);
+        const rotVal = Number.isFinite(s.rotation) ? s.rotation : 0;
 
         host.innerHTML = `
             <div class="le-row le-space-between">
@@ -564,9 +624,15 @@ function renderInspectorForSelection(selected) {
                 <input id="le-box-border" class="basemap-color-input" type="color" value="${borderHex}" />
             </div>
             <div class="le-row le-slider-row">
-                <span class="basemap-slider-label">Border Width</span>
+                <span class="basemap-slider-label">Border W</span>
                 <input id="le-box-bw" class="basemap-range-slider" type="range" min="0" max="4" step="0.5" value="${s.borderWidth ?? 1}" />
                 <span id="le-box-bw-val" class="basemap-slider-value">${(s.borderWidth ?? 1).toFixed(1)}px</span>
+            </div>
+            <div class="le-row le-slider-row">
+                <span class="basemap-slider-label">Angle</span>
+                <input id="le-rotation-slider" class="basemap-range-slider" type="range" min="-180" max="180" step="1" value="${rotVal}" />
+                <span id="le-rotation-val" class="basemap-slider-value" style="min-width:34px;">${rotVal}°</span>
+                <button id="btn-le-reset-rot" class="le-mini-btn" type="button" title="Reset to 0°">0°</button>
             </div>
         `;
 
@@ -584,6 +650,13 @@ function renderInspectorForSelection(selected) {
             const v = parseFloat(e.target.value);
             if (Number.isFinite(v)) updateSelectedLegendStyle({ borderWidth: v });
         });
+        host.querySelector('#le-rotation-slider')?.addEventListener('input', (e) => {
+            const ang = parseFloat(e.target.value);
+            if (Number.isFinite(ang)) updateSelectedLegendStyle({ rotation: ang });
+        });
+        host.querySelector('#btn-le-reset-rot')?.addEventListener('click', () => {
+            updateSelectedLegendStyle({ rotation: 0 });
+        });
     }
 }
 
@@ -594,7 +667,19 @@ function syncExistingControlValues(selected, s, eff) {
     const opVal = host.querySelector('#le-opacity-val');
     if (opVal) opVal.textContent = `${Math.round((s.opacity ?? 1) * 100)}%`;
 
+    const rotVal = host.querySelector('#le-rotation-val');
+    if (rotVal) rotVal.textContent = `${Number.isFinite(s.rotation) ? s.rotation : 0}°`;
+    const rotSlider = host.querySelector('#le-rotation-slider');
+    if (rotSlider && document.activeElement !== rotSlider) {
+        rotSlider.value = String(s.rotation || 0);
+    }
+
     if (selected.kind === 'text') {
+        const fontSizeInput = host.querySelector('#le-font-size');
+        if (fontSizeInput && document.activeElement !== fontSizeInput) {
+            fontSizeInput.value = String(s.fontSize || 13);
+        }
+
         host.querySelector('#le-btn-bold')?.classList.toggle('active', Boolean(s.bold));
         host.querySelector('#le-btn-italic')?.classList.toggle('active', Boolean(s.italic));
         host.querySelector('#le-btn-underline')?.classList.toggle('active', Boolean(s.underline));
@@ -607,10 +692,18 @@ function syncExistingControlValues(selected, s, eff) {
             if (span && eff[prop] !== undefined) {
                 span.textContent = String(eff[prop]);
             }
+            const slider = host.querySelector(`#le-eff-slider-${prop}`);
+            if (slider && document.activeElement !== slider && eff[prop] !== undefined) {
+                slider.value = String(eff[prop]);
+            }
         });
     } else if (selected.kind === 'colorbar') {
         const hVal = host.querySelector('#le-cb-height-val');
         if (hVal) hVal.textContent = `${s.barHeight ?? 13}px`;
+        const cbSizeInput = host.querySelector('#le-cb-size');
+        if (cbSizeInput && document.activeElement !== cbSizeInput) {
+            cbSizeInput.value = String(s.tickFontSize || 10);
+        }
     } else if (selected.kind === 'shape') {
         const bwVal = host.querySelector('#le-shape-bw-val');
         if (bwVal) bwVal.textContent = `${(s.borderWidth ?? 1.5).toFixed(1)}px`;
