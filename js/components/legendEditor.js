@@ -336,6 +336,16 @@ function syncEditingDropdown(selected) {
     const selEl = panelEl?.querySelector('#legend-editing-select');
     if (!selEl) return;
     const list = getLegendElementsList();
+
+    if (selected?.kind === 'group') {
+        selEl.innerHTML = `
+            <option value="__group__" selected>Multiple (${selected.count} elements)</option>
+            ${list.map((item) => `<option value="${item.id}">${item.displayLabel}</option>`).join('')}
+        `;
+        selEl.value = '__group__';
+        return;
+    }
+
     selEl.innerHTML = list.map((item) =>
         `<option value="${item.id}" ${selected?.id === item.id ? 'selected' : ''}>${item.displayLabel}</option>`
     ).join('');
@@ -356,7 +366,28 @@ function renderInspectorForSelection(selected) {
 
     if (!selected) {
         renderedKey = 'none';
-        host.innerHTML = `<div class="le-empty-msg">Click any element on the screen to edit it.</div>`;
+        host.innerHTML = `<div class="le-empty-msg">Click or drag across elements to select and move them.</div>`;
+        return;
+    }
+
+    if (selected.kind === 'group') {
+        renderedKey = `group:${selected.count}`;
+        host.innerHTML = `
+            <div class="le-section-kicker">SELECTION</div>
+            <div class="le-group-summary-card">
+                <span class="le-group-count-badge">${selected.count}</span>
+                <span class="le-group-summary-text">Elements selected together. Drag anywhere on the highlight box to move them as a unit, or drag the handles to scale them together.</span>
+            </div>
+            <div class="le-row">
+                <button id="btn-le-delete-group" class="basemap-reset-all-btn is-danger-btn" type="button" style="width: 100%;">
+                    Delete ${selected.count} Selected Elements
+                </button>
+            </div>
+        `;
+
+        host.querySelector('#btn-le-delete-group')?.addEventListener('click', () => {
+            deleteSelectedLegendElement();
+        });
         return;
     }
 
