@@ -49,6 +49,7 @@ let lastFreeWorkspace = null;
 
 let elementsMap = createDefaultElementsMap();
 let customOrder = [];
+let layerOrder = [...DEFAULT_ELEMENT_ORDER];
 let customCounter = 0;
 
 let historyStack = [];
@@ -195,6 +196,7 @@ function cloneSnapshot() {
         lastFreeWorkspace,
         selectedId,
         customOrder,
+        layerOrder,
         customCounter,
         elementsMap
     });
@@ -244,6 +246,7 @@ function applySnapshot(snapJson) {
     freeLayoutActive = Boolean(snap.freeLayoutActive);
     lastFreeWorkspace = snap.lastFreeWorkspace || null;
     customOrder = Array.isArray(snap.customOrder) ? snap.customOrder : [];
+    layerOrder = Array.isArray(snap.layerOrder) ? snap.layerOrder : [...DEFAULT_ELEMENT_ORDER, ...customOrder];
     customCounter = Number.isFinite(snap.customCounter) ? snap.customCounter : customCounter;
     elementsMap = snap.elementsMap || createDefaultElementsMap();
     selectedId = snap.selectedId || null;
@@ -310,6 +313,7 @@ function applySnapshot(snapJson) {
         });
 
         rescaleFreeLayoutToCurrentWorkspace();
+        applyLayerZIndices();
     }
 
     updateLegendOverlay();
@@ -454,6 +458,7 @@ export function setLegendEditMode(active) {
 
     if (!editMode) {
         selectedId = null;
+        hideLayerContextMenu();
         clearSnapGuides();
         updateSelectionClasses();
     } else if (!selectedId) {
@@ -493,6 +498,7 @@ export function deleteSelectedLegendElement() {
     } else {
         delete elementsMap[selectedId];
         customOrder = customOrder.filter((cid) => cid !== selectedId);
+        layerOrder = layerOrder.filter((lid) => lid !== selectedId);
         if (domEl) domEl.remove();
     }
 
@@ -522,6 +528,7 @@ export function resetLegendToDefault() {
     lastFreeWorkspace = null;
     elementsMap = createDefaultElementsMap();
     customOrder = [];
+    layerOrder = [...DEFAULT_ELEMENT_ORDER];
 
     if (canvasRoot && dockWrap) {
         canvasRoot.classList.remove('is-free-layout');
@@ -1043,8 +1050,10 @@ export function addLegendText(initialText = 'Custom Text') {
         }
     };
     customOrder.push(id);
+    layerOrder.push(id);
 
     mountCustomElementDom(elementsMap[id]);
+    applyLayerZIndices();
     applyElementVisualStyles(id);
     selectLegendElement(id);
     commitHistorySnapshot();
@@ -1082,8 +1091,10 @@ export function addLegendShape(shapeType = 'rect') {
         }
     };
     customOrder.push(id);
+    layerOrder.push(id);
 
     mountCustomElementDom(elementsMap[id]);
+    applyLayerZIndices();
     applyElementVisualStyles(id);
     selectLegendElement(id);
     commitHistorySnapshot();
@@ -1118,8 +1129,10 @@ export function addLegendImage(dataUrl) {
             }
         };
         customOrder.push(id);
+        layerOrder.push(id);
 
         mountCustomElementDom(elementsMap[id]);
+        applyLayerZIndices();
         applyElementVisualStyles(id);
         selectLegendElement(id);
         commitHistorySnapshot();
@@ -1183,6 +1196,7 @@ function activateFreeLayoutIfNeeded() {
         }
     });
 
+    applyLayerZIndices();
     requestAnimationFrame(() => renderColorKeyCanvas());
 }
 
@@ -1533,6 +1547,157 @@ export function updateLegendOverlay() {
 }
 
 /* =========================================================================
+   LAYER ORDERING (Bring to front / forward / backward / back) & MENU
+   ========================================================================= */
+
+function syncLayerOrderIntegrity() {
+    const allValid = [...DEFAULT_ELEMENT_ORDER, ...customOrder].filter((id) => elementsMap[id]);
+    const validSet = new Set(allValid);
+    layerOrder = layerOrder.filter((id) => validSet.has(id));
+    allValid.forEach((id) => {
+        if (!layerOrder.includes(id)) layerOrder.push(id);
+    });
+}
+
+function applyLayerZIndices() {
+    if (!freeLayoutActive || !canvasRoot) return;
+    syncLayerOrderIntegrity();
+    layerOrder.forEach((id, idx) => {
+        const el = getElementDom(id);
+        if (el) el.style.zIndex = String(idx + 1);
+    });
+}
+
+function getVisibleLayerOrder() {
+    syncLayerOrderIntegrity();
+    return layerOrder.filter((id) => elementsMap[id] && !elementsMap[id].deleted);
+}
+
+function reorderLegendElement(id, action) {
+    if (!id || !elementsMap[id] || elementsMap[id].deleted) return;
+    activateFreeLayoutIfNeeded();
+    syncLayerOrderIntegrity();
+
+    const visible = getVisibleLayerOrder();
+    const visIdx = visible.indexOf(id);
+    if (visIdx === -1) return;
+
+    if (action === 'front') {
+        if (visIdx === visible.length - 1) return;
+        layerOrder = layerOrder.filter((lid) => lid !== id);
+        layerOrder.push(id);
+    } else if (action === 'back') {
+        if (visIdx === 0) return;
+        layerOrder = layerOrder.filter((lid) => lid !== id);
+        layerOrder.unshift(id);
+    } else if (action === 'forward') {
+        if (visIdx >= visible.length - 1) return;
+        const swapId = visible[visIdx + 1];
+        const a = layerOrder.indexOf(id);
+        const b = layerOrder.indexOf(swapId);
+        layerOrder[a] = swapId;
+        layerOrder[b] = id;
+    } else if (action === 'backward') {
+        if (visIdx <= 0) return;
+        const swapId = visible[visIdx - 1];
+        const a = layerOrder.indexOf(id);
+        const b = layerOrder.indexOf(swapId);
+        layerOrder[a] = swapId;
+        layerOrder[b] = id;
+    }
+
+    applyLayerZIndices();
+    commitHistorySnapshot();
+}
+
+function hideLayerContextMenu() {
+    const menu = document.getElementById('legend-context-menu');
+    if (menu) menu.style.display = 'none';
+}
+
+function showLayerContextMenu(clientX, clientY, targetId) {
+    if (!editMode || !targetId) return;
+    selectLegendElement(targetId);
+
+    let menu = document.getElementById('legend-context-menu');
+    if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'legend-context-menu';
+        menu.className = 'legend-context-menu';
+        menu.innerHTML = `
+            <button type="button" class="legend-ctx-item" data-layer-action="front">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 10V3m0 0l-3 3m3-3l3 3"/>
+                    <path d="M3 13l9 4 9-4-9-4-9 4z"/>
+                    <path d="M3 17l9 4 9-4"/>
+                </svg>
+                <span>Bring to front</span>
+            </button>
+            <button type="button" class="legend-ctx-item" data-layer-action="forward">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 12V4m0 0l-3 3m3-3l3 3"/>
+                    <path d="M3 15l9 4 9-4-9-4-9 4z"/>
+                </svg>
+                <span>Bring forward</span>
+            </button>
+            <button type="button" class="legend-ctx-item" data-layer-action="backward">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 12v8m0 0l-3-3m3 3l3-3"/>
+                    <path d="M3 9l9-4 9 4-9 4-9-4z"/>
+                </svg>
+                <span>Send backward</span>
+            </button>
+            <button type="button" class="legend-ctx-item" data-layer-action="back">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 14v7m0 0l-3-3m3 3l3-3"/>
+                    <path d="M3 7l9-4 9 4-9 4-9-4z"/>
+                    <path d="M3 11l9 4 9-4"/>
+                </svg>
+                <span>Send to back</span>
+            </button>
+        `;
+        document.body.appendChild(menu);
+
+        menu.addEventListener('pointerdown', (e) => e.stopPropagation());
+        menu.querySelectorAll('.legend-ctx-item').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = btn.dataset.layerAction;
+                const activeTarget = menu.dataset.targetId || selectedId;
+                hideLayerContextMenu();
+                if (activeTarget && action) {
+                    reorderLegendElement(activeTarget, action);
+                }
+            });
+        });
+    }
+
+    menu.dataset.targetId = targetId;
+
+    const visible = getVisibleLayerOrder();
+    const idx = visible.indexOf(targetId);
+    const isTop = idx === visible.length - 1;
+    const isBottom = idx === 0;
+
+    menu.querySelector('[data-layer-action="front"]').disabled = isTop;
+    menu.querySelector('[data-layer-action="forward"]').disabled = isTop;
+    menu.querySelector('[data-layer-action="backward"]').disabled = isBottom;
+    menu.querySelector('[data-layer-action="back"]').disabled = isBottom;
+
+    menu.style.display = 'flex';
+    const z = getCssZoomFactor();
+    const cssX = clientX / z;
+    const cssY = clientY / z;
+    const menuW = menu.offsetWidth || 185;
+    const menuH = menu.offsetHeight || 165;
+    const clampedX = Math.max(8, Math.min((window.innerWidth / z) - menuW - 8, cssX));
+    const clampedY = Math.max(8, Math.min((window.innerHeight / z) - menuH - 8, cssY));
+
+    menu.style.left = `${Math.round(clampedX)}px`;
+    menu.style.top = `${Math.round(clampedY)}px`;
+}
+
+/* =========================================================================
    SMART ALIGNMENT & SNAPPING GUIDES (Dotted lines + 6px magnetic snap)
    ========================================================================= */
 
@@ -1805,8 +1970,10 @@ function pasteClipboardItem() {
 
     elementsMap[newId] = newItem;
     customOrder.push(newId);
+    layerOrder.push(newId);
 
     mountCustomElementDom(newItem);
+    applyLayerZIndices();
     applyElementVisualStyles(newId);
     selectLegendElement(newId);
     commitHistorySnapshot();
@@ -1894,10 +2061,16 @@ function attachDragAndResizeHandlers() {
             angleDeg = ((angleDeg % 360) + 360) % 360;
             if (angleDeg > 180) angleDeg -= 360;
 
-            if (Math.abs(angleDeg) <= 3) angleDeg = 0;
-            else if (Math.abs(angleDeg - 90) <= 3) angleDeg = 90;
-            else if (Math.abs(angleDeg + 90) <= 3) angleDeg = -90;
-            else if (Math.abs(Math.abs(angleDeg) - 180) <= 3) angleDeg = 180;
+            if (e.shiftKey) {
+                angleDeg = Math.round(angleDeg / 22.5) * 22.5;
+                if (angleDeg > 180) angleDeg -= 360;
+                if (angleDeg <= -180) angleDeg = 180;
+            } else {
+                if (Math.abs(angleDeg) <= 3) angleDeg = 0;
+                else if (Math.abs(angleDeg - 90) <= 3) angleDeg = 90;
+                else if (Math.abs(angleDeg + 90) <= 3) angleDeg = -90;
+                else if (Math.abs(Math.abs(angleDeg) - 180) <= 3) angleDeg = 180;
+            }
 
             item.style.rotation = angleDeg;
             el.style.transform = angleDeg !== 0 ? `rotate(${angleDeg}deg)` : '';
@@ -1936,20 +2109,49 @@ function attachDragAndResizeHandlers() {
                 updateCanvaBadge(`${nextFontSize} px`, el);
 
             } else {
-                const minW = id === 'colorbar' ? 120 : (id === 'bg' ? 160 : 28);
+                const minW = id === 'colorbar' ? 120 : (id === 'bg' ? 160 : 20);
                 const minH = id === 'colorbar' ? 24 : (id === 'bg' ? 32 : 12);
 
-                if (dir.includes('e')) w = Math.max(minW, w + dx);
-                if (dir.includes('s')) h = Math.max(minH, h + dy);
-                if (dir.includes('w')) {
-                    const nextW = Math.max(minW, w - dx);
-                    x += (w - nextW);
-                    w = nextW;
-                }
-                if (dir.includes('n')) {
-                    const nextH = Math.max(minH, h - dy);
-                    y += (h - nextH);
-                    h = nextH;
+                if (e.shiftKey && item.shapeType !== 'line') {
+                    const isSquareOrCircle = item.shapeType === 'circle' || Math.abs(origW - origH) <= 2;
+                    const aspect = isSquareOrCircle ? 1 : (origW / Math.max(1, origH));
+                    const minDimW = Math.max(minW, minH * aspect);
+                    const minDimH = minDimW / aspect;
+
+                    if (dir === 'e' || dir === 'w') {
+                        const candW = dir === 'e' ? origW + dx : origW - dx;
+                        w = Math.max(minDimW, candW);
+                        h = w / aspect;
+                        if (dir === 'w') x = origX + (origW - w);
+                        y = origY + (origH - h) / 2;
+                    } else if (dir === 'n' || dir === 's') {
+                        const candH = dir === 's' ? origH + dy : origH - dy;
+                        h = Math.max(minDimH, candH);
+                        w = h * aspect;
+                        if (dir === 'n') y = origY + (origH - h);
+                        x = origX + (origW - w) / 2;
+                    } else {
+                        const candW = dir.includes('e') ? origW + dx : origW - dx;
+                        const candH = dir.includes('s') ? origH + dy : origH - dy;
+                        const scale = Math.max(minDimW / origW, minDimH / origH, Math.max(candW / origW, candH / (origW / aspect)));
+                        w = origW * scale;
+                        h = w / aspect;
+                        if (dir.includes('w')) x = origX + (origW - w);
+                        if (dir.includes('n')) y = origY + (origH - h);
+                    }
+                } else {
+                    if (dir.includes('e')) w = Math.max(minW, w + dx);
+                    if (dir.includes('s')) h = Math.max(minH, h + dy);
+                    if (dir.includes('w')) {
+                        const nextW = Math.max(minW, w - dx);
+                        x += (w - nextW);
+                        w = nextW;
+                    }
+                    if (dir.includes('n')) {
+                        const nextH = Math.max(minH, h - dy);
+                        y += (h - nextH);
+                        h = nextH;
+                    }
                 }
 
                 // Smart-snap resized edge to other elements
@@ -2033,6 +2235,54 @@ function attachDragAndResizeHandlers() {
 
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
+    let longPressTimer = null;
+    let lpStartX = 0;
+    let lpStartY = 0;
+
+    const cancelLongPress = () => {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+    };
+
+    window.addEventListener('pointerdown', (e) => {
+        if (!e.target?.closest?.('#legend-context-menu')) {
+            hideLayerContextMenu();
+        }
+    });
+
+    canvasRoot.addEventListener('contextmenu', (e) => {
+        if (!editMode) return;
+        const itemEl = e.target.closest('.legend-item');
+        if (!itemEl) return;
+        e.preventDefault();
+        e.stopPropagation();
+        showLayerContextMenu(e.clientX, e.clientY, itemEl.dataset.elementId);
+    });
+
+    canvasRoot.addEventListener('pointerdown', (e) => {
+        cancelLongPress();
+        if (!editMode || e.pointerType !== 'touch') return;
+        const itemEl = e.target.closest('.legend-item');
+        if (!itemEl) return;
+        lpStartX = e.clientX;
+        lpStartY = e.clientY;
+        const targetId = itemEl.dataset.elementId;
+        longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            interaction = null;
+            showLayerContextMenu(lpStartX, lpStartY, targetId);
+        }, 450);
+    });
+
+    window.addEventListener('pointermove', (e) => {
+        if (longPressTimer && Math.hypot(e.clientX - lpStartX, e.clientY - lpStartY) > 6) {
+            cancelLongPress();
+        }
+    });
+    window.addEventListener('pointerup', cancelLongPress);
+    window.addEventListener('pointercancel', cancelLongPress);
 
     window.addEventListener('pointermove', (e) => {
         if (!canvasRoot) return;
@@ -2135,6 +2385,14 @@ function attachDragAndResizeHandlers() {
     // 🌟 CAPTURE-PHASE KEYBOARD GUARD & SHORTCUTS
     // Blocks map/timeline shortcuts whenever typing inside text boxes OR editor inputs!
     window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const ctxMenu = document.getElementById('legend-context-menu');
+            if (ctxMenu && ctxMenu.style.display !== 'none') {
+                hideLayerContextMenu();
+                e.stopPropagation();
+                return;
+            }
+        }
         const active = document.activeElement;
         const isInlineEditing = Boolean(active?.isContentEditable);
         const isEditorInput = Boolean(
