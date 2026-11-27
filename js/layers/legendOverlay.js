@@ -90,11 +90,11 @@ function getCssZoomFactor() {
     return z > 0 ? z : 1;
 }
 
-function getWorkspaceBounds(isEditing = editMode) {
+function getWorkspaceBounds() {
     const z = getCssZoomFactor();
     const isDesktop = window.innerWidth >= 1024;
     const left = isDesktop ? DESKTOP_RAIL_W : 0;
-    const right = (window.innerWidth / z) - (isDesktop && isEditing ? DESKTOP_EDITOR_W : 0);
+    const right = window.innerWidth / z;
     return { left, right, span: Math.max(160, right - left) };
 }
 
@@ -469,17 +469,8 @@ export function setLegendEditMode(active) {
     notifySelectionChange();
 
     requestAnimationFrame(() => {
-        if (mapRef && typeof mapRef.resize === 'function') {
-            mapRef.resize();
-        }
         renderColorKeyCanvas();
     });
-    setTimeout(() => {
-        if (mapRef && typeof mapRef.resize === 'function') {
-            mapRef.resize();
-        }
-        renderColorKeyCanvas();
-    }, 240);
 }
 
 export function selectLegendElement(id) {
