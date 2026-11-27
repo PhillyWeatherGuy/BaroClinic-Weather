@@ -4561,3 +4561,95 @@ body.light-mode .le-step-btn:hover {
 body.light-mode .le-step-val {
     color: #0f172a;
 }
+
+/* ==========================================
+   LEGEND LAYER ORDER CONTEXT MENU (Right-Click / Long-Press)
+   ========================================== */
+.legend-context-menu {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    flex-direction: column;
+    min-width: 175px;
+    padding: 6px;
+    background: #131722;
+    border: 1px solid #2a3446;
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
+    user-select: none;
+    backdrop-filter: blur(12px);
+    animation: leCtxFadeIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes leCtxFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.legend-ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #f1f5f9;
+    font-family: 'Roboto', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.legend-ctx-item svg {
+    flex-shrink: 0;
+    color: #94a3b8;
+    transition: color 0.12s ease;
+}
+
+.legend-ctx-item:hover:not(:disabled) {
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.legend-ctx-item:hover:not(:disabled) svg {
+    color: #ffffff;
+}
+
+.legend-ctx-item:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+/* Light Mode Overrides */
+body.light-mode .legend-context-menu {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+
+body.light-mode .legend-ctx-item {
+    color: #0f172a;
+}
+
+body.light-mode .legend-ctx-item svg {
+    color: #475569;
+}
+
+body.light-mode .legend-ctx-item:hover:not(:disabled) {
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+body.light-mode .legend-ctx-item:hover:not(:disabled) svg {
+    color: #1d4ed8;
+}
