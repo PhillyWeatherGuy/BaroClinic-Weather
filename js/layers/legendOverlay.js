@@ -43,6 +43,7 @@ let canvasRoot = null;
 let dockWrap = null;
 let snapGuideLayer = null;
 let editMode = false;
+let marqueeToolActive = false;
 let selectedId = null;
 let selectedIds = new Set();
 let marqueeEl = null;
@@ -352,6 +353,18 @@ export function isLegendEditMode() {
     return editMode;
 }
 
+export function isMarqueeToolActive() {
+    return marqueeToolActive;
+}
+
+export function setMarqueeToolActive(active) {
+    marqueeToolActive = Boolean(active) && editMode;
+    if (canvasRoot) {
+        canvasRoot.classList.toggle('is-marquee-tool', marqueeToolActive);
+    }
+    notifySelectionChange();
+}
+
 export function getSelectedLegendElement() {
     if (selectedIds.size > 1) {
         return {
@@ -469,6 +482,8 @@ export function setLegendEditMode(active) {
     rescaleFreeLayoutToCurrentWorkspace();
 
     if (!editMode) {
+        marqueeToolActive = false;
+        canvasRoot.classList.remove('is-marquee-tool');
         selectedId = null;
         hideLayerContextMenu();
         clearSnapGuides();
@@ -632,7 +647,8 @@ function updateSelectionClasses() {
         canvasRoot.appendChild(groupBoxEl);
     }
 
-    if (editMode && selectedIds.size > 1 && freeLayoutActive) {
+    if (editMode && selectedIds.size > 1) {
+        if (!freeLayoutActive) activateFreeLayoutIfNeeded();
         const gBox = getGroupBoundingBox(selectedIds);
         if (gBox) {
             groupBoxEl.style.display = 'block';
@@ -2107,7 +2123,15 @@ function attachDragAndResizeHandlers() {
                     ix = r.left / z; iy = r.top / z; iw = r.width / z; ih = r.height / z;
                 }
 
-                const hit = !(ix + iw < x1 || ix > x2 || iy + ih < y1 || iy > y2);
+                const overlapX = Math.max(0, Math.min(ix + iw, x2) - Math.max(ix, x1));
+                const overlapY = Math.max(0, Math.min(iy + ih, y2) - Math.max(iy, y1));
+                let hit = overlapX > 0 && overlapY > 0;
+
+                // Don't accidentally include the full-width Background Bar unless dragging across most of it
+                if (hit && id === 'bg') {
+                    hit = overlapX >= iw * 0.65;
+                }
+
                 if (hit) {
                     selectedIds.add(id);
                 } else if (!interaction.initialSelectedIds?.has(id)) {
@@ -2525,6 +2549,36 @@ function attachDragAndResizeHandlers() {
             return;
         }
 
+        // Drag anywhere inside the multi-selection group box -> moves all selected items
+        const groupEl = e.target.closest('#legend-group-box');
+        if (groupEl && selectedIds.size > 1) {
+            e.stopPropagation();
+            const anchorId = Array.from(selectedIds)[0];
+            const anchorItem = elementsMap[anchorId];
+            const groupSnaps = Array.from(selectedIds).map((sid) => ({
+                id: sid,
+                origX: elementsMap[sid].x,
+                origY: elementsMap[sid].y
+            }));
+            document.body.style.userSelect = 'none';
+            interaction = {
+                kind: 'move',
+                detached: freeLayoutActive,
+                didMutate: false,
+                id: anchorId,
+                el: getElementDom(anchorId),
+                groupItems: groupSnaps,
+                startX: e.clientX,
+                startY: e.clientY,
+                origX: anchorItem.x,
+                origY: anchorItem.y,
+                origW: anchorItem.w,
+                origH: anchorItem.h,
+                bgChildren: null
+            };
+            return;
+        }
+
         const rotHandle = e.target.closest('.legend-canva-rot-handle');
         if (rotHandle) {
             const itemEl = rotHandle.closest('.legend-item');
@@ -2575,9 +2629,12 @@ function attachDragAndResizeHandlers() {
         }
 
         const itemEl = e.target.closest('.legend-item');
-        if (itemEl) {
+        const clickedId = itemEl?.dataset?.elementId;
+        const skipItemForMarquee = marqueeToolActive && (!clickedId || !selectedIds.has(clickedId));
+
+        if (itemEl && !skipItemForMarquee) {
             e.stopPropagation();
-            const id = itemEl.dataset.elementId;
+            const id = clickedId;
 
             if (e.shiftKey) {
                 selectLegendElement(id, true);
@@ -2611,6 +2668,7 @@ function attachDragAndResizeHandlers() {
         }
 
         // 🌟 Clicked on empty space -> Start Marquee Drag Box!
+        e.stopPropagation();
         const z = getCssZoomFactor();
         if (!e.shiftKey) {
             selectedIds.clear();
