@@ -2071,8 +2071,8 @@ function attachDragAndResizeHandlers() {
 
         const z = getCssZoomFactor();
 
-        if (!interaction.detached) {
-            if (Math.hypot(e.clientX - interaction.startX, e.clientY - interaction.startY) < 3 && interaction.kind === 'move') {
+        if (interaction.kind === 'move' && !interaction.detached) {
+            if (Math.hypot(e.clientX - interaction.startX, e.clientY - interaction.startY) < 3) {
                 return;
             }
             activateFreeLayoutIfNeeded();
@@ -2245,6 +2245,7 @@ function attachDragAndResizeHandlers() {
             } else if (id === 'bg' && interaction.bgChildren?.length) {
                 interaction.bgChildren.forEach((child) => {
                     const c = elementsMap[child.id];
+                    c.userTouched = true;
                     c.x = Math.round(child.origX + actualDx);
                     c.y = Math.round(child.origY + actualDy);
                     child.el.style.left = `${c.x}px`;
@@ -2398,6 +2399,7 @@ function attachDragAndResizeHandlers() {
 
                 interaction.bgChildren.forEach((child) => {
                     const c = elementsMap[child.id];
+                    c.userTouched = true;
                     const relX = child.origX - interaction.origX;
                     const relY = child.origY - interaction.origY;
 
@@ -2686,6 +2688,7 @@ function attachDragAndResizeHandlers() {
 
         interaction = {
             kind: 'marquee',
+            detached: true,
             startX: e.clientX,
             startY: e.clientY,
             startCssX: e.clientX / z,
