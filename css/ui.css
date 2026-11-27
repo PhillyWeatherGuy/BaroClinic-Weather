@@ -2794,6 +2794,43 @@ body.light-mode .legend-canva-badge {
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
 }
 
+/* 5. Marquee Drag Selection Box */
+.legend-marquee-box {
+    position: fixed;
+    display: none;
+    border: 1.5px solid #3b82f6;
+    background: rgba(59, 130, 246, 0.18);
+    pointer-events: none;
+    z-index: 100;
+    box-sizing: border-box;
+}
+
+body.light-mode .legend-marquee-box {
+    border-color: #2563eb;
+    background: rgba(37, 99, 235, 0.15);
+}
+
+/* 6. Multi-Selection Group Frame */
+.legend-group-box {
+    position: fixed;
+    display: none;
+    outline: 1.5px solid #2563eb;
+    outline-offset: 1px;
+    background: rgba(37, 99, 235, 0.05);
+    pointer-events: auto;
+    cursor: grab;
+    z-index: 15;
+    box-sizing: border-box;
+}
+
+.legend-group-box > .legend-canva-handle {
+    display: block;
+}
+
+.legend-group-box > .legend-canva-rot-stalk {
+    display: none;
+}
+
 /* ==========================================
    DOCKED 260px LEGEND EDITOR + WORKSPACE SPLIT
    ========================================== */
