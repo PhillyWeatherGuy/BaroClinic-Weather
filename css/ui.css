@@ -4770,8 +4770,8 @@ body.light-mode .legend-ctx-item:hover:not(:disabled) svg {
    SLIM 3-ROW IMAGE-1 LAYOUT & VISUAL POLISH
    ========================================== */
 #top-nav {
-    height: 44px;
-    padding: 0 18px;
+    height: 46px;
+    padding: 0 20px;
 }
 
 .nav-micro-label {
@@ -4785,20 +4785,21 @@ body.light-mode .legend-ctx-item:hover:not(:disabled) svg {
 }
 
 .sub-nav-bar {
-    top: 44px;
+    top: 46px;
 }
 
 #param-category-bar {
-    top: 76px;
+    top: 84px;
 }
 
-/* Blue Play Button (Image 1 style) */
+/* Blue Play Button (Image 2 style) */
 #btn-play.play-btn,
 body.light-mode #btn-play.play-btn {
     background: #2563eb;
     border-color: #1d4ed8;
     color: #ffffff;
-    padding: 6px 13px;
+    border-radius: 7px;
+    padding: 6px 12px;
 }
 
 #btn-play.play-btn:hover,
@@ -4808,18 +4809,22 @@ body.light-mode #btn-play.play-btn:hover {
     color: #ffffff;
 }
 
-/* Ring Slider Thumb (Image 1 style) */
+/* Slimmer Track & Ring Slider Thumb */
+#timeline-slider {
+    height: 3px;
+}
+
 #timeline-slider::-webkit-slider-thumb {
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
     background: #ffffff;
     border: 2.5px solid #2563eb;
     box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
 }
 
 #timeline-slider::-moz-range-thumb {
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
     background: #ffffff;
     border: 2.5px solid #2563eb;
     box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
@@ -4835,7 +4840,7 @@ body.light-mode #btn-play.play-btn:hover {
 
 body.light-mode #time-label {
     color: #2563eb;
-    background: rgba(37, 99, 235, 0.09);
+    background: rgba(37, 99, 235, 0.08);
 }
 
 /* Softer Light Mode Surfaces & Borders */
@@ -4849,6 +4854,7 @@ body.light-mode .gif-btn,
 body.light-mode .run-toggle-btn {
     background: #ffffff;
     border-color: #e2e8f0;
+    border-radius: 7px;
     color: #334155;
 }
 
@@ -4863,7 +4869,7 @@ body.light-mode .run-toggle-btn:hover {
 
 body.light-mode #timeline-container {
     border-top-color: #e2e8f0;
-    box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.05);
 }
 
 body.light-mode .mode-nav-btn.active {
@@ -4871,16 +4877,91 @@ body.light-mode .mode-nav-btn.active {
     border-bottom-color: #2563eb;
 }
 
+/* Rounded Left Rail Buttons & Crisp White Light Mode Rail */
+.left-tool-rail .basemap-toggle-btn,
+.left-tool-rail .theme-toggle-pill,
+.left-tool-rail .unit-toggle-pill {
+    border-radius: 8px;
+}
+
+.left-tool-rail .theme-thumb,
+.left-tool-rail .unit-thumb {
+    border-radius: 6px;
+}
+
+body.light-mode .left-tool-rail {
+    background: #ffffff;
+    border-right-color: #e2e8f0;
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn {
+    background: #0f172a;
+    border-color: #0f172a;
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn:hover {
+    background: #1e293b;
+    border-color: #1e293b;
+    color: #ffffff;
+}
+
+body.light-mode .left-tool-rail .basemap-toggle-btn.active {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+body.light-mode .left-tool-rail .theme-toggle-pill,
+body.light-mode .left-tool-rail .unit-toggle-pill {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+body.light-mode .left-tool-rail .unit-toggle-pill {
+    background: #f1f5f9;
+}
+
+/* Crisp White Legend Bar + Boxed Pencil Icon in Light Mode */
+body.light-mode .legend-dock-wrap .legend-bg-bar {
+    background: rgba(255, 255, 255, 0.98);
+    border-bottom-color: #e2e8f0;
+}
+
+.legend-edit-pencil-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+body.light-mode .legend-edit-pencil-btn {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    color: #475569;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+body.light-mode .legend-edit-pencil-btn:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
 @media (min-width: 1024px) {
     .mode-nav {
-        gap: 4px;
-        margin-left: 8px;
-        padding-left: 14px;
+        gap: 6px;
+        margin-left: 16px;
+        padding-left: 0;
+        border-left: none;
     }
 
     .mode-nav-btn {
-        height: 44px;
-        padding: 0 8px;
+        height: 46px;
+        padding: 0 10px;
         font-size: 13px;
         display: inline-flex;
         align-items: center;
@@ -4896,7 +4977,7 @@ body.light-mode .mode-nav-btn.active {
         font-size: 10px;
         font-weight: 700;
         letter-spacing: 0.6px;
-        color: #64748b;
+        color: #94a3b8;
         text-transform: uppercase;
     }
 
@@ -4926,20 +5007,20 @@ body.light-mode .mode-nav-btn.active {
         font-size: 12.5px;
     }
 
-    /* Row 2: Dedicated Slim Parameter Category Strip */
+    /* Row 2: Soft Category Strip with Rounded Pill Active State */
     #desktop-param-categories.desktop-category-container {
         position: fixed;
-        top: 44px;
+        top: 46px;
         left: 0;
         right: 0;
-        height: 32px;
+        height: 38px;
         z-index: 29;
         display: flex;
         align-items: center;
-        gap: 24px;
+        gap: 14px;
         padding: 0 20px;
         box-sizing: border-box;
-        background: #131722;
+        background: #0f131c;
         border-bottom: 1px solid #1e2634;
         overflow-x: auto;
         scrollbar-width: none;
@@ -4950,7 +5031,7 @@ body.light-mode .mode-nav-btn.active {
     }
 
     body.light-mode #desktop-param-categories.desktop-category-container {
-        background: #ffffff;
+        background: #f8fafc;
         border-bottom-color: #e2e8f0;
     }
 
@@ -4958,10 +5039,9 @@ body.light-mode .mode-nav-btn.active {
     body.light-mode #desktop-param-categories .param-cat-pill {
         background: transparent !important;
         border: 0 !important;
-        border-bottom: 2px solid transparent !important;
-        border-radius: 0 !important;
-        height: 32px;
-        padding: 0 2px;
+        border-radius: 6px !important;
+        height: 26px;
+        padding: 0 10px;
         font-size: 12.5px;
         font-weight: 600;
         color: #94a3b8;
@@ -4974,41 +5054,58 @@ body.light-mode .mode-nav-btn.active {
     }
 
     #desktop-param-categories .param-cat-pill:hover {
+        background: rgba(255, 255, 255, 0.06) !important;
         color: #f8fafc;
     }
 
     body.light-mode #desktop-param-categories .param-cat-pill:hover {
+        background: rgba(15, 23, 42, 0.05) !important;
         color: #0f172a;
     }
 
     #desktop-param-categories .param-cat-pill.active {
+        background: rgba(59, 130, 246, 0.16) !important;
         color: #60a5fa !important;
-        border-bottom-color: #3b82f6 !important;
     }
 
     body.light-mode #desktop-param-categories .param-cat-pill.active {
+        background: rgba(37, 99, 235, 0.1) !important;
         color: #2563eb !important;
-        border-bottom-color: #2563eb !important;
     }
 
-    /* Row 3: Slim 48px Legend Bar (Total Top = 44 + 32 + 48 = 124px) */
+    /* Row 3: 50px Legend Bar (Total Top = 46 + 38 + 50 = 134px) */
     .legend-dock-wrap {
-        top: 76px;
-        height: 48px;
-        padding: 4px 40px 4px 14px;
+        top: 84px;
+        height: 50px;
+        padding: 6px 46px 6px 16px;
+    }
+
+    .legend-dock-wrap .legend-edit-pencil-btn {
+        top: 50%;
+        bottom: auto;
+        right: 10px;
+        transform: translateY(-50%);
     }
 
     .legend-canvas-root.is-free-layout .legend-edit-pencil-btn {
-        top: 82px;
+        top: 92px;
+        right: 10px;
+    }
+
+    /* Airier Bottom Timeline */
+    #timeline-container {
+        padding: 8px 20px;
     }
 
     /* Left Rail flush underneath Row 3 */
     .left-tool-rail {
-        top: 124px;
-        bottom: 44px;
+        top: 134px;
+        bottom: 48px;
+        padding: 12px 4px;
+        gap: 10px;
     }
 
-    /* Segmented View Pill (Image 1 Light Mode dark active pill) */
+    /* Segmented View Pill (Dark Active Pill in Light Mode) */
     body.light-mode .view-dropdown-menu {
         background: #f1f5f9 !important;
         border-color: #e2e8f0 !important;
@@ -5032,6 +5129,6 @@ body.light-mode .mode-nav-btn.active {
 
 @media (max-width: 1023px) {
     .left-tool-rail {
-        top: 44px;
+        top: 46px;
     }
 }
