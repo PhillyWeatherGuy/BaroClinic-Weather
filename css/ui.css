@@ -4772,6 +4772,7 @@ body.light-mode .legend-ctx-item:hover:not(:disabled) svg {
 #top-nav {
     height: 46px;
     padding: 0 20px;
+    z-index: 30;
 }
 
 .nav-micro-label {
@@ -4786,10 +4787,70 @@ body.light-mode .legend-ctx-item:hover:not(:disabled) svg {
 
 .sub-nav-bar {
     top: 46px;
+    z-index: 36;
 }
 
 #param-category-bar {
     top: 84px;
+}
+
+/* Fix Layer Stacking Order (Editors > Sub-nav > Timeline/Run Menu > Legend/Pencil > Top Nav > Left Rail) */
+.basemap-editor-panel,
+.legend-editor-panel {
+    z-index: 45;
+}
+
+#timeline-container {
+    z-index: 34;
+}
+
+.legend-canvas-root {
+    z-index: 31;
+}
+
+/* Single-Icon Light/Dark Button (Shows only current mode icon) */
+.left-tool-rail .theme-toggle-pill {
+    width: 36px;
+    height: 34px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.left-tool-rail .theme-pill-track {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.left-tool-rail .theme-thumb {
+    display: none;
+}
+
+.left-tool-rail .theme-toggle-pill .sun-icon {
+    display: none;
+    width: 16px;
+    height: 16px;
+}
+
+.left-tool-rail .theme-toggle-pill .moon-icon {
+    display: block;
+    width: 15px;
+    height: 15px;
+    color: #e2e8f0;
+}
+
+.left-tool-rail .theme-toggle-pill.light-mode .sun-icon {
+    display: block;
+    color: #f59e0b;
+}
+
+.left-tool-rail .theme-toggle-pill.light-mode .moon-icon {
+    display: none;
 }
 
 /* Blue Play Button (Image 2 style) */
@@ -4884,14 +4945,13 @@ body.light-mode .mode-nav-btn.active {
     border-radius: 8px;
 }
 
-.left-tool-rail .theme-thumb,
 .left-tool-rail .unit-thumb {
     border-radius: 6px;
 }
 
 body.light-mode .left-tool-rail {
     background: #ffffff;
-    border-right-color: #e2e8f0;
+    border-right-color: #cbd5e1;
 }
 
 body.light-mode .left-tool-rail .basemap-toggle-btn {
@@ -5021,7 +5081,7 @@ body.light-mode .legend-edit-pencil-btn:hover {
         padding: 0 20px;
         box-sizing: border-box;
         background: #0f131c;
-        border-bottom: 1px solid #1e2634;
+        border-bottom: 1.5px solid #2b3547;
         overflow-x: auto;
         scrollbar-width: none;
     }
@@ -5032,7 +5092,7 @@ body.light-mode .legend-edit-pencil-btn:hover {
 
     body.light-mode #desktop-param-categories.desktop-category-container {
         background: #f8fafc;
-        border-bottom-color: #e2e8f0;
+        border-bottom-color: #cbd5e1;
     }
 
     #desktop-param-categories .param-cat-pill,
@@ -5073,11 +5133,14 @@ body.light-mode .legend-edit-pencil-btn:hover {
         color: #2563eb !important;
     }
 
-    /* Row 3: 50px Legend Bar (Total Top = 46 + 38 + 50 = 134px) */
+    /* Row 3: 50px Legend Bar (Positioned beside raised Left Rail) */
     .legend-dock-wrap {
         top: 84px;
+        left: 48px;
+        right: 0;
+        width: auto;
         height: 50px;
-        padding: 6px 46px 6px 16px;
+        padding: 6px 46px 6px 14px;
     }
 
     .legend-dock-wrap .legend-edit-pencil-btn {
@@ -5092,17 +5155,39 @@ body.light-mode .legend-edit-pencil-btn:hover {
         right: 10px;
     }
 
-    /* Airier Bottom Timeline */
-    #timeline-container {
-        padding: 8px 20px;
-    }
-
-    /* Left Rail flush underneath Row 3 */
+    /* Left Rail Raised Flush Under Row 2 (top: 84px) */
     .left-tool-rail {
-        top: 134px;
+        top: 84px;
         bottom: 48px;
         padding: 12px 4px;
         gap: 10px;
+        border-right: 1.5px solid #2b3547;
+    }
+
+    body.light-mode .left-tool-rail {
+        border-right-color: #cbd5e1;
+    }
+
+    /* Airier Bottom Timeline + Crisp Top Border for Map Frame */
+    #timeline-container {
+        padding: 8px 20px;
+        border-top: 1.5px solid #2b3547;
+    }
+
+    body.light-mode #timeline-container {
+        border-top-color: #cbd5e1;
+    }
+
+    /* Right Edge Border to Complete 4-Sided Map + Legend Frame */
+    #map,
+    #globe-container {
+        box-sizing: border-box;
+        border-right: 1.5px solid #2b3547;
+    }
+
+    body.light-mode #map,
+    body.light-mode #globe-container {
+        border-right-color: #cbd5e1;
     }
 
     /* Segmented View Pill (Dark Active Pill in Light Mode) */
