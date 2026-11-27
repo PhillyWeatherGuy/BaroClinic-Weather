@@ -44,6 +44,9 @@ let dockWrap = null;
 let snapGuideLayer = null;
 let editMode = false;
 let selectedId = null;
+let selectedIds = new Set();
+let marqueeEl = null;
+let groupBoxEl = null;
 let freeLayoutActive = false;
 let lastFreeWorkspace = null;
 
@@ -350,6 +353,15 @@ export function isLegendEditMode() {
 }
 
 export function getSelectedLegendElement() {
+    if (selectedIds.size > 1) {
+        return {
+            id: '__group__',
+            kind: 'group',
+            label: `${selectedIds.size} Elements`,
+            count: selectedIds.size,
+            ids: Array.from(selectedIds)
+        };
+    }
     if (!selectedId) return null;
     const el = elementsMap[selectedId];
     if (!el || el.deleted) return null;
@@ -478,35 +490,67 @@ export function setLegendEditMode(active) {
     });
 }
 
-export function selectLegendElement(id) {
+export function selectLegendElement(id, multi = false) {
     if (id && elementsMap[id]?.deleted) return;
-    selectedId = id || null;
+
+    if (multi && id) {
+        if (selectedIds.has(id)) {
+            selectedIds.delete(id);
+        } else {
+            selectedIds.add(id);
+        }
+        selectedId = selectedIds.size === 1 ? Array.from(selectedIds)[0] : (selectedIds.size > 1 ? '__group__' : null);
+    } else {
+        selectedIds.clear();
+        if (id) selectedIds.add(id);
+        selectedId = id || null;
+    }
+
     updateSelectionClasses();
     notifySelectionChange();
 }
 
 export function deleteSelectedLegendElement() {
-    if (!selectedId) return;
-    const item = elementsMap[selectedId];
-    if (!item) return;
+    const toDelete = selectedIds.size > 0 ? Array.from(selectedIds) : (selectedId ? [selectedId] : []);
+    if (toDelete.length === 0) return;
 
-    const domEl = getElementDom(selectedId);
+    toDelete.forEach((id) => {
+        const item = elementsMap[id];
+        if (!item) return;
+        const domEl = getElementDom(id);
+        if (item.isDefault) {
+            item.deleted = true;
+            if (domEl) domEl.style.display = 'none';
+        } else {
+            delete elementsMap[id];
+            customOrder = customOrder.filter((cid) => cid !== id);
+            layerOrder = layerOrder.filter((lid) => lid !== id);
+            if (domEl) domEl.remove();
+        }
+    });
 
-    if (item.isDefault) {
-        item.deleted = true;
-        if (domEl) domEl.style.display = 'none';
-    } else {
-        delete elementsMap[selectedId];
-        customOrder = customOrder.filter((cid) => cid !== selectedId);
-        layerOrder = layerOrder.filter((lid) => lid !== selectedId);
-        if (domEl) domEl.remove();
-    }
-
+    selectedIds.clear();
     const nextVisible = ['header', 'init', 'fhr', 'valid', 'colorbar', 'bg']
         .find((id) => !elementsMap[id].deleted) || customOrder[0] || null;
     selectedId = nextVisible;
+    if (selectedId) selectedIds.add(selectedId);
+
     updateSelectionClasses();
     commitHistorySnapshot();
+}
+
+function getGroupBoundingBox(idsSet) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    idsSet.forEach((id) => {
+        const item = elementsMap[id];
+        if (!item || item.deleted || !Number.isFinite(item.x)) return;
+        if (item.x < minX) minX = item.x;
+        if (item.y < minY) minY = item.y;
+        if (item.x + item.w > maxX) maxX = item.x + item.w;
+        if (item.y + item.h > maxY) maxY = item.y + item.h;
+    });
+    if (!isFinite(minX)) return null;
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
 export function restoreLegendSection(id) {
@@ -575,8 +619,31 @@ export function resetLegendToDefault() {
 function updateSelectionClasses() {
     if (!canvasRoot) return;
     canvasRoot.querySelectorAll('.legend-item').forEach((el) => {
-        el.classList.toggle('is-selected', editMode && el.dataset.elementId === selectedId);
+        const isSel = editMode && selectedIds.has(el.dataset.elementId);
+        el.classList.toggle('is-selected', isSel);
     });
+
+    // Render Canva-style group bounding box when multiple items are highlighted
+    if (!groupBoxEl) {
+        groupBoxEl = document.createElement('div');
+        groupBoxEl.id = 'legend-group-box';
+        groupBoxEl.className = 'legend-group-box';
+        groupBoxEl.innerHTML = buildCanvaHandlesHTML('group');
+        canvasRoot.appendChild(groupBoxEl);
+    }
+
+    if (editMode && selectedIds.size > 1 && freeLayoutActive) {
+        const gBox = getGroupBoundingBox(selectedIds);
+        if (gBox) {
+            groupBoxEl.style.display = 'block';
+            groupBoxEl.style.left = `${gBox.x}px`;
+            groupBoxEl.style.top = `${gBox.y}px`;
+            groupBoxEl.style.width = `${gBox.w}px`;
+            groupBoxEl.style.height = `${gBox.h}px`;
+            return;
+        }
+    }
+    groupBoxEl.style.display = 'none';
 }
 
 /* =========================================================================
@@ -2005,8 +2072,106 @@ function attachDragAndResizeHandlers() {
             interaction.detached = true;
         }
 
+        const currentCssX = e.clientX / z;
+        const currentCssY = e.clientY / z;
         const dx = (e.clientX - interaction.startX) / z;
         const dy = (e.clientY - interaction.startY) / z;
+
+        // 🌟 1. MARQUEE SELECTION DRAG
+        if (interaction.kind === 'marquee') {
+            const x1 = Math.min(interaction.startCssX, currentCssX);
+            const y1 = Math.min(interaction.startCssY, currentCssY);
+            const x2 = Math.max(interaction.startCssX, currentCssX);
+            const y2 = Math.max(interaction.startCssY, currentCssY);
+
+            if (marqueeEl) {
+                marqueeEl.style.display = 'block';
+                marqueeEl.style.left = `${Math.round(x1)}px`;
+                marqueeEl.style.top = `${Math.round(y1)}px`;
+                marqueeEl.style.width = `${Math.round(x2 - x1)}px`;
+                marqueeEl.style.height = `${Math.round(y2 - y1)}px`;
+            }
+
+            // Detect all items intersecting the marquee box
+            const activeIds = [...DEFAULT_ELEMENT_ORDER, ...customOrder];
+            activeIds.forEach((id) => {
+                const el = getElementDom(id);
+                const item = elementsMap[id];
+                if (!el || !item || item.deleted) return;
+
+                let ix, iy, iw, ih;
+                if (freeLayoutActive && Number.isFinite(item.x)) {
+                    ix = item.x; iy = item.y; iw = item.w; ih = item.h;
+                } else {
+                    const r = el.getBoundingClientRect();
+                    ix = r.left / z; iy = r.top / z; iw = r.width / z; ih = r.height / z;
+                }
+
+                const hit = !(ix + iw < x1 || ix > x2 || iy + ih < y1 || iy > y2);
+                if (hit) {
+                    selectedIds.add(id);
+                } else if (!interaction.initialSelectedIds?.has(id)) {
+                    selectedIds.delete(id);
+                }
+            });
+
+            selectedId = selectedIds.size === 1 ? Array.from(selectedIds)[0] : (selectedIds.size > 1 ? '__group__' : null);
+            updateSelectionClasses();
+            return;
+        }
+
+        // 🌟 2. MULTI-SELECTION GROUP RESIZE / SCALE
+        if (interaction.kind === 'group-resize') {
+            interaction.didMutate = true;
+            const { origGBox, itemsSnap, dir } = interaction;
+            let gw = origGBox.w, gh = origGBox.h;
+            let gx = origGBox.x, gy = origGBox.y;
+
+            if (dir.includes('e')) gw = Math.max(40, origGBox.w + dx);
+            if (dir.includes('s')) gh = Math.max(30, origGBox.h + dy);
+            if (dir.includes('w')) {
+                const nextW = Math.max(40, origGBox.w - dx);
+                gx += (origGBox.w - nextW);
+                gw = nextW;
+            }
+            if (dir.includes('n')) {
+                const nextH = Math.max(30, origGBox.h - dy);
+                gy += (origGBox.h - nextH);
+                gh = nextH;
+            }
+
+            const scaleX = gw / Math.max(1, origGBox.w);
+            const scaleY = gh / Math.max(1, origGBox.h);
+
+            itemsSnap.forEach((snap) => {
+                const item = elementsMap[snap.id];
+                const el = getElementDom(snap.id);
+                if (!item || !el) return;
+
+                item.userTouched = true;
+                item.x = Math.round(gx + (snap.x - origGBox.x) * scaleX);
+                item.y = Math.round(gy + (snap.y - origGBox.y) * scaleY);
+                item.w = Math.max(20, Math.round(snap.w * scaleX));
+                item.h = Math.max(12, Math.round(snap.h * scaleY));
+
+                if (item.kind === 'text') {
+                    item.style.fontSize = Math.max(8, Math.min(96, Math.round((snap.fontSize || 13) * scaleX)));
+                    applyElementVisualStyles(snap.id);
+                }
+
+                el.style.left = `${item.x}px`;
+                el.style.top = `${item.y}px`;
+                el.style.width = `${item.w}px`;
+                el.style.height = `${item.h}px`;
+
+                if (snap.id === 'colorbar') renderColorKeyCanvas();
+            });
+
+            updateSelectionClasses();
+            updateCanvaBadge(`W: ${Math.round(gw)}  H: ${Math.round(gh)}`, groupBoxEl);
+            return;
+        }
+
         const id = interaction.id;
         const el = interaction.el;
         const item = elementsMap[id];
@@ -2037,9 +2202,23 @@ function attachDragAndResizeHandlers() {
             el.style.left = `${item.x}px`;
             el.style.top = `${item.y}px`;
 
-            if (id === 'bg' && interaction.bgChildren?.length) {
-                const actualDx = item.x - interaction.origX;
-                const actualDy = item.y - interaction.origY;
+            const actualDx = item.x - interaction.origX;
+            const actualDy = item.y - interaction.origY;
+
+            // Move all highlighted elements together!
+            if (interaction.groupItems?.length > 1) {
+                interaction.groupItems.forEach((snap) => {
+                    if (snap.id === id) return;
+                    const c = elementsMap[snap.id];
+                    const cEl = getElementDom(snap.id);
+                    if (!c || !cEl) return;
+                    c.userTouched = true;
+                    c.x = Math.round(snap.origX + actualDx);
+                    c.y = Math.round(snap.origY + actualDy);
+                    cEl.style.left = `${c.x}px`;
+                    cEl.style.top = `${c.y}px`;
+                });
+            } else if (id === 'bg' && interaction.bgChildren?.length) {
                 interaction.bgChildren.forEach((child) => {
                     const c = elementsMap[child.id];
                     c.x = Math.round(child.origX + actualDx);
@@ -2048,6 +2227,8 @@ function attachDragAndResizeHandlers() {
                     child.el.style.top = `${c.y}px`;
                 });
             }
+
+            updateSelectionClasses();
             updateCanvaBadge(`X: ${item.x}  Y: ${item.y}`, el);
 
         } else if (interaction.kind === 'rotate') {
@@ -2224,11 +2405,17 @@ function attachDragAndResizeHandlers() {
     const onPointerUp = () => {
         if (!interaction) return;
         const didMutate = interaction.didMutate;
+        const wasMarquee = interaction.kind === 'marquee';
         interaction = null;
+
+        if (marqueeEl) marqueeEl.style.display = 'none';
         clearSnapGuides();
         updateCanvaBadge(null);
         document.body.style.userSelect = '';
-        if (didMutate) {
+
+        if (wasMarquee) {
+            notifySelectionChange();
+        } else if (didMutate) {
             commitHistorySnapshot();
         }
     };
@@ -2306,8 +2493,37 @@ function attachDragAndResizeHandlers() {
 
     canvasRoot.addEventListener('pointerdown', (e) => {
         if (!editMode) return;
-        if (e.target.closest('#btn-legend-edit-pencil')) return;
+        if (e.target.closest('#btn-legend-edit-pencil, #legend-context-menu')) return;
         if (e.target.isContentEditable) return;
+
+        // Group handle resize
+        const groupHandle = e.target.closest('.legend-group-box .legend-canva-handle');
+        if (groupHandle && selectedIds.size > 1) {
+            e.stopPropagation();
+            const gBox = getGroupBoundingBox(selectedIds);
+            const itemsSnap = Array.from(selectedIds).map((id) => {
+                const item = elementsMap[id];
+                return {
+                    id,
+                    x: item.x,
+                    y: item.y,
+                    w: item.w,
+                    h: item.h,
+                    fontSize: item.style?.fontSize || 13
+                };
+            });
+            document.body.style.userSelect = 'none';
+            interaction = {
+                kind: 'group-resize',
+                dir: groupHandle.dataset.dir,
+                origGBox: gBox,
+                itemsSnap,
+                startX: e.clientX,
+                startY: e.clientY,
+                didMutate: false
+            };
+            return;
+        }
 
         const rotHandle = e.target.closest('.legend-canva-rot-handle');
         if (rotHandle) {
@@ -2362,24 +2578,63 @@ function attachDragAndResizeHandlers() {
         if (itemEl) {
             e.stopPropagation();
             const id = itemEl.dataset.elementId;
-            selectLegendElement(id);
+
+            if (e.shiftKey) {
+                selectLegendElement(id, true);
+            } else if (!selectedIds.has(id)) {
+                selectLegendElement(id, false);
+            }
+
             document.body.style.userSelect = 'none';
+            const groupSnaps = Array.from(selectedIds).map((sid) => ({
+                id: sid,
+                origX: elementsMap[sid].x,
+                origY: elementsMap[sid].y
+            }));
+
             interaction = {
                 kind: 'move',
                 detached: freeLayoutActive,
                 didMutate: false,
                 id,
                 el: itemEl,
+                groupItems: groupSnaps,
                 startX: e.clientX,
                 startY: e.clientY,
                 origX: elementsMap[id].x,
                 origY: elementsMap[id].y,
                 origW: elementsMap[id].w,
                 origH: elementsMap[id].h,
-                origFontSize: elementsMap[id].style?.fontSize || 13,
                 bgChildren: (freeLayoutActive && id === 'bg') ? captureBgChildrenSnapshot() : null
             };
+            return;
         }
+
+        // 🌟 Clicked on empty space -> Start Marquee Drag Box!
+        const z = getCssZoomFactor();
+        if (!e.shiftKey) {
+            selectedIds.clear();
+            selectedId = null;
+            updateSelectionClasses();
+            notifySelectionChange();
+        }
+
+        if (!marqueeEl) {
+            marqueeEl = document.createElement('div');
+            marqueeEl.id = 'legend-marquee-box';
+            marqueeEl.className = 'legend-marquee-box';
+            canvasRoot.appendChild(marqueeEl);
+        }
+
+        interaction = {
+            kind: 'marquee',
+            startX: e.clientX,
+            startY: e.clientY,
+            startCssX: e.clientX / z,
+            startCssY: e.clientY / z,
+            initialSelectedIds: new Set(selectedIds)
+        };
+        document.body.style.userSelect = 'none';
     });
 
     // 🌟 CAPTURE-PHASE KEYBOARD GUARD & SHORTCUTS
