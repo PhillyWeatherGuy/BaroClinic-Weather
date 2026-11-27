@@ -4794,7 +4794,15 @@ body.light-mode .legend-ctx-item:hover:not(:disabled) svg {
     top: 84px;
 }
 
-/* Fix Layer Stacking Order (Editors > Sub-nav > Timeline/Run Menu > Legend/Pencil > Top Nav > Left Rail) */
+/* Fix Layer Stacking Order (Picking Bar/Modal > Editors > Sub-nav > Timeline/Run Menu > Legend/Pencil > Top Nav > Left Rail) */
+.highlight-modal-backdrop {
+    z-index: 60;
+}
+
+.highlight-picking-bar {
+    z-index: 46;
+}
+
 .basemap-editor-panel,
 .legend-editor-panel {
     z-index: 45;
@@ -5148,6 +5156,12 @@ body.light-mode .legend-edit-pencil-btn:hover {
         bottom: auto;
         right: 10px;
         transform: translateY(-50%);
+    }
+
+   /* Highlight Picking Bar cleanly below Row 3 Legend Bar */
+    .highlight-picking-bar {
+        top: 144px;
+        right: 14px;
     }
 
     .legend-canvas-root.is-free-layout .legend-edit-pencil-btn {
