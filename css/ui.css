@@ -2799,22 +2799,22 @@ body.light-mode .legend-canva-badge {
    ========================================== */
 .legend-editor-panel {
     position: fixed;
-    top: 50px;
+    top: 35%;
     right: 0;
-    bottom: 0;
+    bottom: 44px;
     width: 420px;
     z-index: 28;
     background: #131722;
     border-left: 1px solid rgba(255, 255, 255, 0.24);
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid rgba(255, 255, 255, 0.24);
     border-radius: 0;
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transform: translateX(100%);
+    transform: translateY(115%);
     pointer-events: none;
-    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .legend-editor-panel .close-btn {
@@ -2822,36 +2822,18 @@ body.light-mode .legend-canva-badge {
 }
 
 .legend-editor-panel.open {
-    transform: translateX(0);
+    transform: translateY(0);
     pointer-events: auto;
-}@media (min-width: 1024px) {
-    body.legend-editor-open #map,
-    body.legend-editor-open #globe-container {
-        left: 0 !important;
-        right: 420px !important;
-        width: auto !important;
-    }
+}
 
-    body.legend-editor-open .legend-dock-wrap {
-        left: 48px;
-        right: 420px;
-        width: auto;
-        padding: 10px 38px 10px 14px;
-    }
+.legend-editor-panel.is-collapsed {
+    top: auto;
+    height: auto;
+}
 
-    body.legend-editor-open .legend-dock-wrap .legend-edit-pencil-btn {
-        right: 8px;
-    }
-
-    body.legend-editor-open .legend-canvas-root.is-free-layout .legend-edit-pencil-btn {
-        right: 428px;
-    }
-
-    body.legend-editor-open #timeline-container {
-        left: 0 !important;
-        right: 420px !important;
-        width: auto !important;
-    }
+.legend-editor-panel.is-collapsed .le-body,
+.legend-editor-panel.is-collapsed .le-footer {
+    display: none;
 }
 
 .le-header {
@@ -2879,6 +2861,29 @@ body.light-mode .legend-canva-badge {
     gap: 6px;
     padding-left: 10px;
     border-left: 1px solid #2a3446;
+}
+
+.le-collapse-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: #181d28;
+    border: 1px solid #2a3446;
+    border-radius: 6px;
+    color: #cbd5e1;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.le-collapse-btn:hover {
+    background: #232c3d;
+    border-color: #64748b;
+    color: #ffffff;
 }
 
 .le-cancel-btn {
@@ -4314,6 +4319,17 @@ body.light-mode .le-header-title {
 
 body.light-mode .le-header-actions {
     border-left-color: #e2e8f0;
+}
+
+body.light-mode .le-collapse-btn {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    color: #334155;
+}
+
+body.light-mode .le-collapse-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
 }
 
 body.light-mode .le-cancel-btn {
