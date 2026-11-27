@@ -4765,3 +4765,273 @@ body.light-mode .legend-ctx-item:hover:not(:disabled) {
 body.light-mode .legend-ctx-item:hover:not(:disabled) svg {
     color: #1d4ed8;
 }
+
+/* ==========================================
+   SLIM 3-ROW IMAGE-1 LAYOUT & VISUAL POLISH
+   ========================================== */
+#top-nav {
+    height: 44px;
+    padding: 0 18px;
+}
+
+.nav-micro-label {
+    display: none;
+}
+
+.nav-model-wrap {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.sub-nav-bar {
+    top: 44px;
+}
+
+#param-category-bar {
+    top: 76px;
+}
+
+/* Blue Play Button (Image 1 style) */
+#btn-play.play-btn,
+body.light-mode #btn-play.play-btn {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+    padding: 6px 13px;
+}
+
+#btn-play.play-btn:hover,
+body.light-mode #btn-play.play-btn:hover {
+    background: #1d4ed8;
+    border-color: #1e40af;
+    color: #ffffff;
+}
+
+/* Ring Slider Thumb (Image 1 style) */
+#timeline-slider::-webkit-slider-thumb {
+    width: 13px;
+    height: 13px;
+    background: #ffffff;
+    border: 2.5px solid #2563eb;
+    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
+}
+
+#timeline-slider::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    background: #ffffff;
+    border: 2.5px solid #2563eb;
+    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
+}
+
+#time-label {
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.12);
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+body.light-mode #time-label {
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.09);
+}
+
+/* Softer Light Mode Surfaces & Borders */
+body.light-mode #top-nav {
+    border-bottom-color: #e2e8f0;
+}
+
+body.light-mode .nav-dropdown-btn,
+body.light-mode .ctrl-btn,
+body.light-mode .gif-btn,
+body.light-mode .run-toggle-btn {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    color: #334155;
+}
+
+body.light-mode .nav-dropdown-btn:hover,
+body.light-mode .ctrl-btn:hover,
+body.light-mode .gif-btn:hover,
+body.light-mode .run-toggle-btn:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-mode #timeline-container {
+    border-top-color: #e2e8f0;
+    box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.06);
+}
+
+body.light-mode .mode-nav-btn.active {
+    color: #0f172a;
+    border-bottom-color: #2563eb;
+}
+
+@media (min-width: 1024px) {
+    .mode-nav {
+        gap: 4px;
+        margin-left: 8px;
+        padding-left: 14px;
+    }
+
+    .mode-nav-btn {
+        height: 44px;
+        padding: 0 8px;
+        font-size: 13px;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .nav-right {
+        gap: 14px;
+    }
+
+    .nav-micro-label {
+        display: inline-block;
+        font-family: 'Roboto', sans-serif;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        color: #64748b;
+        text-transform: uppercase;
+    }
+
+    #top-time-container {
+        margin-left: 0;
+        padding: 0 14px 0 0;
+        border-left: none;
+        border-right: 1px solid rgba(255, 255, 255, 0.14);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+    }
+
+    body.light-mode #top-time-container {
+        background: transparent;
+        box-shadow: none;
+        border-right-color: #e2e8f0;
+    }
+
+    .clock-display {
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    #btn-model-menu {
+        padding: 5px 11px;
+        font-size: 12.5px;
+    }
+
+    /* Row 2: Dedicated Slim Parameter Category Strip */
+    #desktop-param-categories.desktop-category-container {
+        position: fixed;
+        top: 44px;
+        left: 0;
+        right: 0;
+        height: 32px;
+        z-index: 29;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 0 20px;
+        box-sizing: border-box;
+        background: #131722;
+        border-bottom: 1px solid #1e2634;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    #desktop-param-categories.desktop-category-container::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.light-mode #desktop-param-categories.desktop-category-container {
+        background: #ffffff;
+        border-bottom-color: #e2e8f0;
+    }
+
+    #desktop-param-categories .param-cat-pill,
+    body.light-mode #desktop-param-categories .param-cat-pill {
+        background: transparent !important;
+        border: 0 !important;
+        border-bottom: 2px solid transparent !important;
+        border-radius: 0 !important;
+        height: 32px;
+        padding: 0 2px;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: #94a3b8;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    body.light-mode #desktop-param-categories .param-cat-pill {
+        color: #475569;
+    }
+
+    #desktop-param-categories .param-cat-pill:hover {
+        color: #f8fafc;
+    }
+
+    body.light-mode #desktop-param-categories .param-cat-pill:hover {
+        color: #0f172a;
+    }
+
+    #desktop-param-categories .param-cat-pill.active {
+        color: #60a5fa !important;
+        border-bottom-color: #3b82f6 !important;
+    }
+
+    body.light-mode #desktop-param-categories .param-cat-pill.active {
+        color: #2563eb !important;
+        border-bottom-color: #2563eb !important;
+    }
+
+    /* Row 3: Slim 48px Legend Bar (Total Top = 44 + 32 + 48 = 124px) */
+    .legend-dock-wrap {
+        top: 76px;
+        height: 48px;
+        padding: 4px 40px 4px 14px;
+    }
+
+    .legend-canvas-root.is-free-layout .legend-edit-pencil-btn {
+        top: 82px;
+    }
+
+    /* Left Rail flush underneath Row 3 */
+    .left-tool-rail {
+        top: 124px;
+        bottom: 44px;
+    }
+
+    /* Segmented View Pill (Image 1 Light Mode dark active pill) */
+    body.light-mode .view-dropdown-menu {
+        background: #f1f5f9 !important;
+        border-color: #e2e8f0 !important;
+    }
+
+    body.light-mode .view-option-btn {
+        color: #475569 !important;
+    }
+
+    body.light-mode .view-option-btn:hover {
+        color: #0f172a !important;
+        background: rgba(15, 23, 42, 0.05) !important;
+    }
+
+    body.light-mode .view-option-btn.active {
+        background: #0f172a !important;
+        border-color: #0f172a !important;
+        color: #ffffff !important;
+    }
+}
+
+@media (max-width: 1023px) {
+    .left-tool-rail {
+        top: 44px;
+    }
+}
