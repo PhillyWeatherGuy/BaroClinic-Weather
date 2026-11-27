@@ -2831,6 +2831,81 @@ body.light-mode .legend-marquee-box {
     display: none;
 }
 
+/* 7. Active Area Select (Marquee) Mode & Multi-Select Inspector Card */
+.legend-canvas-root.is-editing.is-marquee-tool {
+    pointer-events: auto;
+    cursor: crosshair;
+}
+
+.legend-canvas-root.is-editing.is-marquee-tool .legend-bg-bar:not(.is-selected) {
+    cursor: crosshair;
+}
+
+.le-group-summary-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: #181d28;
+    border: 1px solid #2a3446;
+    border-radius: 8px;
+}
+
+.le-group-count-badge {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
+    background: #2563eb;
+    color: #ffffff;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.le-group-summary-text {
+    font-family: 'Roboto', sans-serif;
+    font-size: 12px;
+    line-height: 1.35;
+    color: #cbd5e1;
+}
+
+.basemap-reset-all-btn.is-danger-btn {
+    border-color: rgba(239, 68, 68, 0.55);
+    color: #fca5a5;
+}
+
+.basemap-reset-all-btn.is-danger-btn:hover:not(:disabled) {
+    background: #dc2626;
+    border-color: #ef4444;
+    color: #ffffff;
+}
+
+body.light-mode .le-group-summary-card {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+body.light-mode .le-group-summary-text {
+    color: #334155;
+}
+
+body.light-mode .basemap-reset-all-btn.is-danger-btn {
+    background: #fff5f5;
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+body.light-mode .basemap-reset-all-btn.is-danger-btn:hover:not(:disabled) {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #ffffff;
+}
+
 /* ==========================================
    DOCKED 260px LEGEND EDITOR + WORKSPACE SPLIT
    ========================================== */
