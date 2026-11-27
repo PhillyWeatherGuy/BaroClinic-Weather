@@ -55,6 +55,8 @@ let historyStack = [];
 let historyIndex = -1;
 let debouncedHistoryTimer = null;
 let editSessionStartSnapshot = null;
+let clipboardItem = null;
+let pasteCascade = 0;
 
 let editToggleCallback = null;
 let selectionChangeCallback = null;
@@ -380,31 +382,29 @@ function rescaleFreeLayoutToCurrentWorkspace() {
         return;
     }
 
-    if (Math.abs(lastFreeWorkspace.span - nextBounds.span) < 2 && Math.abs(lastFreeWorkspace.left - nextBounds.left) < 2) {
-        return;
+    // Keep untouched full-width Background spanning the workspace edge-to-edge,
+    // while keeping EVERY manually positioned/resized element 100% 1:1 WYSIWYG!
+    const bg = elementsMap.bg;
+    const bgEl = getElementDom('bg');
+    if (bg && !bg.deleted && bgEl && !bg.userTouched) {
+        bg.x = Math.round(nextBounds.left);
+        bg.w = Math.round(nextBounds.span);
+        bgEl.style.left = `${bg.x}px`;
+        bgEl.style.width = `${bg.w}px`;
     }
 
-    const scaleX = nextBounds.span / lastFreeWorkspace.span;
-    const allIds = [...DEFAULT_ELEMENT_ORDER, ...customOrder];
-
-    allIds.forEach((id) => {
-        const item = elementsMap[id];
-        const el = getElementDom(id);
-        if (!item || item.deleted || !el || !Number.isFinite(item.x)) return;
-
-        const relX = item.x - lastFreeWorkspace.left;
-        item.x = Math.round(nextBounds.left + relX * scaleX);
-
-        if (item.kind === 'box' || item.kind === 'colorbar' || item.kind === 'shape' || item.kind === 'image') {
-            const minW = item.kind === 'colorbar' ? 90 : 20;
-            item.w = Math.max(minW, Math.round(item.w * scaleX));
-            el.style.width = `${item.w}px`;
-        } else if (item.x + item.w > nextBounds.right) {
-            item.x = Math.max(nextBounds.left, Math.round(nextBounds.right - item.w));
-        }
-
-        el.style.left = `${item.x}px`;
-    });
+    const cb = elementsMap.colorbar;
+    const cbEl = getElementDom('colorbar');
+    if (cb && !cb.deleted && cbEl && !cb.userTouched && Number.isFinite(cb.x)) {
+        const cbRightPad = 14;
+        const availLeft = (elementsMap.header?.x || nextBounds.left) + (elementsMap.header?.w || 220) + 24;
+        const targetX = Math.max(availLeft, cb.x);
+        const targetW = Math.max(140, Math.round(nextBounds.right - cbRightPad - targetX));
+        cb.x = Math.round(targetX);
+        cb.w = targetW;
+        cbEl.style.left = `${cb.x}px`;
+        cbEl.style.width = `${cb.w}px`;
+    }
 
     lastFreeWorkspace = nextBounds;
 }
@@ -1751,6 +1751,76 @@ function bindInlineTextEdit(node, id) {
     });
 }
 
+function pasteClipboardItem() {
+    if (!canvasRoot || !clipboardItem) return;
+    activateFreeLayoutIfNeeded();
+
+    const src = JSON.parse(JSON.stringify(clipboardItem));
+    if (src.kind === 'colorbar') return; // Colorbar uses unique canvas ID
+
+    pasteCascade++;
+    const shift = 14 * pasteCascade;
+    const z = getCssZoomFactor();
+    const maxX = Math.max(0, (window.innerWidth / z) - (src.w || 100));
+    const maxY = Math.max(0, (window.innerHeight / z) - (src.h || 30));
+
+    const newX = Math.round(Math.max(0, Math.min(maxX, (src.x ?? 80) + shift)));
+    const newY = Math.round(Math.max(0, Math.min(maxY, (src.y ?? 80) + shift)));
+
+    let newKind = src.kind;
+    let newShapeType = src.shapeType;
+    let newStyle = src.style || {};
+
+    // Pasting Background clones it as an independent Rectangle shape with exact fill/border/effects
+    if (src.kind === 'box') {
+        newKind = 'shape';
+        newShapeType = 'rect';
+        const isLight = document.body.classList.contains('light-mode');
+        newStyle = {
+            fillColor: newStyle.bgColor || (isLight ? '#ffffff' : '#131722'),
+            borderColor: newStyle.borderColor || (isLight ? '#cbd5e1' : '#334155'),
+            borderWidth: newStyle.borderWidth ?? 1,
+            borderRadius: 0,
+            opacity: newStyle.bgOpacity ?? 0.92,
+            rotation: newStyle.rotation || 0,
+            effect: newStyle.effect || createDefaultEffectState(true)
+        };
+    } else if (src.kind === 'text') {
+        newStyle = {
+            ...newStyle,
+            color: newStyle.color || getEffectiveTextColor(src.id, newStyle)
+        };
+    }
+
+    const prefix = newKind === 'text' ? 'custom_text' : (newKind === 'image' ? 'custom_img' : 'custom_shape');
+    const newId = `${prefix}_${++customCounter}`;
+
+    const newItem = {
+        id: newId,
+        kind: newKind,
+        shapeType: newShapeType,
+        isDefault: false,
+        userTouched: true,
+        label: newKind === 'text' ? 'Text' : (newKind === 'image' ? 'Image' : (src.label || 'Rectangle')),
+        text: src.text,
+        src: src.src,
+        deleted: false,
+        x: newX,
+        y: newY,
+        w: src.w || 140,
+        h: src.h || 34,
+        style: newStyle
+    };
+
+    elementsMap[newId] = newItem;
+    customOrder.push(newId);
+
+    mountCustomElementDom(newItem);
+    applyElementVisualStyles(newId);
+    selectLegendElement(newId);
+    commitHistorySnapshot();
+}
+
 function attachDragAndResizeHandlers() {
     let interaction = null;
 
@@ -1803,6 +1873,7 @@ function attachDragAndResizeHandlers() {
                 clearSnapGuides();
             }
 
+            item.userTouched = true;
             item.x = Math.round(candX);
             item.y = Math.round(candY);
             el.style.left = `${item.x}px`;
@@ -1911,6 +1982,7 @@ function attachDragAndResizeHandlers() {
                 updateCanvaBadge(`W: ${Math.round(w)}  H: ${Math.round(h)}`, el);
             }
 
+            item.userTouched = true;
             item.x = Math.round(x);
             item.y = Math.round(y);
             item.w = Math.round(w);
@@ -2104,6 +2176,39 @@ function attachDragAndResizeHandlers() {
             e.preventDefault();
             e.stopPropagation();
             redoLegend();
+            return;
+        }
+
+        // Copy (Cmd/Ctrl + C)
+        if (isMod && e.key.toLowerCase() === 'c') {
+            // Let user copy highlighted text normally if they selected text
+            const selText = window.getSelection()?.toString();
+            if (selText) return;
+            if (!selectedId || !elementsMap[selectedId]) return;
+            e.preventDefault();
+            e.stopPropagation();
+            clipboardItem = JSON.parse(JSON.stringify(elementsMap[selectedId]));
+            pasteCascade = 0;
+            return;
+        }
+
+        // Paste (Cmd/Ctrl + V)
+        if (isMod && e.key.toLowerCase() === 'v') {
+            if (!clipboardItem) return;
+            e.preventDefault();
+            e.stopPropagation();
+            pasteClipboardItem();
+            return;
+        }
+
+        // Duplicate (Cmd/Ctrl + D)
+        if (isMod && e.key.toLowerCase() === 'd') {
+            if (!selectedId || !elementsMap[selectedId]) return;
+            e.preventDefault();
+            e.stopPropagation();
+            clipboardItem = JSON.parse(JSON.stringify(elementsMap[selectedId]));
+            pasteCascade = 0;
+            pasteClipboardItem();
             return;
         }
 
