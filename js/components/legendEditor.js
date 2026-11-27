@@ -21,7 +21,9 @@ import {
     canUndoLegend,
     canRedoLegend,
     cancelLegendEditMode,
-    getLegendElementsList
+    getLegendElementsList,
+    isMarqueeToolActive,
+    setMarqueeToolActive
 } from '../layers/legendOverlay.js';
 
 const FONT_OPTIONS = [
@@ -355,6 +357,11 @@ function syncEditingDropdown(selected) {
 function renderInspectorForSelection(selected) {
     syncHistoryButtons();
     syncEditingDropdown(selected);
+
+    const selectBtn = panelEl?.querySelector('.legend-tool-btn[data-tool="select"]');
+    if (selectBtn) {
+        selectBtn.classList.toggle('active', isMarqueeToolActive());
+    }
 
     const host = panelEl?.querySelector('#legend-inspector-controls');
     const deleteBtn = panelEl?.querySelector('#btn-le-delete');
@@ -920,7 +927,7 @@ export function initLegendEditor() {
         <div class="le-body">
             <div class="le-tools-wrap">
                 <div class="legend-tools-bar is-segmented">
-                    <button type="button" class="legend-tool-btn active" data-tool="select" title="Select & Move">
+                    <button type="button" class="legend-tool-btn" data-tool="select" title="Area Select (Marquee)">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
                         </svg>
@@ -1015,14 +1022,18 @@ export function initLegendEditor() {
             if (tool === 'select') {
                 shapesMenuOpen = false;
                 if (shapesPop) shapesPop.style.display = 'none';
+                setMarqueeToolActive(!isMarqueeToolActive());
             } else if (tool === 'text') {
+                setMarqueeToolActive(false);
                 shapesMenuOpen = false;
                 if (shapesPop) shapesPop.style.display = 'none';
                 addLegendText('Custom Text');
             } else if (tool === 'shape') {
+                setMarqueeToolActive(false);
                 shapesMenuOpen = !shapesMenuOpen;
                 if (shapesPop) shapesPop.style.display = shapesMenuOpen ? 'grid' : 'none';
             } else if (tool === 'image') {
+                setMarqueeToolActive(false);
                 shapesMenuOpen = false;
                 if (shapesPop) shapesPop.style.display = 'none';
                 imageMode = 'add';
@@ -1030,7 +1041,7 @@ export function initLegendEditor() {
             }
         });
     });
-
+    
     panelEl.querySelectorAll('.le-shape-pick-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
             shapesMenuOpen = false;
