@@ -104,6 +104,14 @@ function setPanelOpen(isOpen) {
         const shapesPop = panelEl.querySelector('#legend-shapes-popover');
         if (shapesPop) shapesPop.style.display = 'none';
     }
+    if (isOpen) {
+        panelEl.classList.remove('is-collapsed');
+        const colBtn = panelEl.querySelector('#btn-legend-collapse');
+        if (colBtn) {
+            colBtn.textContent = '▾';
+            colBtn.title = 'Collapse Panel';
+        }
+    }
     panelEl.classList.toggle('open', isOpen);
     panelEl.setAttribute('aria-hidden', String(!isOpen));
 }
@@ -872,6 +880,7 @@ export function initLegendEditor() {
                 </div>
             </div>
             <div class="le-header-actions">
+                <button id="btn-legend-collapse" class="le-collapse-btn" type="button" title="Collapse Panel" aria-label="Collapse Panel">▾</button>
                 <button id="btn-legend-cancel" class="le-cancel-btn" type="button">Cancel</button>
                 <button id="btn-legend-done-editing" class="legend-editor-done-btn" type="button">Done</button>
             </div>
@@ -948,6 +957,12 @@ export function initLegendEditor() {
     document.body.appendChild(panelEl);
 
     panelEl.querySelector('#btn-legend-undo')?.addEventListener('click', () => undoLegend());
+    const collapseBtn = panelEl.querySelector('#btn-legend-collapse');
+    collapseBtn?.addEventListener('click', () => {
+        const isCollapsed = panelEl.classList.toggle('is-collapsed');
+        collapseBtn.textContent = isCollapsed ? '▴' : '▾';
+        collapseBtn.title = isCollapsed ? 'Expand Panel' : 'Collapse Panel';
+    });
     panelEl.querySelector('#btn-legend-redo')?.addEventListener('click', () => redoLegend());
     panelEl.querySelector('#btn-legend-cancel')?.addEventListener('click', () => cancelLegendEditMode());
     panelEl.querySelector('#btn-legend-done-editing')?.addEventListener('click', () => setLegendEditMode(false));
