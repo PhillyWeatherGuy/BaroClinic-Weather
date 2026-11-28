@@ -25,6 +25,8 @@ const FRONT_TYPES = [
     { id: 'dryline', label: 'Dryline' }
 ];
 
+const FADE_DIRS = ['middle', 'top', 'bottom', 'left', 'right'];
+
 const TEXT_FONTS = [
     { label: 'Roboto', value: "'Roboto', sans-serif" },
     { label: 'Inter', value: "'Inter', sans-serif" },
@@ -70,9 +72,12 @@ let strokeSmoothing = 45;  // 0 - 100
 let shapeType = 'rect';    // 'rect' | 'circle' | 'triangle'
 let shapeFill = false;
 
-let hlOpacity = 0.45;      // 0.10 - 0.95
-let hlFadeDir = 'none';    // 'none' | 'middle' | 'top' | 'bottom' | 'left' | 'right'
-let hlFadeSpeed = 0.55;    // 0.10 - 1.00
+// Universal Opacity & Multi-Direction Fade
+let activeOpacity = 1.0;
+let hlOpacity = 0.45;
+let activeFadeDirs = [];   // e.g. ['top', 'left'] or ['middle']
+let activeFadeSpeed = 0.55;
+let fadePanelOpen = false;
 
 let textFont = "'Roboto', sans-serif";
 let textSize = 20;
@@ -189,6 +194,7 @@ export function toggleDrawMode(forceState = null) {
         selectedObjId = null;
         effectsMenuOpen = false;
         customWidthOpen = false;
+        fadePanelOpen = false;
     } else {
         const basemapPanel = document.getElementById('basemap-editor-panel');
         if (basemapPanel?.classList.contains('open')) {
@@ -202,7 +208,7 @@ export function toggleDrawMode(forceState = null) {
 }
 
 /* =========================================================================
-   GEOMETRY HELPERS & SMOOTHING
+   GEOMETRY HELPERS, SMOOTHING & MAC-STYLE SHIFT SHAPE SNAP
    ========================================================================= */
 
 function smoothPoints(pts, amountPct) {
@@ -221,6 +227,118 @@ function smoothPoints(pts, amountPct) {
         curr = next;
     }
     return curr;
+}
+
+function simplifyRDP(pts, eps) {
+    if (pts.length <= 2) return pts;
+    const a = pts[0], b = pts[pts.length - 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    let maxD = 0, idx = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+        const d = len < 1e-4
+            ? Math.hypot(pts[i].x - a.x, pts[i].y - a.y)
+            : Math.abs((b.y - a.y) * pts[i].x - (b.x - a.x) * pts[i].y + b.x * a.y - b.y * a.x) / len;
+        if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD > eps) {
+        const left = simplifyRDP(pts.slice(0, idx + 1), eps);
+        const right = simplifyRDP(pts.slice(idx), eps);
+        return left.slice(0, -1).concat(right);
+    }
+    return [a, b];
+}
+
+function snapFreehandStroke(pts, isClosedLoop = false) {
+    if (!pts || pts.length < 3) return pts;
+
+    let pathLen = 0;
+    for (let i = 1; i < pts.length; i++) {
+        pathLen += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    }
+    if (pathLen < 12) return pts;
+
+    const A = pts[0];
+    const B = pts[pts.length - 1];
+    const chord = Math.hypot(B.x - A.x, B.y - A.y);
+
+    // 1. Closed Loop -> Smooth Ellipse (great for closed lows, area circles, loops)
+    if ((isClosedLoop || chord < pathLen * 0.22) && pts.length >= 8) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        pts.forEach((p) => {
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+        });
+        const rx = (maxX - minX) / 2;
+        const ry = (maxY - minY) / 2;
+        if (rx > 8 && ry > 8) {
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
+            const out = [];
+            const steps = 48;
+            for (let i = 0; i <= steps; i++) {
+                const th = (i / steps) * Math.PI * 2;
+                out.push({ x: cx + rx * Math.cos(th), y: cy + ry * Math.sin(th) });
+            }
+            return out;
+        }
+    }
+
+    // 2. Straight Line Check -> Crisp straight line A -> B
+    let maxDev = 0;
+    let peakPt = pts[Math.floor(pts.length / 2)];
+    for (let i = 1; i < pts.length - 1; i++) {
+        const d = chord < 1e-4
+            ? Math.hypot(pts[i].x - A.x, pts[i].y - A.y)
+            : Math.abs((B.y - A.y) * pts[i].x - (B.x - A.x) * pts[i].y + B.x * A.y - B.y * A.x) / chord;
+        if (d > maxDev) {
+            maxDev = d;
+            peakPt = pts[i];
+        }
+    }
+
+    if (chord > 10 && maxDev / chord < 0.085) {
+        const steps = Math.max(8, Math.ceil(chord / 18));
+        const out = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            out.push({ x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t });
+        }
+        return out;
+    }
+
+    // 3. Single Smooth Arc / Trough / Ridge Check -> Quadratic Bezier through peak!
+    const ctrlX = 2 * peakPt.x - 0.5 * (A.x + B.x);
+    const ctrlY = 2 * peakPt.y - 0.5 * (A.y + B.y);
+    const bezPts = [];
+    const steps = 44;
+    for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const u = 1 - t;
+        bezPts.push({
+            x: u * u * A.x + 2 * u * t * ctrlX + t * t * B.x,
+            y: u * u * A.y + 2 * u * t * ctrlY + t * t * B.y
+        });
+    }
+
+    let sumErr = 0;
+    for (let i = 0; i < pts.length; i++) {
+        let best = Infinity;
+        for (let j = 0; j < bezPts.length; j++) {
+            const d = Math.hypot(pts[i].x - bezPts[j].x, pts[i].y - bezPts[j].y);
+            if (d < best) best = d;
+        }
+        sumErr += best;
+    }
+    const avgErr = sumErr / pts.length;
+    if (avgErr < Math.max(14, pathLen * 0.045)) {
+        return bezPts;
+    }
+
+    // 4. Multi-Inflection Wave / S-Curve -> Simplified smooth Chaikin spline
+    const keyPts = simplifyRDP(pts, Math.max(10, pathLen * 0.028));
+    return smoothPoints(keyPts, 100);
 }
 
 function resamplePolyline(pts, spacing) {
@@ -271,11 +389,12 @@ function getObjectBounds(obj) {
         return { x: minX - pad, y: minY - pad, w: Math.max(20, maxX - minX + pad * 2), h: Math.max(20, maxY - minY + pad * 2) };
     }
     if (obj.type === 'shape') {
+        const pad = Math.max(4, (obj.width || 4) / 2);
         return {
-            x: Math.min(obj.x, obj.x + obj.w),
-            y: Math.min(obj.y, obj.y + obj.h),
-            w: Math.max(12, Math.abs(obj.w)),
-            h: Math.max(12, Math.abs(obj.h))
+            x: Math.min(obj.x, obj.x + obj.w) - pad,
+            y: Math.min(obj.y, obj.y + obj.h) - pad,
+            w: Math.max(12, Math.abs(obj.w)) + pad * 2,
+            h: Math.max(12, Math.abs(obj.h)) + pad * 2
         };
     }
     if (obj.type === 'stamp') {
@@ -333,10 +452,11 @@ function scaleObject(obj, origBounds, nextBounds) {
         obj.x2 = nextBounds.x + (obj.x2 - origBounds.x) * sx;
         obj.y2 = nextBounds.y + (obj.y2 - origBounds.y) * sy;
     } else if (obj.type === 'shape') {
-        obj.x = nextBounds.x;
-        obj.y = nextBounds.y;
-        obj.w = nextBounds.w;
-        obj.h = nextBounds.h;
+        const pad = Math.max(4, (obj.width || 4) / 2);
+        obj.x = nextBounds.x + pad;
+        obj.y = nextBounds.y + pad;
+        obj.w = Math.max(8, nextBounds.w - pad * 2);
+        obj.h = Math.max(8, nextBounds.h - pad * 2);
     } else if (obj.type === 'stamp') {
         const avgScale = (sx + sy) * 0.5;
         obj.size = Math.max(18, Math.min(220, Math.round((obj.origSize || obj.size) * avgScale)));
@@ -350,7 +470,7 @@ function scaleObject(obj, origBounds, nextBounds) {
 }
 
 /* =========================================================================
-   CANVAS RENDERING (Pen, Highlighter Fade, Weather Fronts, H/L, Area, Text)
+   UNIVERSAL RENDERING (Supports Multi-Direction Fade & Opacity on ANY Object)
    ========================================================================= */
 
 function applyDashPattern(c, style, width) {
@@ -368,82 +488,7 @@ function drawPolylinePath(c, pts) {
     }
 }
 
-function drawHighlighter(obj) {
-    const pts = obj.points || [];
-    if (pts.length < 2) return;
-    const { w: vw, h: vh } = getViewportSize();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    if (!scratchCanvas) {
-        scratchCanvas = document.createElement('canvas');
-        scratchCtx = scratchCanvas.getContext('2d');
-    }
-    if (scratchCanvas.width !== vw * dpr || scratchCanvas.height !== vh * dpr) {
-        scratchCanvas.width = vw * dpr;
-        scratchCanvas.height = vh * dpr;
-    }
-
-    const sc = scratchCtx;
-    sc.setTransform(dpr, 0, 0, dpr, 0, 0);
-    sc.clearRect(0, 0, vw, vh);
-    sc.globalCompositeOperation = 'source-over';
-    sc.strokeStyle = obj.color;
-    sc.lineWidth = obj.width;
-    sc.lineCap = 'round';
-    sc.lineJoin = 'round';
-    sc.setLineDash([]);
-    drawPolylinePath(sc, pts);
-    sc.stroke();
-
-    // Fade mask (Middle / Top / Bottom / Left / Right)
-    if (obj.fadeDir && obj.fadeDir !== 'none') {
-        const b = getObjectBounds(obj);
-        if (b) {
-            sc.globalCompositeOperation = 'destination-in';
-            const spd = Math.max(0.1, Math.min(1.0, obj.fadeSpeed ?? 0.55));
-            const reach = Math.max(0.18, 1.15 - spd * 0.85); // higher speed = sharper dropoff
-
-            let grad = null;
-            if (obj.fadeDir === 'middle') {
-                const cx = b.x + b.w / 2;
-                const cy = b.y + b.h / 2;
-                const maxR = Math.max(12, Math.hypot(b.w / 2, b.h / 2) * reach);
-                grad = sc.createRadialGradient(cx, cy, maxR * 0.08, cx, cy, maxR);
-                grad.addColorStop(0, 'rgba(0,0,0,1)');
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-            } else if (obj.fadeDir === 'top') {
-                grad = sc.createLinearGradient(0, b.y, 0, b.y + b.h * reach);
-                grad.addColorStop(0, 'rgba(0,0,0,1)');
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-            } else if (obj.fadeDir === 'bottom') {
-                grad = sc.createLinearGradient(0, b.y + b.h, 0, b.y + b.h - b.h * reach);
-                grad.addColorStop(0, 'rgba(0,0,0,1)');
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-            } else if (obj.fadeDir === 'left') {
-                grad = sc.createLinearGradient(b.x, 0, b.x + b.w * reach, 0);
-                grad.addColorStop(0, 'rgba(0,0,0,1)');
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-            } else if (obj.fadeDir === 'right') {
-                grad = sc.createLinearGradient(b.x + b.w, 0, b.x + b.w - b.w * reach, 0);
-                grad.addColorStop(0, 'rgba(0,0,0,1)');
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-            }
-
-            if (grad) {
-                sc.fillStyle = grad;
-                sc.fillRect(b.x - 10, b.y - 10, b.w + 20, b.h + 20);
-            }
-        }
-    }
-
-    ctx.save();
-    ctx.globalAlpha = Math.max(0.05, Math.min(0.95, obj.opacity ?? 0.45));
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(scratchCanvas, 0, 0);
-    ctx.restore();
-}
-
-function drawWeatherFront(obj) {
+function drawWeatherFront(c, obj) {
     const pts = obj.points || [];
     if (pts.length < 2) return;
 
@@ -453,45 +498,43 @@ function drawWeatherFront(obj) {
     const symSize = Math.max(9, Math.min(26, w * 2.3 + 5));
     const step = Math.max(26, symSize * 2.2);
 
-    ctx.save();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    c.save();
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
 
     if (fType === 'trough') {
-        ctx.strokeStyle = '#b45309';
-        ctx.lineWidth = w;
-        ctx.setLineDash([Math.max(8, w * 2.5), Math.max(6, w * 1.8)]);
-        drawPolylinePath(ctx, pts);
-        ctx.stroke();
-        ctx.restore();
+        c.strokeStyle = '#b45309';
+        c.lineWidth = w;
+        c.setLineDash([Math.max(8, w * 2.5), Math.max(6, w * 1.8)]);
+        drawPolylinePath(c, pts);
+        c.stroke();
+        c.restore();
         return;
     }
 
-    // Draw base curve
     if (fType === 'stationary') {
         const segs = resamplePolyline(pts, step);
-        ctx.lineWidth = w;
+        c.lineWidth = w;
         for (let i = 0; i < segs.length - 1; i++) {
             const isCold = i % 2 === 0;
-            ctx.strokeStyle = isCold ? '#2563eb' : '#dc2626';
-            ctx.beginPath();
-            ctx.moveTo(segs[i].x, segs[i].y);
-            ctx.lineTo(segs[i + 1].x, segs[i + 1].y);
-            ctx.stroke();
+            c.strokeStyle = isCold ? '#2563eb' : '#dc2626';
+            c.beginPath();
+            c.moveTo(segs[i].x, segs[i].y);
+            c.lineTo(segs[i + 1].x, segs[i + 1].y);
+            c.stroke();
         }
     } else {
         const lineCol = fType === 'cold' ? '#2563eb'
             : fType === 'warm' ? '#dc2626'
             : fType === 'occluded' ? '#7c3aed'
-            : '#b45309'; // dryline
-        ctx.strokeStyle = lineCol;
-        ctx.lineWidth = w;
-        ctx.setLineDash([]);
-        drawPolylinePath(ctx, pts);
-        ctx.stroke();
+            : '#b45309';
+        c.strokeStyle = lineCol;
+        c.lineWidth = w;
+        c.setLineDash([]);
+        drawPolylinePath(c, pts);
+        c.stroke();
     }
 
-    // Draw meteorological symbols along resampled points
     const samples = resamplePolyline(pts, step);
     for (let i = 0; i < samples.length - 1; i++) {
         const p0 = samples[i];
@@ -500,35 +543,32 @@ function drawWeatherFront(obj) {
         const my = (p0.y + p1.y) * 0.5;
         const ang = Math.atan2(p1.y - p0.y, p1.x - p0.x);
 
-        ctx.save();
-        ctx.translate(mx, my);
-        ctx.rotate(ang);
+        c.save();
+        c.translate(mx, my);
+        c.rotate(ang);
 
         const drawTriangle = (color, dir) => {
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.moveTo(-symSize * 0.48, 0);
-            ctx.lineTo(symSize * 0.48, 0);
-            ctx.lineTo(0, -symSize * 0.92 * dir);
-            ctx.closePath();
-            ctx.fill();
+            c.fillStyle = color;
+            c.beginPath();
+            c.moveTo(-symSize * 0.48, 0);
+            c.lineTo(symSize * 0.48, 0);
+            c.lineTo(0, -symSize * 0.92 * dir);
+            c.closePath();
+            c.fill();
         };
 
         const drawSemiCircle = (color, dir, openOnly = false) => {
-            ctx.beginPath();
-            if (dir > 0) {
-                ctx.arc(0, 0, symSize * 0.45, Math.PI, 0, false);
-            } else {
-                ctx.arc(0, 0, symSize * 0.45, 0, Math.PI, false);
-            }
+            c.beginPath();
+            if (dir > 0) c.arc(0, 0, symSize * 0.45, Math.PI, 0, false);
+            else c.arc(0, 0, symSize * 0.45, 0, Math.PI, false);
             if (openOnly) {
-                ctx.strokeStyle = color;
-                ctx.lineWidth = Math.max(1.8, w * 0.75);
-                ctx.stroke();
+                c.strokeStyle = color;
+                c.lineWidth = Math.max(1.8, w * 0.75);
+                c.stroke();
             } else {
-                ctx.closePath();
-                ctx.fillStyle = color;
-                ctx.fill();
+                c.closePath();
+                c.fillStyle = color;
+                c.fill();
             }
         };
 
@@ -546,203 +586,292 @@ function drawWeatherFront(obj) {
             drawSemiCircle('#b45309', flip, true);
         }
 
-        ctx.restore();
+        c.restore();
     }
 
-    ctx.restore();
+    c.restore();
 }
 
-function drawHatchedArea(obj) {
+function drawHatchedArea(c, obj) {
     const pts = obj.points || [];
     if (pts.length < 3) return;
     const b = getObjectBounds(obj);
     if (!b) return;
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.closePath();
+    c.save();
+    c.beginPath();
+    c.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) c.lineTo(pts[i].x, pts[i].y);
+    c.closePath();
 
-    // Subtle tint inside hatched area
-    ctx.save();
-    ctx.clip();
-    ctx.globalAlpha = 0.14;
-    ctx.fillStyle = obj.color;
-    ctx.fillRect(b.x, b.y, b.w, b.h);
+    c.save();
+    c.clip();
+    c.globalAlpha = 0.14;
+    c.fillStyle = obj.color;
+    c.fillRect(b.x, b.y, b.w, b.h);
 
-    // 45° diagonal hatching lines
-    ctx.globalAlpha = 0.8;
-    ctx.strokeStyle = obj.color;
-    ctx.lineWidth = Math.max(1.2, (obj.width || 3) * 0.45);
+    c.globalAlpha = 0.8;
+    c.strokeStyle = obj.color;
+    c.lineWidth = Math.max(1.2, (obj.width || 3) * 0.45);
     const gap = Math.max(9, (obj.width || 3) * 2.2);
     const diag = b.w + b.h;
-    ctx.beginPath();
+    c.beginPath();
     for (let d = -diag; d < diag * 2; d += gap) {
-        ctx.moveTo(b.x + d, b.y);
-        ctx.lineTo(b.x + d - b.h, b.y + b.h);
+        c.moveTo(b.x + d, b.y);
+        c.lineTo(b.x + d - b.h, b.y + b.h);
     }
-    ctx.stroke();
-    ctx.restore();
+    c.stroke();
+    c.restore();
 
-    // Perimeter outline
-    ctx.strokeStyle = obj.color;
-    ctx.lineWidth = Math.max(1.8, (obj.width || 3) * 0.7);
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-    ctx.restore();
+    c.strokeStyle = obj.color;
+    c.lineWidth = Math.max(1.8, (obj.width || 3) * 0.7);
+    c.lineJoin = 'round';
+    c.stroke();
+    c.restore();
 }
 
-function drawTextObject(obj) {
+function drawTextObject(c, obj) {
     const fs = obj.fontSize || 20;
     const font = `700 ${fs}px ${obj.fontFamily || "'Roboto', sans-serif"}`;
     const lines = String(obj.text || 'Text').split('\n');
     const lineH = fs * 1.22;
 
-    ctx.save();
-    ctx.font = font;
-    ctx.textBaseline = 'top';
+    c.save();
+    c.font = font;
+    c.textBaseline = 'top';
 
     let maxW = 20;
-    lines.forEach((l) => { maxW = Math.max(maxW, ctx.measureText(l).width); });
+    lines.forEach((l) => { maxW = Math.max(maxW, c.measureText(l).width); });
 
     if (obj.labelBox) {
         const padX = 10;
         const padY = 6;
         const boxH = lines.length * lineH + padY * 2;
         const isDarkText = ['#0f172a', '#000000', '#111827'].includes((obj.color || '').toLowerCase());
-        ctx.fillStyle = isDarkText ? 'rgba(255, 255, 255, 0.92)' : 'rgba(15, 23, 42, 0.88)';
-        ctx.strokeStyle = obj.color || '#ffffff';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(obj.x - padX, obj.y - padY, maxW + padX * 2, boxH, 6);
-        ctx.fill();
-        ctx.stroke();
+        c.fillStyle = isDarkText ? 'rgba(255, 255, 255, 0.92)' : 'rgba(15, 23, 42, 0.88)';
+        c.strokeStyle = obj.color || '#ffffff';
+        c.lineWidth = 1.5;
+        c.beginPath();
+        c.roundRect(obj.x - padX, obj.y - padY, maxW + padX * 2, boxH, 6);
+        c.fill();
+        c.stroke();
     }
 
     const eff = obj.effect || 'none';
     if (eff === 'drop') {
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 3;
-        ctx.shadowBlur = 4;
+        c.shadowColor = 'rgba(0, 0, 0, 0.75)';
+        c.shadowOffsetX = 2;
+        c.shadowOffsetY = 3;
+        c.shadowBlur = 4;
     } else if (eff === 'glow') {
-        ctx.shadowColor = obj.color || '#ffffff';
-        ctx.shadowBlur = 12;
+        c.shadowColor = obj.color || '#ffffff';
+        c.shadowBlur = 12;
     } else if (eff === 'neon') {
-        ctx.shadowColor = obj.color || '#3b82f6';
-        ctx.shadowBlur = 18;
+        c.shadowColor = obj.color || '#3b82f6';
+        c.shadowBlur = 18;
     }
 
     lines.forEach((line, idx) => {
         const ly = obj.y + idx * lineH;
         if (eff === 'echo') {
-            ctx.save();
-            ctx.globalAlpha = 0.35;
-            ctx.fillStyle = obj.color;
-            ctx.fillText(line, obj.x + 3, ly + 3);
-            ctx.restore();
+            c.save();
+            c.globalAlpha = 0.35;
+            c.fillStyle = obj.color;
+            c.fillText(line, obj.x + 3, ly + 3);
+            c.restore();
         }
         if (eff === 'outline') {
-            ctx.strokeStyle = ['#ffffff', '#f8fafc'].includes((obj.color || '').toLowerCase()) ? '#0f172a' : '#ffffff';
-            ctx.lineWidth = Math.max(2.5, fs * 0.14);
-            ctx.lineJoin = 'round';
-            ctx.strokeText(line, obj.x, ly);
+            c.strokeStyle = ['#ffffff', '#f8fafc'].includes((obj.color || '').toLowerCase()) ? '#0f172a' : '#ffffff';
+            c.lineWidth = Math.max(2.5, fs * 0.14);
+            c.lineJoin = 'round';
+            c.strokeText(line, obj.x, ly);
         }
         if (eff === 'hollow') {
-            ctx.strokeStyle = obj.color;
-            ctx.lineWidth = Math.max(1.5, fs * 0.08);
-            ctx.strokeText(line, obj.x, ly);
+            c.strokeStyle = obj.color;
+            c.lineWidth = Math.max(1.5, fs * 0.08);
+            c.strokeText(line, obj.x, ly);
         } else {
-            ctx.fillStyle = obj.color;
-            ctx.fillText(line, obj.x, ly);
+            c.fillStyle = obj.color;
+            c.fillText(line, obj.x, ly);
         }
     });
 
-    ctx.restore();
+    c.restore();
 }
 
-function drawObject(obj) {
-    if (!obj) return;
-    if (obj.type === 'highlighter') {
-        drawHighlighter(obj);
-        return;
-    }
+function drawObjectGeometry(c, obj) {
     if (obj.type === 'front') {
-        drawWeatherFront(obj);
+        drawWeatherFront(c, obj);
         return;
     }
     if (obj.type === 'area') {
-        drawHatchedArea(obj);
+        drawHatchedArea(c, obj);
         return;
     }
     if (obj.type === 'text') {
-        drawTextObject(obj);
+        drawTextObject(c, obj);
         return;
     }
 
-    ctx.save();
-    ctx.strokeStyle = obj.color;
-    ctx.fillStyle = obj.color;
-    ctx.lineWidth = obj.width || 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    applyDashPattern(ctx, obj.strokeStyle || 'solid', obj.width || 4);
+    c.save();
+    c.strokeStyle = obj.color;
+    c.fillStyle = obj.color;
+    c.lineWidth = obj.width || 4;
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    applyDashPattern(c, obj.type === 'highlighter' ? 'solid' : (obj.strokeStyle || 'solid'), obj.width || 4);
 
-    if (obj.type === 'pen') {
-        drawPolylinePath(ctx, obj.points);
-        ctx.stroke();
+    if (obj.type === 'pen' || obj.type === 'highlighter') {
+        drawPolylinePath(c, obj.points);
+        c.stroke();
     } else if (obj.type === 'line' || obj.type === 'arrow') {
-        ctx.beginPath();
-        ctx.moveTo(obj.x1, obj.y1);
-        ctx.lineTo(obj.x2, obj.y2);
-        ctx.stroke();
+        c.beginPath();
+        c.moveTo(obj.x1, obj.y1);
+        c.lineTo(obj.x2, obj.y2);
+        c.stroke();
         if (obj.type === 'arrow') {
             const ang = Math.atan2(obj.y2 - obj.y1, obj.x2 - obj.x1);
             const headLen = Math.max(11, (obj.width || 4) * 2.8 + 4);
-            ctx.setLineDash([]);
-            ctx.beginPath();
-            ctx.moveTo(obj.x2, obj.y2);
-            ctx.lineTo(obj.x2 - headLen * Math.cos(ang - Math.PI / 6), obj.y2 - headLen * Math.sin(ang - Math.PI / 6));
-            ctx.moveTo(obj.x2, obj.y2);
-            ctx.lineTo(obj.x2 - headLen * Math.cos(ang + Math.PI / 6), obj.y2 - headLen * Math.sin(ang + Math.PI / 6));
-            ctx.stroke();
+            c.setLineDash([]);
+            c.beginPath();
+            c.moveTo(obj.x2, obj.y2);
+            c.lineTo(obj.x2 - headLen * Math.cos(ang - Math.PI / 6), obj.y2 - headLen * Math.sin(ang - Math.PI / 6));
+            c.moveTo(obj.x2, obj.y2);
+            c.lineTo(obj.x2 - headLen * Math.cos(ang + Math.PI / 6), obj.y2 - headLen * Math.sin(ang + Math.PI / 6));
+            c.stroke();
         }
     } else if (obj.type === 'shape') {
-        ctx.setLineDash([]);
+        c.setLineDash([]);
         const x = obj.x, y = obj.y, w = obj.w, h = obj.h;
-        ctx.beginPath();
+        c.beginPath();
         if (obj.shapeType === 'circle') {
-            ctx.ellipse(x + w / 2, y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
+            c.ellipse(x + w / 2, y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
         } else if (obj.shapeType === 'triangle') {
-            ctx.moveTo(x + w / 2, y);
-            ctx.lineTo(x + w, y + h);
-            ctx.lineTo(x, y + h);
-            ctx.closePath();
+            c.moveTo(x + w / 2, y);
+            c.lineTo(x + w, y + h);
+            c.lineTo(x, y + h);
+            c.closePath();
         } else {
-            ctx.rect(x, y, w, h);
+            c.rect(x, y, w, h);
         }
         if (obj.fill) {
-            ctx.save();
-            ctx.globalAlpha = 0.25;
-            ctx.fill();
-            ctx.restore();
+            c.save();
+            c.globalAlpha = 0.25;
+            c.fill();
+            c.restore();
         }
-        ctx.stroke();
+        c.stroke();
     } else if (obj.type === 'stamp') {
         const s = obj.size || 40;
         const isHigh = obj.stampType === 'H';
         const col = isHigh ? '#2563eb' : '#dc2626';
-        ctx.font = `900 ${s}px 'Inter', 'Roboto', sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.lineWidth = Math.max(3, s * 0.14);
-        ctx.strokeStyle = '#ffffff';
-        ctx.strokeText(obj.stampType, obj.x, obj.y);
-        ctx.fillStyle = col;
-        ctx.fillText(obj.stampType, obj.x, obj.y);
+        c.font = `900 ${s}px 'Inter', 'Roboto', sans-serif`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.lineWidth = Math.max(3, s * 0.14);
+        c.strokeStyle = '#ffffff';
+        c.strokeText(obj.stampType, obj.x, obj.y);
+        c.fillStyle = col;
+        c.fillText(obj.stampType, obj.x, obj.y);
     }
 
+    c.restore();
+}
+
+function getNormalizedFadeDirs(obj) {
+    if (Array.isArray(obj.fadeDirs)) return obj.fadeDirs;
+    if (obj.fadeDir && obj.fadeDir !== 'none') return [obj.fadeDir];
+    return [];
+}
+
+function drawObject(obj) {
+    if (!obj) return;
+
+    const fadeDirs = getNormalizedFadeDirs(obj);
+    const opacity = Number.isFinite(obj.opacity) ? obj.opacity : (obj.type === 'highlighter' ? 0.45 : 1.0);
+    const needsScratch = obj.type === 'highlighter' || fadeDirs.length > 0 || opacity < 0.999;
+
+    if (!needsScratch) {
+        drawObjectGeometry(ctx, obj);
+        return;
+    }
+
+    const { w: vw, h: vh } = getViewportSize();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    if (!scratchCanvas) {
+        scratchCanvas = document.createElement('canvas');
+        scratchCtx = scratchCanvas.getContext('2d');
+    }
+    if (scratchCanvas.width !== vw * dpr || scratchCanvas.height !== vh * dpr) {
+        scratchCanvas.width = vw * dpr;
+        scratchCanvas.height = vh * dpr;
+    }
+
+    const sc = scratchCtx;
+    sc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sc.clearRect(0, 0, vw, vh);
+    sc.globalCompositeOperation = 'source-over';
+    drawObjectGeometry(sc, obj);
+
+    // Apply multi-direction alpha masks via multiplicative destination-in passes!
+    if (fadeDirs.length > 0) {
+        const b = getObjectBounds(obj);
+        if (b) {
+            sc.globalCompositeOperation = 'destination-in';
+            const spd = Math.max(0.1, Math.min(1.0, obj.fadeSpeed ?? 0.55));
+            const hasTopAndBot = fadeDirs.includes('top') && fadeDirs.includes('bottom');
+            const hasLeftAndRight = fadeDirs.includes('left') && fadeDirs.includes('right');
+
+            const pad = 16;
+            const rx = b.x - pad, ry = b.y - pad, rw = b.w + pad * 2, rh = b.h + pad * 2;
+
+            fadeDirs.forEach((dir) => {
+                let grad = null;
+                if (dir === 'middle') {
+                    // Bright in middle, fades smoothly outward toward outer edges
+                    const cx = b.x + b.w / 2;
+                    const cy = b.y + b.h / 2;
+                    const reach = Math.max(0.18, 1.15 - spd * 0.85);
+                    const maxR = Math.max(12, Math.hypot(b.w / 2, b.h / 2) * reach);
+                    grad = sc.createRadialGradient(cx, cy, maxR * 0.06, cx, cy, maxR);
+                    grad.addColorStop(0, 'rgba(0,0,0,1)');
+                    grad.addColorStop(1, 'rgba(0,0,0,0)');
+                } else if (dir === 'top') {
+                    // Fades out from the top edge inward (0 at top -> 1 inward)
+                    const depth = hasTopAndBot ? Math.max(0.12, 0.5 - spd * 0.36) : Math.max(0.15, 1.0 - spd * 0.82);
+                    grad = sc.createLinearGradient(0, b.y, 0, b.y + b.h * depth);
+                    grad.addColorStop(0, 'rgba(0,0,0,0)');
+                    grad.addColorStop(1, 'rgba(0,0,0,1)');
+                } else if (dir === 'bottom') {
+                    const depth = hasTopAndBot ? Math.max(0.12, 0.5 - spd * 0.36) : Math.max(0.15, 1.0 - spd * 0.82);
+                    grad = sc.createLinearGradient(0, b.y + b.h, 0, b.y + b.h - b.h * depth);
+                    grad.addColorStop(0, 'rgba(0,0,0,0)');
+                    grad.addColorStop(1, 'rgba(0,0,0,1)');
+                } else if (dir === 'left') {
+                    const depth = hasLeftAndRight ? Math.max(0.12, 0.5 - spd * 0.36) : Math.max(0.15, 1.0 - spd * 0.82);
+                    grad = sc.createLinearGradient(b.x, 0, b.x + b.w * depth, 0);
+                    grad.addColorStop(0, 'rgba(0,0,0,0)');
+                    grad.addColorStop(1, 'rgba(0,0,0,1)');
+                } else if (dir === 'right') {
+                    const depth = hasLeftAndRight ? Math.max(0.12, 0.5 - spd * 0.36) : Math.max(0.15, 1.0 - spd * 0.82);
+                    grad = sc.createLinearGradient(b.x + b.w, 0, b.x + b.w - b.w * depth, 0);
+                    grad.addColorStop(0, 'rgba(0,0,0,0)');
+                    grad.addColorStop(1, 'rgba(0,0,0,1)');
+                }
+
+                if (grad) {
+                    sc.fillStyle = grad;
+                    sc.fillRect(rx, ry, rw, rh);
+                }
+            });
+        }
+    }
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.05, Math.min(1.0, opacity));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(scratchCanvas, 0, 0);
     ctx.restore();
 }
 
@@ -823,7 +952,10 @@ function closeInlineTextInput(commit = true) {
                 fontFamily: textFont,
                 fontSize: textSize,
                 labelBox: textLabelBox,
-                effect: textEffect
+                effect: textEffect,
+                opacity: activeOpacity,
+                fadeDirs: [...activeFadeDirs],
+                fadeSpeed: activeFadeSpeed
             };
             objects.push(newObj);
             selectedObjId = newObj.id;
@@ -891,6 +1023,13 @@ function renderOptionsStrip() {
 
     const selObj = selectedObjId ? objects.find((o) => o.id === selectedObjId) : null;
     const contextTool = selObj ? selObj.type : activeTool;
+    const isHighlighter = contextTool === 'highlighter';
+    const canFade = contextTool !== 'eraser' && !(contextTool === 'select' && !selObj);
+
+    const curDirs = selObj ? getNormalizedFadeDirs(selObj) : activeFadeDirs;
+    const curOp = Math.round((selObj ? (selObj.opacity ?? (isHighlighter ? 0.45 : 1)) : (isHighlighter ? hlOpacity : activeOpacity)) * 100);
+    const curSpeed = Math.round((selObj ? (selObj.fadeSpeed ?? 0.55) : activeFadeSpeed) * 100);
+    const showFadeControls = isHighlighter || fadePanelOpen || curDirs.length > 0;
 
     let html = '';
 
@@ -957,31 +1096,6 @@ function renderOptionsStrip() {
                 <button type="button" id="btn-shape-fill" class="draw-opt-pill ${curFill ? 'active' : ''}">Fill</button>
             </div>
         `;
-    } else if (contextTool === 'highlighter') {
-        const curOp = Math.round((selObj ? selObj.opacity : hlOpacity) * 100);
-        const curFade = selObj ? (selObj.fadeDir || 'none') : hlFadeDir;
-        const curSpeed = Math.round((selObj ? (selObj.fadeSpeed ?? 0.55) : hlFadeSpeed) * 100);
-        html += `
-            <div class="draw-opt-group">
-                <span class="draw-opt-kicker">HIGHLIGHT</span>
-                <span class="draw-opt-label">Opacity</span>
-                <input id="draw-hl-opacity" class="draw-opt-slider" type="range" min="10" max="95" step="5" value="${curOp}" />
-                <span id="draw-hl-opacity-val" class="draw-opt-val">${curOp}%</span>
-                <span class="draw-opt-sep"></span>
-                <span class="draw-opt-label">Fade</span>
-                ${['none', 'middle', 'top', 'bottom', 'left', 'right'].map((dir) => `
-                    <button type="button" class="draw-opt-pill ${curFade === dir ? 'active' : ''}" data-hl-fade="${dir}">
-                        ${dir[0].toUpperCase() + dir.slice(1)}
-                    </button>
-                `).join('')}
-                ${curFade !== 'none' ? `
-                    <span class="draw-opt-sep"></span>
-                    <span class="draw-opt-label">Speed</span>
-                    <input id="draw-hl-speed" class="draw-opt-slider" type="range" min="10" max="100" step="5" value="${curSpeed}" />
-                    <span id="draw-hl-speed-val" class="draw-opt-val">${curSpeed}%</span>
-                ` : ''}
-            </div>
-        `;
     } else if (contextTool === 'text') {
         const curFont = selObj ? selObj.fontFamily : textFont;
         const curSize = selObj ? selObj.fontSize : textSize;
@@ -1004,6 +1118,45 @@ function renderOptionsStrip() {
                 ` : ''}
             </div>
         `;
+    }
+
+    // Universal Opacity & Multi-Direction Fade Controls
+    if (canFade) {
+        if (!isHighlighter) {
+            html += `
+                <div class="draw-opt-group">
+                    ${html ? '<span class="draw-opt-sep"></span>' : ''}
+                    <button type="button" id="btn-toggle-universal-fade" class="draw-opt-pill ${showFadeControls ? 'active' : ''}">
+                        <span>Fade${curDirs.length > 0 ? ` (${curDirs.length})` : ''}</span>
+                    </button>
+                </div>
+            `;
+        }
+
+        if (showFadeControls) {
+            html += `
+                <div class="draw-opt-group">
+                    <span class="draw-opt-sep"></span>
+                    <span class="draw-opt-kicker">${isHighlighter ? 'HIGHLIGHT' : 'FADE'}</span>
+                    <span class="draw-opt-label">Opacity</span>
+                    <input id="draw-hl-opacity" class="draw-opt-slider" type="range" min="10" max="100" step="5" value="${curOp}" />
+                    <span id="draw-hl-opacity-val" class="draw-opt-val">${curOp}%</span>
+                    <span class="draw-opt-sep"></span>
+                    <button type="button" class="draw-opt-pill ${curDirs.length === 0 ? 'active' : ''}" data-hl-fade="none">None</button>
+                    ${FADE_DIRS.map((dir) => `
+                        <button type="button" class="draw-opt-pill ${curDirs.includes(dir) ? 'active' : ''}" data-hl-fade="${dir}">
+                            ${dir[0].toUpperCase() + dir.slice(1)}
+                        </button>
+                    `).join('')}
+                    ${curDirs.length > 0 ? `
+                        <span class="draw-opt-sep"></span>
+                        <span class="draw-opt-label">Speed</span>
+                        <input id="draw-hl-speed" class="draw-opt-slider" type="range" min="10" max="100" step="5" value="${curSpeed}" />
+                        <span id="draw-hl-speed-val" class="draw-opt-val">${curSpeed}%</span>
+                    ` : ''}
+                </div>
+            `;
+        }
     }
 
     if (!html) {
@@ -1096,26 +1249,46 @@ function renderOptionsStrip() {
         renderOptionsStrip();
     });
 
+    optionsStripEl.querySelector('#btn-toggle-universal-fade')?.addEventListener('click', () => {
+        fadePanelOpen = !fadePanelOpen;
+        renderOptionsStrip();
+    });
+
     const hlOpEl = optionsStripEl.querySelector('#draw-hl-opacity');
     hlOpEl?.addEventListener('input', (e) => {
         const pct = parseInt(e.target.value, 10);
-        hlOpacity = pct / 100;
+        if (isHighlighter) hlOpacity = pct / 100;
+        else activeOpacity = pct / 100;
         const valEl = optionsStripEl.querySelector('#draw-hl-opacity-val');
         if (valEl) valEl.textContent = `${pct}%`;
-        if (selObj?.type === 'highlighter') {
-            selObj.opacity = hlOpacity;
+        if (selObj) {
+            selObj.opacity = pct / 100;
             redrawAll();
         }
     });
-    hlOpEl?.addEventListener('change', () => { if (selObj?.type === 'highlighter') pushUndoSnapshot(); });
+    hlOpEl?.addEventListener('change', () => { if (selObj) pushUndoSnapshot(); });
 
+    // Multi-Select Fade Direction Toggles
     optionsStripEl.querySelectorAll('[data-hl-fade]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            hlFadeDir = btn.dataset.hlFade;
-            if (selObj?.type === 'highlighter') {
-                selObj.fadeDir = hlFadeDir;
+            const dir = btn.dataset.hlFade;
+            const targetArr = selObj ? [...getNormalizedFadeDirs(selObj)] : [...activeFadeDirs];
+            let nextArr;
+            if (dir === 'none') {
+                nextArr = [];
+            } else if (targetArr.includes(dir)) {
+                nextArr = targetArr.filter((d) => d !== dir);
+            } else {
+                nextArr = [...targetArr, dir];
+            }
+
+            if (selObj) {
+                selObj.fadeDirs = nextArr;
+                delete selObj.fadeDir;
                 pushUndoSnapshot();
                 redrawAll();
+            } else {
+                activeFadeDirs = nextArr;
             }
             renderOptionsStrip();
         });
@@ -1124,15 +1297,15 @@ function renderOptionsStrip() {
     const hlSpdEl = optionsStripEl.querySelector('#draw-hl-speed');
     hlSpdEl?.addEventListener('input', (e) => {
         const pct = parseInt(e.target.value, 10);
-        hlFadeSpeed = pct / 100;
+        activeFadeSpeed = pct / 100;
         const valEl = optionsStripEl.querySelector('#draw-hl-speed-val');
         if (valEl) valEl.textContent = `${pct}%`;
-        if (selObj?.type === 'highlighter') {
-            selObj.fadeSpeed = hlFadeSpeed;
+        if (selObj) {
+            selObj.fadeSpeed = activeFadeSpeed;
             redrawAll();
         }
     });
-    hlSpdEl?.addEventListener('change', () => { if (selObj?.type === 'highlighter') pushUndoSnapshot(); });
+    hlSpdEl?.addEventListener('change', () => { if (selObj) pushUndoSnapshot(); });
 
     optionsStripEl.querySelector('#draw-text-font')?.addEventListener('change', (e) => {
         textFont = e.target.value;
@@ -1192,7 +1365,7 @@ function renderToolbar(refreshStrip = true) {
             <button type="button" class="draw-tool-btn ${activeTool === 'select' ? 'active' : ''}" data-tool="select" title="Select & Move">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 3l7.2 17 2.6-6.2L20 11.2 4 3z"/></svg>
             </button>
-            <button type="button" class="draw-tool-btn ${activeTool === 'pen' ? 'active' : ''}" data-tool="pen" title="Pen">
+            <button type="button" class="draw-tool-btn ${activeTool === 'pen' ? 'active' : ''}" data-tool="pen" title="Pen (Hold Shift to snap smooth curve/line)">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
             </button>
             <button type="button" class="draw-tool-btn ${activeTool === 'highlighter' ? 'active' : ''}" data-tool="highlighter" title="Highlighter">
@@ -1219,7 +1392,7 @@ function renderToolbar(refreshStrip = true) {
 
         <!-- Group 2: Weather Tools -->
         <div class="draw-bar-group">
-            <button type="button" class="draw-wx-btn ${activeTool === 'front' ? 'active' : ''}" data-tool="front" title="Weather Front">
+            <button type="button" class="draw-wx-btn ${activeTool === 'front' ? 'active' : ''}" data-tool="front" title="Weather Front (Hold Shift to snap smooth curve)">
                 <svg width="22" height="12" viewBox="0 0 24 12"><line x1="1" y1="6" x2="12" y2="6" stroke="#2563eb" stroke-width="2"/><line x1="12" y1="6" x2="23" y2="6" stroke="#dc2626" stroke-width="2"/><polygon points="4,6 9,6 6.5,11" fill="#2563eb"/><path d="M14,6 A3,3 0 0,1 20,6 Z" fill="#dc2626"/></svg>
                 <span>Front</span>
             </button>
@@ -1281,7 +1454,6 @@ function renderToolbar(refreshStrip = true) {
         </div>
     `;
 
-    // Bind Toolbar Listeners
     toolbarEl.querySelectorAll('[data-tool]').forEach((btn) => {
         btn.addEventListener('click', () => {
             activeTool = btn.dataset.tool;
@@ -1347,7 +1519,7 @@ function renderToolbar(refreshStrip = true) {
 }
 
 /* =========================================================================
-   CANVAS POINTER EVENTS (Draw, Erase, Select/Move/Resize)
+   CANVAS POINTER EVENTS (Draw, Shift Smooth Snap, Erase, Select/Move/Resize)
    ========================================================================= */
 
 function attachCanvasEvents() {
@@ -1454,7 +1626,10 @@ function attachCanvasEvents() {
                 stampType: activeTool === 'high' ? 'H' : 'L',
                 x: pos.x,
                 y: pos.y,
-                size: stampSize
+                size: stampSize,
+                opacity: activeOpacity,
+                fadeDirs: [...activeFadeDirs],
+                fadeSpeed: activeFadeSpeed
             };
             objects.push(stampObj);
             pushUndoSnapshot();
@@ -1477,11 +1652,11 @@ function attachCanvasEvents() {
                 points: [{ x: pos.x, y: pos.y }],
                 frontType,
                 flipSide: frontFlip,
-                opacity: hlOpacity,
-                fadeDir: hlFadeDir,
-                fadeSpeed: hlFadeSpeed
+                opacity: activeTool === 'highlighter' ? hlOpacity : activeOpacity,
+                fadeDirs: [...activeFadeDirs],
+                fadeSpeed: activeFadeSpeed
             };
-            interaction = { kind: 'draw-poly' };
+            interaction = { kind: 'draw-poly', shiftSnap: Boolean(e.shiftKey) };
         } else if (activeTool === 'line' || activeTool === 'arrow') {
             activeDraft = {
                 id,
@@ -1490,7 +1665,10 @@ function attachCanvasEvents() {
                 width: activeWidth,
                 strokeStyle,
                 x1: pos.x, y1: pos.y,
-                x2: pos.x, y2: pos.y
+                x2: pos.x, y2: pos.y,
+                opacity: activeOpacity,
+                fadeDirs: [...activeFadeDirs],
+                fadeSpeed: activeFadeSpeed
             };
             interaction = { kind: 'draw-line' };
         } else if (activeTool === 'shape') {
@@ -1502,7 +1680,10 @@ function attachCanvasEvents() {
                 color: activeColor,
                 width: activeWidth,
                 x: pos.x, y: pos.y, w: 0, h: 0,
-                startX: pos.x, startY: pos.y
+                startX: pos.x, startY: pos.y,
+                opacity: activeOpacity,
+                fadeDirs: [...activeFadeDirs],
+                fadeSpeed: activeFadeSpeed
             };
             interaction = { kind: 'draw-shape' };
         }
@@ -1511,6 +1692,9 @@ function attachCanvasEvents() {
     window.addEventListener('pointermove', (e) => {
         if (!drawModeActive || !interaction) return;
         const pos = getPos(e);
+        if (e.shiftKey && interaction.kind === 'draw-poly') {
+            interaction.shiftSnap = true;
+        }
 
         if (interaction.kind === 'erase') {
             for (let i = objects.length - 1; i >= 0; i--) {
@@ -1568,7 +1752,7 @@ function attachCanvasEvents() {
         }
     });
 
-    window.addEventListener('pointerup', () => {
+    window.addEventListener('pointerup', (e) => {
         if (!drawModeActive || !interaction) return;
 
         if (interaction.kind === 'erase' && interaction.erasedAny) {
@@ -1579,7 +1763,10 @@ function attachCanvasEvents() {
             let valid = false;
             if (activeDraft.points) {
                 if (activeDraft.points.length >= 2) {
-                    if (activeDraft.type === 'pen' && strokeSmoothing > 0) {
+                    // 🌟 Hold/Press Shift -> Mac-style Smart Smooth Line / Arc / Ellipse Snap!
+                    if (interaction.shiftSnap || e.shiftKey) {
+                        activeDraft.points = snapFreehandStroke(activeDraft.points, activeDraft.type === 'area');
+                    } else if (activeDraft.type === 'pen' && strokeSmoothing > 0) {
                         activeDraft.points = smoothPoints(activeDraft.points, strokeSmoothing);
                     }
                     valid = true;
