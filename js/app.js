@@ -45,6 +45,7 @@ import {
     isHighlightPickingActive
 } from './layers/highlightOverlay.js';
 import { initLegendOverlay, updateLegendOverlay } from './layers/legendOverlay.js';
+import { initDrawOverlay } from './layers/drawOverlay.js';
 import { initLegendEditor } from './components/legendEditor.js';
 
 // 🛰️ Real-Time Radar Engine
@@ -1783,6 +1784,7 @@ map.on('load', async () => {
     initHighlightOverlay(map);
     applyHighlightLayers(map);
     initLegendOverlay(map);
+    initDrawOverlay(map);
     initLegendEditor();
 
     // Keep Legend synced in Radar mode too (product changes & frame scrubbing)
